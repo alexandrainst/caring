@@ -8,7 +8,7 @@ mod float;
 use std::{error::Error, process::abort};
 
 use ff::{Field, PrimeField};
-use field::Element;
+use field::Element32;
 
 use crate::ideal::cointoss;
 
@@ -64,7 +64,7 @@ impl<F: Field> std::ops::Mul for VerifiableShare<F> {
     }
 }
 
-pub fn share<F: Field>(num: Element) -> Vec<VerifiableShare<F>> {
+pub fn share<F: Field>(num: Element32) -> Vec<VerifiableShare<F>> {
     todo!()
 }
 
@@ -91,7 +91,7 @@ pub fn verify<F: Field>(input: &[VerifiableShare<F>], output: &[VerifiableShare<
     todo!("check zero for 't'");
 }
 
-pub fn reconstruct<F: Field>(shares: &[VerifiableShare<F>], wire: usize) -> Element {
+pub fn reconstruct<F: Field>(shares: &[VerifiableShare<F>], wire: usize) -> Element32 {
     todo!()
 }
 

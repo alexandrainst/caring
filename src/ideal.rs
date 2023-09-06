@@ -1,4 +1,4 @@
-use crate::field::Element;
+use crate::field::Element32;
 
 // TODO: Some contraints
 pub fn cointoss<T>() -> T {

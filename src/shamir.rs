@@ -19,6 +19,16 @@ impl<F: Field> std::ops::Add for Share<F> {
     }
 }
 
+impl<F: Field> std::ops::Add<F> for Share<F> {
+    type Output = Self;
+
+    fn add(self, rhs: F) -> Self::Output {
+        Self {
+            x: self.x,
+            y: self.y + rhs,
+        }
+    }
+}
 
 impl<F: Field> std::ops::Mul<F> for Share<F> {
     type Output = Self;
@@ -38,10 +48,12 @@ impl<F: Field> std::ops::Mul<Share<F>> for Share<F> {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct MultipliedShare<F: Field>{
     x: Share<F>, y: Share<F>
 }
 
+#[derive(Clone, Copy)]
 pub struct ExplodedShare<F: Field>{
     ax: F, by: F
 }
@@ -71,6 +83,13 @@ impl<F: Field> MultipliedShare<F> {
 
 
 
+/// Share/shard a secret value `v` into `n` shares
+/// where `n` is the number of the `ids`
+///
+/// * `v`: secret value to share
+/// * `ids`: ids to share to
+/// * `threshold`: threshold to reconstruct it
+/// * `rng`: rng to generate shares from
 pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) -> Vec<Share<F>> {
     let n = ids.len();
     assert!(
@@ -104,6 +123,9 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
     shares
 }
 
+/// Reconstruct or open shares
+///
+/// * `shares`: shares to be combined into an open value
 pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
     // Lagrange interpolation
     let mut sum = F::ZERO;
@@ -114,47 +136,46 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
         let mut prod = F::ONE;
         for Share { x: xk, y: _ } in shares.iter() {
             let xk = *xk;
-            if xk == xi {
-                continue;
+            if xk != xi {
+                prod *= -xk * (xi - xk).invert().unwrap();
             }
-            prod *= -xk * (xi - xk).invert().unwrap();
         }
         sum += yi * prod;
     }
-
     sum
 }
 
 #[cfg(test)]
 mod test {
-    use crate::field::Element;
+    use crate::field::Element32;
 
     use super::*;
 
     #[test]
     fn simple() {
         let mut rng = rand::thread_rng();
-        let v = Element::from(42u32);
-        let ids: Vec<_> = (1..=5u32).map(Element::from).collect();
+        let v = Element32::from(42u32);
+        let ids: Vec<_> = (1..=5u32).map(Element32::from).collect();
         let shares = share(v, &ids, 4, &mut rng);
         let v = reconstruct(&shares);
-        assert_eq!(v, Element::from(42u32));
+        assert_eq!(v, Element32::from(42u32));
     }
 
     #[test]
     fn addition() {
+        const PARTIES : std::ops::Range<u32> = 1..5u32;
         let a = 3;
         let b = 7;
         let vs1 = {
-            let v = Element::from(a);
+            let v = Element32::from(a);
             let mut rng = rand::thread_rng();
-            let ids: Vec<_> = (1..=5u32).map(Element::from).collect();
+            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
         let vs2 = {
-            let v = Element::from(b);
+            let v = Element32::from(b);
             let mut rng = rand::thread_rng();
-            let ids: Vec<_> = (1..=5u32).map(Element::from).collect();
+            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
 
@@ -165,38 +186,29 @@ mod test {
         assert_eq!(v, a + b);
     }
 
-    use ff::PrimeField;
-    use fixed::{FixedU32, traits::Fixed, FixedU64};
+    use fixed::FixedU32;
 
     #[test]
     fn addition_fixpoint() {
+        const PARTIES : std::ops::Range<u32> = 1..5u32;
         type Fix = FixedU32::<16>;
         let a = 1.0;
         let b = 3.0;
         let a = Fix::from_num(a);
         let b = Fix::from_num(b);
-        dbg!(&a);
-        dbg!(&b);
-
-        let c = a.to_bits() as u64 + b.to_bits() as u64; 
-        println!("a: {:#x}", a.to_bits());
-        println!("b: {:#x}", b.to_bits());
-        dbg!(c);
-        dbg!(Fix::from_bits(c as u32));
-
 
         let vs1 = {
-            let v = Element::from(a.to_bits() as u64);
+            let v = Element32::from(a.to_bits() as u64);
             dbg!(&v);
             let mut rng = rand::thread_rng();
-            let ids: Vec<_> = (1..=5u32).map(Element::from).collect();
+            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
         let vs2 = {
-            let v = Element::from(b.to_bits() as u64);
+            let v = Element32::from(b.to_bits() as u64);
             dbg!(&v);
             let mut rng = rand::thread_rng();
-            let ids: Vec<_> = (1..=5u32).map(Element::from).collect();
+            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
 
@@ -209,5 +221,50 @@ mod test {
         let v : u32 = v.into();
         let v = Fix::from_bits(v as u32);
         assert_eq!(v, a+b);
+    }
+
+    #[test]
+    fn multiplication() {
+        const PARTIES : std::ops::Range<u32> = 1..5u32;
+
+        let a = 3;
+        let b = 7;
+        let vs1 = {
+            let v = Element32::from(a);
+            let mut rng = rand::thread_rng();
+            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
+            share(v, &ids, 4, &mut rng)
+        };
+        let vs2 = {
+            let v = Element32::from(b);
+            let mut rng = rand::thread_rng();
+            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
+            share(v, &ids, 4, &mut rng)
+        };
+        let (bt_a, bt_b, bt_c) = {
+            let (a,b,c) = (Element32::from(7u32), Element32::from(13u32), Element32::from(7*13u32));
+            let mut rng = rand::thread_rng();
+            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
+            let a = share(a, &ids, 4, &mut rng);
+            let b = share(b, &ids, 4, &mut rng);
+            let c = share(c, &ids, 4, &mut rng);
+            (a,b,c)
+        };
+
+        // MPC
+        let mult_shares : Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a,&b)| a*b).collect();
+        // explode out to other share with other parties
+        let exp_shares : Vec<_> = mult_shares.iter()
+            .zip(bt_a)
+            .zip(bt_b)
+            .map(|((s,a),b)| s.explode(a.y,b.y)).collect();
+        // implode back into the multiplactions
+        let shares : Vec<_> = mult_shares.iter()
+            .zip(bt_c)
+            .map(|(s,c)| s.implode(&exp_shares, c.y)).collect();
+
+        let v = reconstruct(&shares);
+        let v : u32 = v.into();
+        assert_eq!(v, a * b);
     }
 }
