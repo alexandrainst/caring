@@ -5,6 +5,8 @@ mod ideal;
 pub mod shamir;
 mod float;
 
+// TODO: Redo this. Probably just delete it.
+
 use std::{error::Error, process::abort};
 
 use ff::{Field, PrimeField};
