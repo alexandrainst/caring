@@ -1,5 +1,5 @@
 # Caring
-_(Secret) Sharing is caring._
+_(Secret) Sharing is caring. (Name to change)_ 
 
 This is a library for performing secret sharing.
 

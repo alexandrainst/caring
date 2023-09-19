@@ -1,5 +1,6 @@
-use ff::{derive::rand_core::RngCore, Field};
+use ff::{derive::rand_core::RngCore};
 
+use crate::field::Field;
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
 /// Reconstruction can be done by obtaining `t` shares.
@@ -10,7 +11,8 @@ use ff::{derive::rand_core::RngCore, Field};
 /// * `y`: The 'share' part of the share
 #[derive(Clone, Copy, Debug)]
 pub struct Share<F: Field> {
-    // NOTE: Consider removing 'x' as it should be implied by the user handling it
+    // NOTE: Consider:w
+    //removing 'x' as it should be implied by the user handling it
     pub(crate) x: F,
     pub(crate) y: F,
 }
@@ -90,8 +92,7 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
             .enumerate()
             .map(|(i, a)| {
                 // evaluate: a * x^i
-                let exp: [u64; 1] = [i as u64];
-                (*a) * x.pow(exp)
+                (*a) * x.pow(i as u64)
             }) // sum: s + a1 x + a2 x^2 + ...
             .fold(F::ZERO, |sum, x| sum + x);
         shares.push(Share::<F> { x, y: share });
@@ -117,7 +118,7 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
         for Share { x: xk, y: _ } in shares.iter() {
             let xk = *xk;
             if xk != xi {
-                prod *= -xk * (xi - xk).invert().unwrap();
+                prod *= -xk * (xi - xk).invert();
             }
         }
         sum += yi * prod;
@@ -127,7 +128,7 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
 
 #[cfg(test)]
 mod test {
-    use crate::field::Element32;
+    use crate::element::Element32;
 
     use super::*;
 

@@ -1,16 +1,17 @@
 #![feature(split_array)]
 
-mod field;
+mod element;
 mod ideal;
 pub mod shamir;
 mod float;
+mod field;
 
 // TODO: Redo this. Probably just delete it.
 
 use std::{error::Error, process::abort};
 
 use ff::{Field, PrimeField};
-use field::Element32;
+use element::Element32;
 
 use crate::ideal::cointoss;
 
