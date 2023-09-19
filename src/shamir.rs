@@ -1,6 +1,6 @@
-use ff::{derive::rand_core::RngCore};
+use ff::{derive::rand_core::RngCore, Field};
 
-use crate::field::Field;
+
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
 /// Reconstruction can be done by obtaining `t` shares.
@@ -16,6 +16,7 @@ pub struct Share<F: Field> {
     pub(crate) x: F,
     pub(crate) y: F,
 }
+
 
 impl<F: Field> std::ops::Add for Share<F> {
     type Output = Self;
@@ -92,7 +93,7 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
             .enumerate()
             .map(|(i, a)| {
                 // evaluate: a * x^i
-                (*a) * x.pow(i as u64)
+                (*a) * x.pow(&[i as u64])
             }) // sum: s + a1 x + a2 x^2 + ...
             .fold(F::ZERO, |sum, x| sum + x);
         shares.push(Share::<F> { x, y: share });
@@ -118,7 +119,7 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
         for Share { x: xk, y: _ } in shares.iter() {
             let xk = *xk;
             if xk != xi {
-                prod *= -xk * (xi - xk).invert();
+                prod *= -xk * (xi - xk).invert().unwrap();
             }
         }
         sum += yi * prod;
