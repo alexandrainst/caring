@@ -8,13 +8,21 @@ use crate::shamir::{Share, self};
 #[derive(Clone, Copy)]
 pub struct VerifiableShare<F : Field, G : Group>{
     share: Share<F>,
-    // Should probably be a different field than F,
-    // but supports a commit operation commit(F) -> G
-    // or a 'product' G = F * G with F.
-    // As such we can support any pair of fields that provide these
-    // options. Note that the discrete log problem for the second
-    // should be hard.
+
+    // I have come to the realization that we don't need this,
+    // we only need the polynomial. 
     mac: Mac<G>, 
+}
+
+impl<F: Field, G: Group + std::ops::Mul<F, Output = G>> VerifiableShare<F, G> {
+    pub fn verify(&self, poly: &Polynomial<G>) -> bool {
+        let VerifiableShare { share, mac } = self;
+        let mut check = G::identity();
+        for (i,&a) in poly.0.iter().enumerate() {
+            check += a * share.x.pow([i as u64]);
+        }
+        check == G::generator() * share.y
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -99,6 +107,18 @@ pub fn share<F: Field, G: Group>(
     (shares, mac_poly)
 }
 
+pub fn reconstruct<F: Field, G: Group>(
+    shares: &[VerifiableShare<F,G>],
+    poly: &Polynomial<G>
+) -> Option<F> {
+    let (shares, macs) : (Vec<_>, Vec<_>) = shares.iter().map(|s| (s.share, s.mac)).unzip();
+    let res = shamir::reconstruct(&shares);
+
+    // ???
+
+    Some(res)
+}
+
 #[cfg(test)]
 mod test {
     use curve25519_dalek::{Scalar, RistrettoPoint};
@@ -114,6 +134,10 @@ mod test {
 
         let parties : Vec<_> = PARTIES.map(Scalar::from).collect();
         let (shares, poly) = share::<Scalar, RistrettoPoint>(v, &parties, 2, &mut rng);
-
+        for share in &shares {
+            assert!(share.verify(&poly));
+        }
+        let v2 = reconstruct(&shares, &poly).unwrap();
+        assert_eq!(v, v2);
     }
 }
