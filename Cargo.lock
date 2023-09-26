@@ -58,6 +58,7 @@ dependencies = [
  "ff",
  "fixed",
  "gf256",
+ "group",
  "num-traits",
  "rand",
 ]

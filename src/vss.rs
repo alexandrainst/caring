@@ -1,11 +1,12 @@
 use std::{ops, iter};
 
 use ff::Field;
+use group::Group;
 use rand::RngCore;
 use crate::shamir::{Share, self};
 
 #[derive(Clone, Copy)]
-pub struct VerifiableShare<F : Field, G : Field>{
+pub struct VerifiableShare<F : Field, G : Group>{
     share: Share<F>,
     // Should probably be a different field than F,
     // but supports a commit operation commit(F) -> G
@@ -17,10 +18,10 @@ pub struct VerifiableShare<F : Field, G : Field>{
 }
 
 #[derive(Clone, Copy)]
-pub struct Mac<F: Field>(F);
+pub struct Mac<F: Group>(F);
 
 
-impl<F: Field, G: Field> ops::Add for VerifiableShare<F,G> {
+impl<F: Field, G: Group> ops::Add for VerifiableShare<F,G> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -32,7 +33,7 @@ impl<F: Field, G: Field> ops::Add for VerifiableShare<F,G> {
 }
 
 
-impl<F: Field, G: Field> ops::Sub for VerifiableShare<F,G> {
+impl<F: Field, G: Group> ops::Sub for VerifiableShare<F,G> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -43,9 +44,9 @@ impl<F: Field, G: Field> ops::Sub for VerifiableShare<F,G> {
     }
 }
 
-pub struct Polynomial<F: Field>(Box<[F]>);
+pub struct Polynomial<F>(Box<[F]>);
 
-pub fn share<F: Field, G: Field>(
+pub fn share<F: Field, G: Group>(
     val: F,
     ids: &[F],
     threshold: u64,
@@ -68,8 +69,7 @@ pub fn share<F: Field, G: Field>(
     // I want to avoid this allocation :(
     let poly : Box<[F]> = iter::once(val).chain(poly).collect();
 
-    let g : G = G::ONE;
-    let mac_poly : Box<[G]> = poly.iter().map(|a| g * *a).collect();
+    let mac_poly : Box<[G]> = poly.iter().map(|a| G::generator()  * *a).collect();
 
     // Sample n points from 1..=n in the polynomial
     let mut shares: Vec<_> = Vec::with_capacity(n);
@@ -89,7 +89,7 @@ pub fn share<F: Field, G: Field>(
                 // evaluate: a * x^i
                 *a * x.pow([i as u64])
             }) // sum: s + a1 x + a2 x^2 + ...
-            .fold(G::ZERO, |sum, x| sum + x);
+            .fold(G::identity(), |sum, x| sum + x);
         let share = Share::<F> { x, y: share };
         let mac = Mac(mac);
         shares.push(VerifiableShare{share, mac});
@@ -97,4 +97,23 @@ pub fn share<F: Field, G: Field>(
 
     let mac_poly = Polynomial(mac_poly);
     (shares, mac_poly)
+}
+
+#[cfg(test)]
+mod test {
+    use curve25519_dalek::{Scalar, RistrettoPoint};
+    use rand::thread_rng;
+
+    use super::*;
+
+    #[test]
+    fn test_sharing() {
+        const PARTIES : std::ops::Range<u32> = 1..5u32;
+        let mut rng = thread_rng();
+        let v = Scalar::random(&mut rng);
+
+        let parties : Vec<_> = PARTIES.map(Scalar::from).collect();
+        let (shares, poly) = share::<Scalar, RistrettoPoint>(v, &parties, 2, &mut rng);
+
+    }
 }
