@@ -11,7 +11,7 @@ use ff::{derive::rand_core::RngCore, Field};
 /// * `y`: The 'share' part of the share
 #[derive(Clone, Copy, Debug)]
 pub struct Share<F: Field> {
-    // NOTE: Consider:w
+    // NOTE: Consider
     //removing 'x' as it should be implied by the user handling it
     pub(crate) x: F,
     pub(crate) y: F,
@@ -26,6 +26,22 @@ impl<F: Field> std::ops::Add for Share<F> {
     ///
     /// * `rhs`: the other share
     fn add(self, rhs: Self) -> Self::Output {
+        assert!(self.x == rhs.x);
+        Self {
+            x: self.x,
+            y: self.y + rhs.y,
+        }
+    }
+}
+
+impl<F: Field> std::ops::Sub for Share<F> {
+    type Output = Self;
+
+    /// Add two shares together.
+    /// Note: These must share the same `x` value.
+    ///
+    /// * `rhs`: the other share
+    fn sub(self, rhs: Self) -> Self::Output {
         assert!(self.x == rhs.x);
         Self {
             x: self.x,
@@ -61,6 +77,8 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     }
     // TODO: Maybe create the other way around?
 }
+
+// TODO: Multiplication in some form
 
 /// Share/shard a secret value `v` into `n` shares
 /// where `n` is the number of the `ids`
