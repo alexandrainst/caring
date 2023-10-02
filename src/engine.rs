@@ -1,8 +1,10 @@
 //! This a experiment for a structure to run MPC programs
 
-use std::future::Future;
+use std::{future::Future, net::{IpAddr, TcpStream, SocketAddr, TcpListener, Shutdown}, collections::HashSet, io::{Write, Read}};
 
-struct Channel {}
+enum Channel {
+    TcpChannel(TcpStream)
+}
 
 struct Party {
     id: u32,
@@ -22,13 +24,56 @@ impl Party {
 }
 
 
-struct Engine {
+pub struct Engine {
     parties: Vec<Party>,
 }
 
+
 impl Engine {
 
-    pub fn new() -> Self { Engine { parties: Vec::new() }}
+    pub fn connect(my_addr: SocketAddr, peers: &[SocketAddr]) -> Option<Self> {
+        let mut parties = Vec::new();
+        let mut missing = HashSet::new();
+
+        // Connect to the initial parties.
+        let mut buf = String::new();
+        for addr in peers {
+            if let Ok(mut stream) = TcpStream::connect(addr) {
+                println!("Connected to {addr}");
+                stream.read_to_string(&mut buf);
+                println!("{addr} says '{buf}'");
+                parties.push(stream);
+            } else {
+                missing.insert(addr.ip());
+            }
+        }
+
+        // If we are not able to connect to some, they will connect to us.
+        while let Ok(incoming) = TcpListener::bind(my_addr) {
+            if let Ok((mut stream, addr)) = incoming.accept() {
+                if missing.take(&addr.ip()).is_none() {
+                    eprintln!("Error!, {addr} is not supposed connect to us");
+                    stream.shutdown(Shutdown::Both);
+                } else {
+                    println!("{addr} connected");
+                    write!(stream, "Hi buddy!");
+                    parties.push(stream);
+                }
+                if missing.is_empty() {
+                    break
+                }
+            }
+        }
+
+        // Yea. We need async here.
+
+        // We need a good method to distribute IDs
+        let parties = parties.into_iter().map(Channel::TcpChannel)
+            .map(|channel| Party {id: 0, channel}).collect();
+
+        Some(Engine { parties })
+    }
+
 
     pub fn execute<Prg>(&mut self, prg: Prg) where Prg: FnMut(&mut Engine) {
 
@@ -61,14 +106,5 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn simple() {
-        let mut engine = Engine::new();
-        engine.execute(|eng| {
-            println!("hello world");
-        });
-
-    }
 
 }

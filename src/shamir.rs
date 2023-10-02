@@ -111,7 +111,7 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
             .enumerate()
             .map(|(i, a)| {
                 // evaluate: a * x^i
-                (*a) * x.pow(&[i as u64])
+                (*a) * x.pow([i as u64])
             }) // sum: s + a1 x + a2 x^2 + ...
             .fold(F::ZERO, |sum, x| sum + x);
         shares.push(Share::<F> { x, y: share });

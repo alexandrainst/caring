@@ -54,6 +54,17 @@ impl<F: Field, G: Group> ops::Sub for VerifiableShare<F,G> {
 
 pub struct Polynomial<F>(Box<[F]>);
 
+impl<F: Group> ops::Add for Polynomial<F> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let res : Box<[_]> = self.0.iter().zip(rhs.0.iter())
+            .map(|(&a,&b)| a+b).collect();
+
+        Self(res)
+    }
+}
+
 pub fn share<F: Field, G: Group>(
     val: F,
     ids: &[F],
@@ -139,5 +150,34 @@ mod test {
         }
         let v2 = reconstruct(&shares, &poly).unwrap();
         assert_eq!(v, v2);
+    }
+
+    #[test]
+    fn test_addition() {
+        const PARTIES : std::ops::Range<u32> = 1..5u32;
+        let mut rng = thread_rng();
+        let v1 = Scalar::from_bytes_mod_order([7; 32]);
+        let v2 = Scalar::from_bytes_mod_order([10; 32]);
+
+        let parties : Vec<_> = PARTIES.map(Scalar::from).collect();
+        let (shares1, poly1) = share::<Scalar, RistrettoPoint>(v1, &parties, 2, &mut rng);
+        let (shares2, poly2) = share::<Scalar, RistrettoPoint>(v2, &parties, 2, &mut rng);
+        for share in &shares1 {
+            assert!(share.verify(&poly1));
+        }
+        for share in &shares2 {
+            assert!(share.verify(&poly2));
+        }
+        let shares : Vec<_> = shares1.iter().zip(shares2.iter())
+            .map(|(&s1, &s2)| s1 + s2)
+            .collect();
+
+        let poly = poly1 + poly2;
+        for share in &shares {
+            assert!(share.verify(&poly));
+        }
+
+        let vsum = reconstruct(&shares, &poly).unwrap();
+        assert_eq!(v1+v2, vsum);
     }
 }
