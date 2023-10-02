@@ -65,6 +65,7 @@ impl<F: Group> ops::Add for Polynomial<F> {
     }
 }
 
+
 pub fn share<F: Field, G: Group>(
     val: F,
     ids: &[F],
@@ -180,4 +181,51 @@ mod test {
         let vsum = reconstruct(&shares, &poly).unwrap();
         assert_eq!(v1+v2, vsum);
     }
+
+    #[test]
+    fn test_addition_fixpoint() {
+        const PARTIES : std::ops::Range<u32> = 1..5u32;
+        let a = 1.0;
+        let b = 3.0;
+        type Fix = fixed::FixedU32::<16>;
+        fn pad(num: u32) -> [u8; 32] {
+            let num = num.to_le_bytes();
+            let mut arr = [0; 32];
+            arr[0] = num[0];
+            arr[1] = num[1];
+            arr[2] = num[2];
+            arr[3] = num[3];
+            arr
+        }
+
+        let a = Fix::from_num(a);
+        let b = Fix::from_num(b);
+        let v1 = Scalar::from_bytes_mod_order(pad(a.to_bits()));
+        let v2 = Scalar::from_bytes_mod_order(pad(b.to_bits()));
+
+        let mut rng = thread_rng();
+        let parties : Vec<_> = PARTIES.map(Scalar::from).collect();
+        let (shares1, poly1) = share::<Scalar, RistrettoPoint>(v1, &parties, 2, &mut rng);
+        let (shares2, poly2) = share::<Scalar, RistrettoPoint>(v2, &parties, 2, &mut rng);
+        for share in &shares1 {
+            assert!(share.verify(&poly1));
+        }
+        for share in &shares2 {
+            assert!(share.verify(&poly2));
+        }
+        let shares : Vec<_> = shares1.iter().zip(shares2.iter())
+            .map(|(&s1, &s2)| s1 + s2)
+            .collect();
+
+        let poly = poly1 + poly2;
+        for share in &shares {
+            assert!(share.verify(&poly));
+        }
+
+        let vsum = reconstruct(&shares, &poly).unwrap();
+        let sum = &vsum.as_bytes()[0..4];
+        let sum : [u8; 4] = sum.try_into().unwrap();
+        let sum = Fix::from_le_bytes(sum);
+        assert_eq!(a+b, sum);
+    }   
 }

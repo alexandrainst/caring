@@ -9,10 +9,7 @@ pub mod engine;
 use std::{env, net::SocketAddr};
 
 use curve25519_dalek::Scalar;
-use nalgebra::{Matrix, U4, SMatrix};
-use nalgebra::Dyn;
 
-type Weird = SMatrix<shamir::Share<Scalar>, 2, 2>;
 
 use engine::Engine;
 
