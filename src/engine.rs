@@ -1,6 +1,7 @@
 //! This a experiment for a structure to run MPC programs
 
-use std::{future::Future, net::{IpAddr, TcpStream, SocketAddr, TcpListener, Shutdown}, collections::HashSet, io::{Write, Read}};
+use std::{future::Future, net::{IpAddr, TcpStream, SocketAddr, TcpListener, Shutdown}, collections::HashSet, io::{Write, Read}, pin::pin};
+
 
 enum Channel {
     TcpChannel(TcpStream)
@@ -13,7 +14,7 @@ struct Party {
 
 impl Party {
     pub async fn send<const N: usize>(&mut self, msg: impl Into<[u8; N]>) {
-        let payload : [u8; N] = msg.into();
+        let _payload : [u8; N] = msg.into();
         todo!()
     }
 
@@ -29,6 +30,7 @@ pub struct Engine {
 }
 
 
+
 impl Engine {
 
     pub fn connect(my_addr: SocketAddr, peers: &[SocketAddr]) -> Option<Self> {
@@ -40,7 +42,7 @@ impl Engine {
         for addr in peers {
             if let Ok(mut stream) = TcpStream::connect(addr) {
                 println!("Connected to {addr}");
-                stream.read_to_string(&mut buf);
+                stream.read_to_string(&mut buf).unwrap();
                 println!("{addr} says '{buf}'");
                 parties.push(stream);
             } else {
@@ -53,10 +55,10 @@ impl Engine {
             if let Ok((mut stream, addr)) = incoming.accept() {
                 if missing.take(&addr.ip()).is_none() {
                     eprintln!("Error!, {addr} is not supposed connect to us");
-                    stream.shutdown(Shutdown::Both);
+                    stream.shutdown(Shutdown::Both).unwrap();
                 } else {
                     println!("{addr} connected");
-                    write!(stream, "Hi buddy!");
+                    write!(stream, "Hi buddy!").unwrap();
                     parties.push(stream);
                 }
                 if missing.is_empty() {
@@ -75,9 +77,12 @@ impl Engine {
     }
 
 
-    pub fn execute<Prg>(&mut self, prg: Prg) where Prg: FnMut(&mut Engine) {
-
-
+    pub fn execute<'a,T,P,F>(&'a mut self, prg: P) -> Option<T>
+        where F : Future<Output=T>, P: Fn(&'a mut Self) -> F,
+    {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let prg = prg(self);
+        Some(runtime.block_on(prg))
     }
     // TODO: I am not sure if we should provide 'asyncronous' functions (not in the async sense),
     // in which parties can either send or recv, or if we only need to provide 'syncronous'
@@ -87,24 +92,18 @@ impl Engine {
     // this should be received with a corresponding check to ensure consistency.
     pub async fn broadcast<const N: usize>(&mut self, msg: impl Into<[u8; N]>) {
         let msg : [u8; N] = msg.into();
-        for party in &mut self.parties {
-            party.send(msg);
-        }
+        let fut = self.parties.iter_mut()
+            .map(|p| p.send(msg));
+        futures::future::join_all(fut).await;
     }
 
     // commit to a given value and broadcast the commitment.
-    pub async fn commit() {}
+    pub async fn commit(&mut self) {}
 
     // publish a commited value.
-    pub async fn publish() {}
+    pub async fn publish(&mut self) {}
 
     // recv from a broadcast by a specific party
-    pub async fn recv_broadcast() {}
-
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
+    pub async fn recv_broadcast(&mut self) {}
 
 }

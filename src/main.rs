@@ -8,22 +8,28 @@ pub mod engine;
 
 use std::{env, net::SocketAddr};
 
-use curve25519_dalek::Scalar;
 
 
 use engine::Engine;
+use rand::Rng;
 
 fn main() {
     let mut args = env::args();
     args.next();
     let my_addr: String = args.next().unwrap();
     dbg!(&my_addr);
-    let my_addr : SocketAddr = my_addr.parse().unwrap();
-    let peers : Vec<_> = args.map(|s| s.parse().unwrap()).collect();
-    let _engine: Option<Engine> = Engine::connect(my_addr, &peers);
-
-    let mut b: i32 = 2;
+    let me : SocketAddr = my_addr.parse().unwrap();
+    let peers : Vec<SocketAddr> = args.map(|s| s.parse().unwrap()).collect();
+    let mut engine: Engine = Engine::connect(me, &peers).unwrap();
     
+    let mut rng = rand::thread_rng();
+    let num = rng.gen_range(1..100);
+    println!("My number for today is: {num}");
 
-    b += 3;
+    engine.execute(|engine: &mut Engine| async {
+        engine.commit().await;
+        println!("Something cool");
+    });
+
+
 }

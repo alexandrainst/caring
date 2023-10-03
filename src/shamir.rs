@@ -137,7 +137,7 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
         for Share { x: xk, y: _ } in shares.iter() {
             let xk = *xk;
             if xk != xi {
-                prod *= -xk * (xi - xk).invert().unwrap();
+                prod *= -xk * (xi - xk).invert().unwrap_or(F::ZERO)
             }
         }
         sum += yi * prod;

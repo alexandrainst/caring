@@ -10,7 +10,9 @@ curve25519-dalek = {version = "4.1.1", features = ["group"]}
 derive_more = "0.99.17"
 ff = { version = "0.13.0", features = ["derive"] }
 fixed = "2.0.0-alpha.11"
+futures = "0.3.28"
 gf256 = "0.3.0"
 group = "0.13.0"
 num-traits = "0.2.16"
 rand = "0.8.5"
+tokio = { version = "1.32.0", features = ["full"] }

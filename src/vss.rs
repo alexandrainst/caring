@@ -188,6 +188,7 @@ mod test {
         let a = 1.0;
         let b = 3.0;
         type Fix = fixed::FixedU32::<16>;
+        // Function to pad a u32 to a [u8; 32]
         fn pad(num: u32) -> [u8; 32] {
             let num = num.to_le_bytes();
             let mut arr = [0; 32];
@@ -198,10 +199,12 @@ mod test {
             arr
         }
 
+
         let a = Fix::from_num(a);
         let b = Fix::from_num(b);
         let v1 = Scalar::from_bytes_mod_order(pad(a.to_bits()));
         let v2 = Scalar::from_bytes_mod_order(pad(b.to_bits()));
+        v2.invert();
 
         let mut rng = thread_rng();
         let parties : Vec<_> = PARTIES.map(Scalar::from).collect();
