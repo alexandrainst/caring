@@ -1,100 +1,92 @@
 //! This a experiment for a structure to run MPC programs
 
-use std::{future::Future, net::{IpAddr, TcpStream, SocketAddr, TcpListener, Shutdown}, collections::HashSet, io::{Write, Read}, pin::pin};
+use std::{future::Future, sync::Arc};
+use std::net::SocketAddr;
 
+use futures::future::{join_all, self};
+use tokio::{sync::Mutex, net::tcp::{OwnedReadHalf, OwnedWriteHalf}};
+use tokio::task;
+use tokio::{net::TcpStream, runtime::Runtime, io::{AsyncReadExt, AsyncWriteExt}};
 
-enum Channel {
-    TcpChannel(TcpStream)
-}
 
 struct Party {
     id: u32,
-    channel: Channel,
+    channel: (Mutex<OwnedReadHalf>, Mutex<OwnedWriteHalf>),
 }
-
-impl Party {
-    pub async fn send<const N: usize>(&mut self, msg: impl Into<[u8; N]>) {
-        let _payload : [u8; N] = msg.into();
-        todo!()
-    }
-
-    pub async fn recv<const N: usize, T>(&mut self) -> T where T: From<[u8; N]> {
-        let zeroes = [0; N];
-        T::from(zeroes)
-    }
-}
-
 
 pub struct Engine {
-    parties: Vec<Party>,
+    parties: Vec<Arc<Party>>,
+    // runtime: Runtime,
 }
 
 
 
 impl Engine {
 
-    pub fn connect(my_addr: SocketAddr, peers: &[SocketAddr]) -> Option<Self> {
-        let mut parties = Vec::new();
-        let mut missing = HashSet::new();
+    // pub fn new() -> Self {
+    //     let runtime = tokio::runtime::Builder::new_current_thread()
+    //         .enable_io()
+    //         .build().unwrap();
+    //     Self { runtime, parties: Vec::with_capacity(0) }
+    // }
 
+    pub async fn connect(my_addr: SocketAddr, peers: &[SocketAddr]) -> Self {
         // Connect to the initial parties.
-        let mut buf = String::new();
-        for addr in peers {
-            if let Ok(mut stream) = TcpStream::connect(addr) {
-                println!("Connected to {addr}");
-                stream.read_to_string(&mut buf).unwrap();
-                println!("{addr} says '{buf}'");
+        let n = peers.len();
+        let parties = async {
+
+            println!("Connecting to parties");
+            let results = join_all(peers.iter()
+                .map(|addr| tokio::task::spawn(tokio::net::TcpStream::connect(*addr)))
+            ).await;
+
+            let mut parties : Vec<_> = results.into_iter().map(|x| x.unwrap())
+                .filter_map(|x| x.ok())
+                .collect();
+
+            // If we are not able to connect to some, they will connect to us.
+            println!("Accepting connections");
+            let incoming = tokio::net::TcpListener::bind(my_addr).await.unwrap();
+            loop {
+                if parties.len() >= n { break };
+                let (stream, _) = incoming.accept().await.unwrap();
                 parties.push(stream);
-            } else {
-                missing.insert(addr.ip());
             }
-        }
 
-        // If we are not able to connect to some, they will connect to us.
-        while let Ok(incoming) = TcpListener::bind(my_addr) {
-            if let Ok((mut stream, addr)) = incoming.accept() {
-                if missing.take(&addr.ip()).is_none() {
-                    eprintln!("Error!, {addr} is not supposed connect to us");
-                    stream.shutdown(Shutdown::Both).unwrap();
-                } else {
-                    println!("{addr} connected");
-                    write!(stream, "Hi buddy!").unwrap();
-                    parties.push(stream);
-                }
-                if missing.is_empty() {
-                    break
-                }
-            }
-        }
+            // We need a good method to distribute IDs
+            
+            parties.into_iter()
+                .map(|channel| channel.into_split())
+                .map(|(read, write)| Party {id: 0, channel: (Mutex::new(read), Mutex::new(write))})
+                .map(|p| Arc::new(p))
+                .collect()
+        };
 
-        // Yea. We need async here.
-
-        // We need a good method to distribute IDs
-        let parties = parties.into_iter().map(Channel::TcpChannel)
-            .map(|channel| Party {id: 0, channel}).collect();
-
-        Some(Engine { parties })
+        Engine { parties: parties.await }
     }
 
 
-    pub fn execute<'a,T,P,F>(&'a mut self, prg: P) -> Option<T>
-        where F : Future<Output=T>, P: Fn(&'a mut Self) -> F,
-    {
-        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
-        let prg = prg(self);
-        Some(runtime.block_on(prg))
-    }
+    // pub async fn execute<'a,T,P,F>(&'a mut self, prg: P) -> Option<T>
+    //     where F : Future<Output=T> + Send, P: Fn(&'a mut Self) -> F, T: Send,
+    // {
+    //     let prg = prg(self);
+    //     Some(task::spawn(prg).await.unwrap())
+    // }
     // TODO: I am not sure if we should provide 'asyncronous' functions (not in the async sense),
     // in which parties can either send or recv, or if we only need to provide 'syncronous'
     // in which all parties do the same.
 
     // send the same value to all parties
     // this should be received with a corresponding check to ensure consistency.
-    pub async fn broadcast<const N: usize>(&mut self, msg: impl Into<[u8; N]>) {
-        let msg : [u8; N] = msg.into();
-        let fut = self.parties.iter_mut()
-            .map(|p| p.send(msg));
-        futures::future::join_all(fut).await;
+    pub fn broadcast<const N: usize>(&mut self, msg: &[u8; N]) {
+        let msg = Arc::new(*msg);
+        for party in &mut self.parties {
+            let party = party.clone();
+            let msg = msg.clone();
+            task::spawn(async move {
+                party.channel.1.lock().await.write_all(&*msg).await.unwrap();
+            });
+        }
     }
 
     // commit to a given value and broadcast the commitment.
@@ -103,7 +95,21 @@ impl Engine {
     // publish a commited value.
     pub async fn publish(&mut self) {}
 
-    // recv from a broadcast by a specific party
-    pub async fn recv_broadcast(&mut self) {}
+    // recv from a broadcast 
+    pub async fn recv_from_all<const N: usize>(&mut self) -> Vec<[u8; N]> {
+        let mut results = Vec::new();
+
+        for party in &mut self.parties {
+            let party = party.clone();
+            let handle = async move {
+                let mut buf = [0u8; N];
+                party.channel.0.lock().await.read_exact(&mut buf).await.unwrap();
+                buf
+            };
+            results.push(handle);
+        }
+
+        future::join_all(results.into_iter()).await
+    }
 
 }
