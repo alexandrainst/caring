@@ -23,13 +23,6 @@ pub struct Engine {
 
 impl Engine {
 
-    // pub fn new() -> Self {
-    //     let runtime = tokio::runtime::Builder::new_current_thread()
-    //         .enable_io()
-    //         .build().unwrap();
-    //     Self { runtime, parties: Vec::with_capacity(0) }
-    // }
-
     pub async fn connect(my_addr: SocketAddr, peers: &[SocketAddr]) -> Self {
         // Connect to the initial parties.
         let n = peers.len();
@@ -58,7 +51,7 @@ impl Engine {
             parties.into_iter()
                 .map(|channel| channel.into_split())
                 .map(|(read, write)| Party {id: 0, channel: (Mutex::new(read), Mutex::new(write))})
-                .map(|p| Arc::new(p))
+                .map(Arc::new)
                 .collect()
         };
 
@@ -72,6 +65,7 @@ impl Engine {
     //     let prg = prg(self);
     //     Some(task::spawn(prg).await.unwrap())
     // }
+
     // TODO: I am not sure if we should provide 'asyncronous' functions (not in the async sense),
     // in which parties can either send or recv, or if we only need to provide 'syncronous'
     // in which all parties do the same.
@@ -88,12 +82,6 @@ impl Engine {
             });
         }
     }
-
-    // commit to a given value and broadcast the commitment.
-    pub async fn commit(&mut self) {}
-
-    // publish a commited value.
-    pub async fn publish(&mut self) {}
 
     // recv from a broadcast 
     pub async fn recv_from_all<const N: usize>(&mut self) -> Vec<[u8; N]> {
@@ -112,4 +100,10 @@ impl Engine {
         future::join_all(results.into_iter()).await
     }
 
+
+    // commit to a given value and broadcast the commitment.
+    pub async fn commit(&mut self) {}
+
+    // publish a commited value.
+    pub async fn publish(&mut self) {}
 }

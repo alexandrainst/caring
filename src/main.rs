@@ -15,12 +15,15 @@ use rand::Rng;
 
 #[tokio::main]
 async fn main() {
-    console_subscriber::init();
+
+    // #[cfg(tokio_unstable)]
+    // console_subscriber::init();
+
     // Argument parsing
     let mut args = env::args();
     args.next();
-    let my_addr: String = args.next().unwrap();
-    let me : SocketAddr = my_addr.parse().unwrap();
+    let me: String = args.next().unwrap();
+    let me : SocketAddr = me.parse().unwrap();
     let peers : Vec<SocketAddr> = args.map(|s| s.parse().unwrap()).collect();
     // Construct the engine
     let mut engine: Engine = Engine::connect(me, &peers).await;
