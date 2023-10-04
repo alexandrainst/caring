@@ -26,7 +26,7 @@ impl<F: Field> std::ops::Add for Share<F> {
     ///
     /// * `rhs`: the other share
     fn add(self, rhs: Self) -> Self::Output {
-        assert!(self.x == rhs.x);
+        assert_eq!(self.x, rhs.x);
         Self {
             x: self.x,
             y: self.y + rhs.y,
@@ -42,7 +42,7 @@ impl<F: Field> std::ops::Sub for Share<F> {
     ///
     /// * `rhs`: the other share
     fn sub(self, rhs: Self) -> Self::Output {
-        assert!(self.x == rhs.x);
+        assert_eq!(self.x, rhs.x);
         Self {
             x: self.x,
             y: self.y + rhs.y,

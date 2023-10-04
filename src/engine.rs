@@ -66,12 +66,19 @@ impl Engine {
     //     Some(task::spawn(prg).await.unwrap())
     // }
 
-    // TODO: I am not sure if we should provide 'asyncronous' functions (not in the async sense),
-    // in which parties can either send or recv, or if we only need to provide 'syncronous'
+    // TODO: I am not sure if we should provide 'asymmetric' functions
+    // in which parties can either send or recv, or if we only need to provide 'symmetric'
     // in which all parties do the same.
 
     // send the same value to all parties
     // this should be received with a corresponding check to ensure consistency.
+
+    /// Asymmetric broadcast
+    ///
+    /// Broadcasts the message with a given size.
+    /// Combine with `recv_for_all` for a symmetric version
+    ///
+    /// * `msg`: Message to be broadcast
     pub fn broadcast<const N: usize>(&mut self, msg: &[u8; N]) {
         let msg = Arc::new(*msg);
         for party in &mut self.parties {
@@ -83,7 +90,10 @@ impl Engine {
         }
     }
 
-    // recv from a broadcast 
+    /// Asymmetric receive from all
+    ///
+    /// This receives a `N`-sized byte message from all parties,
+    /// except yourself.
     pub async fn recv_from_all<const N: usize>(&mut self) -> Vec<[u8; N]> {
         let mut results = Vec::new();
 

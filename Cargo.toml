@@ -16,4 +16,6 @@ gf256 = "0.3.0"
 group = "0.13.0"
 num-traits = "0.2.16"
 rand = "0.8.5"
+serde = "1.0.188"
 tokio = { version = "1.32.0", features = ["full"] }
+tokio-serde = "0.8.0"
