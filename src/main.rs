@@ -45,14 +45,10 @@ async fn main() {
     engine.broadcast(&my_id.to_le_bytes());
     let their_id = engine.recv_from_all().await;
     let their_id = u32::from_le_bytes(their_id[0]);
-    let mut ids = [my_id, their_id];
-    ids.sort();
-    let (my_id, their_id) : (u32, u32) = if ids[0] == my_id {(1, 2)} else {(2, 1)};
+    let (my_id, their_id) : (u32, u32) = if my_id < their_id {(1, 2)} else {(2, 1)};
     println!("I am {my_id}, and my friend is {their_id}");
     let mut ids = [my_id, their_id];
     ids.sort();
-
-
 
     println!("Let's try some MPC");
     let num = curve25519_dalek::Scalar::from(num);

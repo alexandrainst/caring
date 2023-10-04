@@ -139,7 +139,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_sharing() {
+    fn sharing() {
         const PARTIES : std::ops::Range<u32> = 1..5u32;
         let mut rng = thread_rng();
         let v = Scalar::random(&mut rng);
@@ -154,7 +154,7 @@ mod test {
     }
 
     #[test]
-    fn test_addition() {
+    fn addition() {
         const PARTIES : std::ops::Range<u32> = 1..5u32;
         let mut rng = thread_rng();
         let v1 = Scalar::from_bytes_mod_order([7; 32]);
@@ -183,7 +183,7 @@ mod test {
     }
 
     #[test]
-    fn test_addition_fixpoint() {
+    fn addition_fixpoint() {
         const PARTIES : std::ops::Range<u32> = 1..5u32;
         let a = 1.0;
         let b = 3.0;
