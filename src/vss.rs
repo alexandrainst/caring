@@ -1,3 +1,8 @@
+//! This is an implementation of verifiable secret sharing using Feldman's scheme
+//! see https://en.wikipedia.org/wiki/Verifiable_secret_sharing#Feldman's_scheme
+//! The scheme can be instansiated with any field F and a corresponding group G
+//! for which there exists a mapping F -> G using a generator `g`.
+//! It should also be noted that the discrete log problem in G should be *hard*.
 use std::{ops, iter};
 
 use ff::Field;
@@ -6,17 +11,18 @@ use rand::RngCore;
 use crate::shamir::{Share, self};
 
 #[derive(Clone, Copy)]
-pub struct VerifiableShare<F : Field, G : Group>{
+pub struct VerifiableShare<F : Field>{
     share: Share<F>,
 
     // I have come to the realization that we don't need this,
     // we only need the polynomial. 
-    mac: Mac<G>, 
+    // mac: Mac<G>, 
 }
 
-impl<F: Field, G: Group + std::ops::Mul<F, Output = G>> VerifiableShare<F, G> {
-    pub fn verify(&self, poly: &Polynomial<G>) -> bool {
-        let VerifiableShare { share, mac } = self;
+impl<F: Field> VerifiableShare<F> {
+    pub fn verify<G>(&self, poly: &Polynomial<G>) -> bool
+        where G: Group + std::ops::Mul<F, Output = G> {
+        let VerifiableShare { share } = self;
         let mut check = G::identity();
         for (i,&a) in poly.0.iter().enumerate() {
             check += a * share.x.pow([i as u64]);
@@ -29,25 +35,25 @@ impl<F: Field, G: Group + std::ops::Mul<F, Output = G>> VerifiableShare<F, G> {
 pub struct Mac<F: Group>(F);
 
 
-impl<F: Field, G: Group> ops::Add for VerifiableShare<F,G> {
+impl<F: Field> ops::Add for VerifiableShare<F> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
         Self {
             share: self.share + rhs.share,
-            mac: Mac(self.mac.0 + rhs.mac.0),
+            // mac: Mac(self.mac.0 + rhs.mac.0),
         }
     }
 }
 
 
-impl<F: Field, G: Group> ops::Sub for VerifiableShare<F,G> {
+impl<F: Field> ops::Sub for VerifiableShare<F> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
         Self {
             share: self.share - rhs.share,
-            mac: Mac(self.mac.0 - rhs.mac.0),
+            // mac: Mac(self.mac.0 - rhs.mac.0),
         }
     }
 }
@@ -71,7 +77,7 @@ pub fn share<F: Field, G: Group>(
     ids: &[F],
     threshold: u64,
     rng: &mut impl RngCore,
-) -> (Vec<VerifiableShare<F,G>>, Polynomial<G>)
+) -> (Vec<VerifiableShare<F>>, Polynomial<G>)
     where G: std::ops::Mul<F, Output = G>
 {
     // let shares = shamir::share(val, threshold, rng);
@@ -112,7 +118,7 @@ pub fn share<F: Field, G: Group>(
             .fold(G::identity(), |sum, x| sum + x);
         let share = Share::<F> { x, y: share };
         let mac = Mac(mac);
-        shares.push(VerifiableShare{share, mac});
+        shares.push(VerifiableShare{share});
     }
 
     let mac_poly = Polynomial(mac_poly);
@@ -120,10 +126,11 @@ pub fn share<F: Field, G: Group>(
 }
 
 pub fn reconstruct<F: Field, G: Group>(
-    shares: &[VerifiableShare<F,G>],
+    shares: &[VerifiableShare<F>],
     poly: &Polynomial<G>
 ) -> Option<F> {
-    let (shares, macs) : (Vec<_>, Vec<_>) = shares.iter().map(|s| (s.share, s.mac)).unzip();
+    // let (shares, macs) : (Vec<_>, Vec<_>) = shares.iter().map(|s| (s.share)).unzip();
+    let shares : Vec<_> = shares.iter().map(|s| s.share).collect();
     let res = shamir::reconstruct(&shares);
 
     // ???

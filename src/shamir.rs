@@ -1,3 +1,4 @@
+//! This is vanilla Shamir Secret Sharing using an arbitrary field F.
 use ff::{derive::rand_core::RngCore, Field};
 
 

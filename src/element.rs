@@ -1,8 +1,8 @@
-//! Concrete abstract mathematical fields.
+//! Concrete mathematical field example.
+//! Here we have a prime field that is very close to 2^32.
 
-use ff::{PrimeField, Field};
+use ff::PrimeField;
 
-use crate::field::MyField;
 #[derive(PrimeField)]
 #[PrimeFieldModulus = "4294967291"]
 #[PrimeFieldGenerator = "2"]
