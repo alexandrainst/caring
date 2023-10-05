@@ -341,6 +341,7 @@ dependencies = [
  "platforms",
  "rand_core",
  "rustc_version",
+ "serde",
  "subtle",
  "zeroize",
 ]

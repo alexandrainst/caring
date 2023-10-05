@@ -3,6 +3,7 @@ mod element;
 pub mod shamir;
 pub mod vss;
 pub mod engine;
+mod connection;
 
 use std::{env, net::SocketAddr};
 

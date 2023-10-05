@@ -18,6 +18,10 @@ pub struct Share<F: Field> {
     pub(crate) y: F,
 }
 
+// TODO: We could use a construct representing a group of shares,
+// this could probably allow for the removal of the `x` in the Share.
+// This should allow for an easier 'sharing' phase, where each party
+// gets their correct version.
 
 impl<F: Field> std::ops::Add for Share<F> {
     type Output = Self;

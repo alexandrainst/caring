@@ -1,6 +1,5 @@
 //! Concrete mathematical field example.
 //! Here we have a prime field that is very close to 2^32.
-
 use ff::PrimeField;
 
 #[derive(PrimeField)]

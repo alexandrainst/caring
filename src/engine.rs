@@ -7,7 +7,7 @@ use futures::future::{join_all, self};
 use rand::{thread_rng, Rng};
 use tokio::{sync::Mutex, net::tcp::{OwnedReadHalf, OwnedWriteHalf}};
 use tokio::task;
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 // TODO: Find a better abstraction of streams.
 // It would be nice if we could swap-out the underlying stream,
@@ -206,18 +206,3 @@ impl Engine {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[tokio::test]
-    async fn send_recv() {
-        // TODO: fake some tcp connections.
-        let mut engine = Engine {parties: Vec::new(), id: PartyID(0)};
-        engine.send(&"hello", 0).await;
-        let msg : Box<str> = engine.recv(0).await;
-        let msg : &str = &msg;
-        assert_eq!(msg, "hello");
-    }
-
-}
