@@ -117,7 +117,7 @@ pub fn share<F: Field, G: Group>(
             }) // sum: s + a1 x + a2 x^2 + ...
             .fold(G::identity(), |sum, x| sum + x);
         let share = Share::<F> { x, y: share };
-        let mac = Mac(mac);
+        let _mac = Mac(mac);
         shares.push(VerifiableShare{share});
     }
 
@@ -127,7 +127,7 @@ pub fn share<F: Field, G: Group>(
 
 pub fn reconstruct<F: Field, G: Group>(
     shares: &[VerifiableShare<F>],
-    poly: &Polynomial<G>
+    _poly: &Polynomial<G>
 ) -> Option<F> {
     // let (shares, macs) : (Vec<_>, Vec<_>) = shares.iter().map(|s| (s.share)).unzip();
     let shares : Vec<_> = shares.iter().map(|s| s.share).collect();

@@ -92,7 +92,7 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
     let n = ids.len();
     assert!(
         n >= threshold as usize,
-        "Threshold should be less-than-equal to the number of shares"
+        "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
     );
 
     // Sample random t-degree polynomial

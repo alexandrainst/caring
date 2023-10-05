@@ -19,4 +19,5 @@ num-traits = "0.2.16"
 rand = "0.8.5"
 serde = "1.0.188"
 tokio = { version = "1.32.0", features = ["full"] }
-tokio-serde = "0.8.0"
+tokio-serde = { version = "0.8.0", features = ["bincode"] }
+tokio-util = "0.7.9"
