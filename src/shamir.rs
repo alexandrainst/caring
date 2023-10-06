@@ -10,7 +10,7 @@ use ff::{derive::rand_core::RngCore, Field};
 ///
 /// * `x`: The id of the share
 /// * `y`: The 'share' part of the share
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Share<F: Field> {
     // NOTE: Consider
     //removing 'x' as it should be implied by the user handling it

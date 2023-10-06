@@ -10,7 +10,7 @@ use group::Group;
 use rand::RngCore;
 use crate::shamir::{Share, self};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VerifiableShare<F : Field>{
     share: Share<F>,
 

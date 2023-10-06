@@ -1,18 +1,27 @@
 use std::collections::BTreeMap;
 
+use futures::{future, join};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 
+
+// There is also an argument for splitting this into three structs
+// with a common trait.
 #[non_exhaustive]
 pub enum Connection {
     // We could end up in a problem where we want to send 
     // and receive at the same time. In this case we might need
     // to 'split' the connection. However, that is not nice.
+    // We would still end-up with borrowing problems, if we don't form a seperate send/recv
+    // struct. Another way could be just use interoir mutability checks with RefCell,
+    // thus allowing some degree of freedom,
+    // when we know we ore only using half of the connection.
     Tcp(tokio::net::TcpStream),
     Unix(tokio::net::UnixStream),
     InMemory{
         sender: tokio::sync::mpsc::Sender<Box<[u8]>>,
         receiver: tokio::sync::mpsc::Receiver<Box<[u8]>>,
     }
+    // TODO: Add TLS-backed stream
 }
 
 impl Connection {
@@ -58,6 +67,8 @@ impl Connection {
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> T {
         match self {
             Connection::InMemory { sender: _, receiver } => {
+                // Technically we could skip serialization here
+                // and just pass pointer around and clone.
                 let msg = receiver.recv().await.unwrap();
                 let buf = std::io::Cursor::new(msg);
                 bincode::deserialize_from(buf).unwrap()
@@ -69,6 +80,9 @@ impl Connection {
                 bincode::deserialize_from(buf).unwrap()
             },
             Connection::Unix(stream) => {
+                // We probably could have more leeway here aswell,
+                // since we know we are on the same machine,
+                // but not the same process.
                 let mut buf = Vec::new();
                 stream.read_to_end(&mut buf).await.unwrap();
                 let buf = std::io::Cursor::new(buf);
@@ -79,40 +93,46 @@ impl Connection {
 }
 
 pub struct Network {
-    connections: Vec<Connection>,
+    // connections should be sorted after their index.
+    pub connections: Vec<Connection>,
+    pub index: usize,
 }
 
+// TODO: struct representing a group of messages from a broadcast?
 impl Network {
     pub async fn broadcast(&mut self, msg: &impl serde::Serialize) {
         // TODO: Concurrency
-        for conn in &mut self.connections {
-            conn.send(msg).await;
-        }
+        let futures = self.connections.iter_mut().map(|conn| {
+            conn.send(msg)
+        });
+        future::join_all(futures).await;
     }
 
     pub async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
         // TODO: Concurrency
-        let mut messages = Vec::new();
-        for conn in &mut self.connections {
-            let msg : T = conn.recv().await;
-            messages.push(msg);
-        }
-        messages
+        let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
+            let msg = conn.recv();
+            async move {(i, msg.await)}
+        });
+        let mut messages = future::join_all(messages).await;
+        // Maybe we should pass the id with it?
+        // Idk, it doesn't seem like there is a single good way for this.
+        messages.sort_unstable_by_key(|(i,_)| *i);
+        messages.into_iter().map(|(_,m)| m).collect()
     }
 
-    pub async fn symmetric_broadcast<T: serde::de::DeserializeOwned + serde::Serialize>(&mut self, msg: T) -> Vec<T> {
-        // TODO: Concurrency
+    pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T> where T: serde::Serialize + serde::de::DeserializeOwned {
         self.broadcast(&msg).await;
         let mut messages = self.receive_all().await;
-        messages.push(msg);
+        messages.insert(self.index, msg);
         messages
     }
 
-    pub fn in_memory(num: usize) -> Vec<Network> {
+    pub fn in_memory(player_count: usize) -> Vec<Network> {
         // This could probably be created nicer,
         // but upper-triangular matrices are hard to construct.
         let mut internet = BTreeMap::new();
-        for i in 0..num {
+        for i in 0..player_count {
             for j in 0..i {
                 if i == j {continue;}
                 let (c1, c2) = Connection::in_memory();
@@ -122,15 +142,15 @@ impl Network {
         }
 
         let mut networks = Vec::new();
-        for i in 0..num {
+        for i in 0..player_count {
             let mut network = Vec::new();
-            for j in 0..num {
+            for j in 0..player_count {
                 if i == j { continue;}
                 println!("({i}, {j})");
                 let conn = internet.remove(&(i,j)).unwrap();
                 network.push(conn);
             }
-            let network = Network {connections: network};
+            let network = Network {connections: network, index: i};
             networks.push(network);
         }
         networks
@@ -139,6 +159,11 @@ impl Network {
 
 #[cfg(test)]
 mod test {
+
+    use std::net::SocketAddrV4;
+
+    use tokio::net::{TcpSocket, TcpListener, TcpStream};
+
     use super::*;
 
     #[tokio::test]
@@ -164,12 +189,13 @@ mod test {
 
     #[tokio::test]
     async fn network() {
-        let players = Network::in_memory(2);
+        let players = Network::in_memory(1000);
         for p in players {
             tokio::spawn(async move {
                 let mut network = p;
                 let msg = "Joy to the world!".to_owned();
-                let post = network.symmetric_broadcast(msg).await;
+                network.broadcast(&msg).await;
+                let post : Vec<String> = network.receive_all().await;
                 for package in post {
                     assert_eq!(package, "Joy to the world!");
                 }
@@ -177,4 +203,25 @@ mod test {
         }
     }
 
+    #[tokio::test]
+    async fn tcp() {
+        let addr = "127.0.0.1:4321".parse::<SocketAddrV4>().unwrap();
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let handle = tokio::spawn(async move {
+            let stream = TcpStream::connect(addr).await.unwrap();
+            let mut conn = Connection::from_tcp_stream(stream);
+
+            conn.send(&"Hello").await;
+            let msg : Box<str> = conn.recv().await;
+            assert_eq!(msg, "Greetings".into());
+
+        });
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut conn = Connection::from_tcp_stream(stream);
+        let msg : Box<str> = conn.recv().await;
+        assert_eq!(msg, "Hello".into());
+        conn.send(&"Greetings").await;
+
+        handle.await.unwrap();
+    }
 }

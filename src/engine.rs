@@ -63,7 +63,6 @@ impl Engine {
         vec.push(self.id);
         vec.sort_unstable();
         vec
-
     }
 
     pub async fn connect(my_addr: SocketAddr, peers: &[SocketAddr]) -> Self {
