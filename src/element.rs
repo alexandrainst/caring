@@ -8,6 +8,7 @@ use ff::PrimeField;
 #[PrimeFieldReprEndianness = "little"]
 pub struct Element32([u64; 1]);
 
+
 impl From<Element32> for u32 {
     /// Convert a element into u32
     ///
