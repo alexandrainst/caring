@@ -70,10 +70,9 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
 //TODO: struct representing a group of messages from a broadcast?
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
     pub async fn broadcast(&mut self, msg: &impl serde::Serialize) {
-        // TODO: Concurrency
-         self.connections.iter_mut().map(|conn| {
-            conn.send(msg)
-        });
+        for conn in &self.connections {
+            conn.send(msg);
+        }
     }
 
     pub async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
@@ -115,7 +114,6 @@ impl Network<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>> {
             let mut network = Vec::new();
             for j in 0..player_count {
                 if i == j { continue;}
-                println!("({i}, {j})");
                 let conn = internet.remove(&(i,j)).unwrap();
                 network.push(conn);
             }
@@ -131,6 +129,7 @@ mod test {
 
     use std::{net::SocketAddrV4, time::Duration};
 
+    use curve25519_dalek::Scalar;
     use tokio::net::{TcpSocket, TcpListener, TcpStream};
 
     use super::*;
@@ -158,7 +157,9 @@ mod test {
 
     #[tokio::test]
     async fn network() {
+        println!("Spawning network!");
         let players = Network::in_memory(1000);
+        println!("Done!");
         for p in players {
             tokio::spawn(async move {
                 let mut network = p;
@@ -174,7 +175,6 @@ mod test {
 
     #[tokio::test]
     async fn tcp() {
-        console_subscriber::init();
         let addr = "127.0.0.1:4321".parse::<SocketAddrV4>().unwrap();
         let listener = TcpListener::bind(addr).await.unwrap();
         let h1 = tokio::spawn(async move {
