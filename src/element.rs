@@ -8,7 +8,6 @@ use ff::PrimeField;
 #[PrimeFieldReprEndianness = "little"]
 pub struct Element32([u64; 1]);
 
-
 impl From<Element32> for u32 {
     /// Convert a element into u32
     ///
@@ -29,7 +28,8 @@ impl From<u32> for Element32 {
         let val = val.to_le_bytes();
         // NOTE: Should probably mention that this is vartime.
         // TODO: Maybe this fails if the integer is bigger than the modulus?
-        Element32::from_repr_vartime(Element32Repr([val[0], val[1], val[2], val[3], 0, 0, 0, 0])).unwrap()
+        Element32::from_repr_vartime(Element32Repr([val[0], val[1], val[2], val[3], 0, 0, 0, 0]))
+            .unwrap()
     }
 }
 

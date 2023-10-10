@@ -1,13 +1,10 @@
 //! This a experiment for a structure to run MPC programs
 
-
 use tokio::io::{AsyncRead, AsyncWrite};
-
 
 use crate::connection::Network;
 
-
-pub struct Engine<R : AsyncRead + Unpin, W : AsyncWrite + Unpin> {
+pub struct Engine<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     // Should probably just be a map with ID's to parties.
     // However we still need a good way to get IDs.
     // One way could be to do as Fresco does and just supply them in the beginning.
@@ -23,13 +20,7 @@ pub struct Engine<R : AsyncRead + Unpin, W : AsyncWrite + Unpin> {
     // If everything goes well we should then have some IDs, however they wouldn't be 'fair' IDs,
     // in the sense that a given party can always choose a low random value.
     // So don't depend anything on being number one!
-    network: Network<R,W>,
+    network: Network<R, W>,
 }
 
-
-
-impl<R : AsyncRead + Unpin, W : AsyncWrite + Unpin> Engine<R,W> {
-
-
-}
-
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Engine<R, W> {}

@@ -2,7 +2,6 @@
 //! See https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing
 use ff::{derive::rand_core::RngCore, Field};
 
-
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
 /// Reconstruction can be done by obtaining `t` shares.
@@ -72,17 +71,20 @@ impl<F: Field> std::ops::Add<F> for Share<F> {
     }
 }
 
-impl <F: Field> std::iter::Sum for Share<F> {
+impl<F: Field> std::iter::Sum for Share<F> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
-        let Some(Share{x,y}) = iter.next() else {
-            return Share{x: F::ZERO, y: F::ZERO};
+        let Some(Share { x, y }) = iter.next() else {
+            return Share {
+                x: F::ZERO,
+                y: F::ZERO,
+            };
         };
         let mut acc = y;
         for share in iter {
             assert_eq!(share.x, x);
             acc += share.y;
         }
-        Share{x, y: acc}
+        Share { x, y: acc }
     }
 }
 
@@ -93,7 +95,10 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     ///
     /// * `rhs`: field element to multiply with
     fn mul(self, rhs: F) -> Self::Output {
-        Self { y: self.y * rhs, ..self }
+        Self {
+            y: self.y * rhs,
+            ..self
+        }
     }
     // TODO: Maybe create the other way around?
 }
@@ -185,7 +190,7 @@ mod test {
     #[test]
     fn addition() {
         // We test that we can secret-share a two numbers and add them.
-        const PARTIES : std::ops::Range<u32> = 1..5u32;
+        const PARTIES: std::ops::Range<u32> = 1..5u32;
         let a = 3;
         let b = 7;
         let vs1 = {
@@ -202,9 +207,9 @@ mod test {
         };
 
         // MPC
-        let shares : Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a,&b)| a+b).collect();
+        let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a, &b)| a + b).collect();
         let v = reconstruct(&shares);
-        let v : u32 = v.into();
+        let v: u32 = v.into();
         assert_eq!(v, a + b);
     }
 
@@ -213,8 +218,8 @@ mod test {
     #[test]
     fn addition_fixpoint() {
         // We test that we can secret-share a two *fixed point* numbers and add them.
-        const PARTIES : std::ops::Range<u32> = 1..5u32;
-        type Fix = FixedU32::<16>;
+        const PARTIES: std::ops::Range<u32> = 1..5u32;
+        type Fix = FixedU32<16>;
         let a = 1.0;
         let b = 3.0;
         let a = Fix::from_num(a);
@@ -236,13 +241,13 @@ mod test {
         };
 
         // MPC
-        let shares : Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a,&b)| a+b).collect();
+        let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a, &b)| a + b).collect();
         let v = reconstruct(&shares);
         dbg!(v);
 
         // back to fixed
-        let v : u32 = v.into();
+        let v: u32 = v.into();
         let v = Fix::from_bits(v);
-        assert_eq!(v, a+b);
+        assert_eq!(v, a + b);
     }
 }

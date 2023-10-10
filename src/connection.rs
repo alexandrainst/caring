@@ -6,26 +6,32 @@ use std::{collections::BTreeMap, marker::PhantomData, net::SocketAddr, ops::Rang
 
 use futures::{future, SinkExt, StreamExt};
 use itertools::Itertools;
-use rand::{Rng, thread_rng};
-use tokio::{io::{AsyncWrite, AsyncRead, DuplexStream, ReadHalf, WriteHalf}, sync::{mpsc::Sender}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}}};
-use tokio_util::codec::{FramedRead, LengthDelimitedCodec, FramedWrite};
-
+use rand::{thread_rng, Rng};
+use tokio::{
+    io::{AsyncRead, AsyncWrite, DuplexStream, ReadHalf, WriteHalf},
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream,
+    },
+    sync::mpsc::Sender,
+};
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     input: tokio::sync::mpsc::Sender<Box<[u8]>>,
     reader: FramedRead<R, LengthDelimitedCodec>,
     task: tokio::task::JoinHandle<()>, // Not needed either, but could be.
-    phantom: PhantomData<W> // Not needed, but nice
+    phantom: PhantomData<W>,           // Not needed, but nice
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,W> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R, W> {
     /// Construct a new connection from a reader and writer
     /// Messages are serialized with bincode and length delimated.
     ///
     /// * `reader`: Reader to receive messages from
     /// * `writer`: Writer to send messages to
     pub fn new(reader: R, writer: W) -> Self {
-        let (input, mut outgoing) : (Sender<Box<[u8]>>, _) = tokio::sync::mpsc::channel(8);
+        let (input, mut outgoing): (Sender<Box<[u8]>>, _) = tokio::sync::mpsc::channel(8);
         let codec = LengthDelimitedCodec::new();
         let reader = FramedRead::new(reader, codec.clone());
         let mut writer = FramedWrite::new(writer, codec);
@@ -36,11 +42,16 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
                 writer.send(msg.into()).await.unwrap();
             }
         });
-        Connection {task, input, reader, phantom: PhantomData}
+        Connection {
+            task,
+            input,
+            reader,
+            phantom: PhantomData,
+        }
     }
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R,W> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Send a message without waiting
     ///
     /// * `msg`: Message to send
@@ -57,7 +68,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R,W> {
     }
 }
 
-
 impl Connection<OwnedReadHalf, OwnedWriteHalf> {
     /// New TCP-based connection from a stream
     ///
@@ -67,7 +77,6 @@ impl Connection<OwnedReadHalf, OwnedWriteHalf> {
         Self::new(reader, writer)
     }
 }
-
 
 pub type DuplexConnection = Connection<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;
@@ -94,7 +103,7 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
 }
 
 //TODO: struct representing a group of messages from a broadcast?
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// Broadcast a message to all other parties.
     ///
     /// Asymmetric, non-waiting
@@ -126,20 +135,23 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
         // TODO: Concurrency
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv();
-            async move {(i, msg.await)}
+            async move { (i, msg.await) }
         });
         let mut messages = future::join_all(messages).await;
         // Maybe we should pass the id with it?
         // Idk, it doesn't seem like there is a single good way for this.
-        messages.sort_unstable_by_key(|(i,_)| *i);
-        messages.into_iter().map(|(_,m)| m).collect()
+        messages.sort_unstable_by_key(|(i, _)| *i);
+        messages.into_iter().map(|(_, m)| m).collect()
     }
 
     /// Broadcast a message to all parties and await their messages
     /// Messages are ordered by their index.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T> where T: serde::Serialize + serde::de::DeserializeOwned {
+    pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
         self.broadcast(&msg);
         let mut messages = self.receive_all().await;
         messages.insert(self.index, msg);
@@ -150,7 +162,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
     /// Messages are ordered by their index.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Vec<T> where T: serde::Serialize + serde::de::DeserializeOwned {
+    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Vec<T>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
         let mine = msgs.remove(self.index);
         self.unicast(&msgs);
         let mut messages = self.receive_all().await;
@@ -166,33 +181,31 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
     /// * `rng`: Random number generator to use
     pub async fn resolute_ids(&mut self, rng: &mut impl Rng) {
         self.index = 0; // reset index.
-        let num : u64 = rng.gen();
+        let num: u64 = rng.gen();
         let results = self.symmetric_broadcast(num).await;
         // Enumerate the results, sort by the ballots and return the indices.
-        let mut results : Vec<_> = results.into_iter().enumerate().collect();
-        results.sort_unstable_by_key(|(_, n) : &(usize, u64)| *n);
+        let mut results: Vec<_> = results.into_iter().enumerate().collect();
+        results.sort_unstable_by_key(|(_, n): &(usize, u64)| *n);
         // Results have `n` items
-        let mut results : Vec<_> = results.into_iter().map(|(i,_)| i).collect();
+        let mut results: Vec<_> = results.into_iter().map(|(i, _)| i).collect();
 
         // Connections only have `n-1` items, since we do not connect to ourselves.
         // Thus we need to add ourselves.
         let connections = std::mem::take(&mut self.connections);
-        let mut connections : Vec<_> = connections.into_iter().map(Option::Some).collect();
+        let mut connections: Vec<_> = connections.into_iter().map(Option::Some).collect();
         connections.insert(0, None);
 
         // Remove our own position, remember we are at zero.
-        let (i,_) = results.iter().find_position(|&i| *i == 0).unwrap();
+        let (i, _) = results.iter().find_position(|&i| *i == 0).unwrap();
         results.remove(i); // remember we have removed it to not remove it twice.
         self.index = i;
 
         // Now we sort the connections by their index.
         let sorted = results.into_iter().map(|i| {
-            std::mem::take(&mut connections[i])
-                .expect("No element should be removed twice")
+            std::mem::take(&mut connections[i]).expect("No element should be removed twice")
         });
         // Add it back.
         self.connections.extend(sorted);
-
     }
 
     /// Returns a range for representing the participants.
@@ -215,10 +228,12 @@ impl InMemoryNetwork {
         let mut internet = BTreeMap::new();
         for i in 0..player_count {
             for j in 0..i {
-                if i == j {continue;}
+                if i == j {
+                    continue;
+                }
                 let (c1, c2) = Connection::in_memory();
-                internet.insert((i,j), c1);
-                internet.insert((j,i), c2);
+                internet.insert((i, j), c1);
+                internet.insert((j, i), c2);
             }
         }
 
@@ -226,11 +241,16 @@ impl InMemoryNetwork {
         for i in 0..player_count {
             let mut network = Vec::new();
             for j in 0..player_count {
-                if i == j { continue;}
-                let conn = internet.remove(&(i,j)).unwrap();
+                if i == j {
+                    continue;
+                }
+                let conn = internet.remove(&(i, j)).unwrap();
                 network.push(conn);
             }
-            let network = Network {connections: network, index: i};
+            let network = Network {
+                connections: network,
+                index: i,
+            };
             networks.push(network);
         }
         networks
@@ -250,11 +270,16 @@ impl TcpNetwork {
         let n = peers.len();
 
         println!("Connecting to parties");
-        let results = future::join_all(peers.iter()
-            .map(|addr| tokio::task::spawn(tokio::net::TcpStream::connect(*addr)))
-        ).await;
+        let results = future::join_all(
+            peers
+                .iter()
+                .map(|addr| tokio::task::spawn(tokio::net::TcpStream::connect(*addr))),
+        )
+        .await;
 
-        let mut parties : Vec<_> = results.into_iter().map(|x| x.unwrap())
+        let mut parties: Vec<_> = results
+            .into_iter()
+            .map(|x| x.unwrap())
             .filter_map(|x| x.ok())
             .collect();
 
@@ -262,24 +287,28 @@ impl TcpNetwork {
         println!("Accepting connections");
         let incoming = tokio::net::TcpListener::bind(me).await.unwrap();
         loop {
-            if parties.len() >= n { break };
+            if parties.len() >= n {
+                break;
+            };
             let (stream, _) = incoming.accept().await.unwrap();
             parties.push(stream);
         }
 
         let connections = parties.into_iter().map(Connection::from_tcp).collect();
-        let mut network = Self { connections, index: 0};
+        let mut network = Self {
+            connections,
+            index: 0,
+        };
         network.resolute_ids(&mut thread_rng()).await;
 
         network
     }
-
 }
 
 #[cfg(test)]
 mod test {
 
-    use std::{net::SocketAddrV4};
+    use std::net::SocketAddrV4;
 
     use tokio::net::{TcpListener, TcpStream};
 
@@ -296,7 +325,7 @@ mod test {
                 let mut network = p;
                 let msg = "Joy to the world!".to_owned();
                 network.broadcast(&msg);
-                let post : Vec<String> = network.receive_all().await;
+                let post: Vec<String> = network.receive_all().await;
                 for package in post {
                     assert_eq!(package, "Joy to the world!");
                 }
@@ -313,23 +342,21 @@ mod test {
             println!("[1] Message sent");
             conn.send(&"Buddy");
             println!("[1] Message sent");
-            let msg : Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await;
             println!("[1] Message received");
             assert_eq!(msg, "Greetings friend".into());
-
         });
         let h2 = tokio::spawn(async move {
             let mut conn = conn2;
-            let msg : Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await;
             println!("[2] Message received");
             assert_eq!(msg, "Hello".into());
-            let msg : Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await;
             println!("[2] Message received");
             assert_eq!(msg, "Buddy".into());
             conn.send(&"Greetings friend");
             println!("[2] Message sent");
         });
-
 
         h2.await.unwrap();
         h1.await.unwrap();
@@ -346,24 +373,22 @@ mod test {
             println!("[1] Message sent");
             conn.send(&"Buddy");
             println!("[1] Message sent");
-            let msg : Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await;
             println!("[1] Message received");
             assert_eq!(msg, "Greetings friend".into());
-
         });
         let h2 = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut conn = Connection::from_tcp(stream);
-            let msg : Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await;
             println!("[2] Message received");
             assert_eq!(msg, "Hello".into());
-            let msg : Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await;
             println!("[2] Message received");
             assert_eq!(msg, "Buddy".into());
             conn.send(&"Greetings friend");
             println!("[2] Message sent");
         });
-
 
         h2.await.unwrap();
         h1.await.unwrap();
