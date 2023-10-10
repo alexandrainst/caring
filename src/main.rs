@@ -9,8 +9,8 @@ use std::{env, net::SocketAddr};
 
 
 
-use curve25519_dalek::Scalar;
-use engine::Engine;
+
+
 use rand::Rng;
 
 use crate::connection::TcpNetwork;

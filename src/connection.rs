@@ -2,7 +2,7 @@
 //! This 'medium' can be anything that implements `AsyncRead`/`AsyncWrite`.
 //! There is built-in support for TLS and in-memory duplex-based connections.
 
-use std::{collections::BTreeMap, marker::PhantomData, net::SocketAddr, ops::Range, sync::Arc};
+use std::{collections::BTreeMap, marker::PhantomData, net::SocketAddr, ops::Range};
 
 use futures::{future, SinkExt, StreamExt};
 use itertools::Itertools;
@@ -279,9 +279,9 @@ impl TcpNetwork {
 #[cfg(test)]
 mod test {
 
-    use std::{net::SocketAddrV4, time::Duration};
+    use std::{net::SocketAddrV4};
 
-    use tokio::net::{TcpSocket, TcpListener, TcpStream};
+    use tokio::net::{TcpListener, TcpStream};
 
     use super::*;
 
