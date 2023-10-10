@@ -3,7 +3,7 @@ mod element;
 pub mod shamir;
 pub mod vss;
 pub mod engine;
-mod connection;
+pub mod connection;
 
 use std::{env, net::SocketAddr};
 
@@ -17,24 +17,18 @@ use crate::connection::TcpNetwork;
 
 #[tokio::main]
 async fn main() {
-
-    // #[cfg(tokio_unstable)]
-    // console_subscriber::init();
-
     // Argument parsing
     let mut args = env::args();
     args.next();
     let me: String = args.next().unwrap();
     let me : SocketAddr = me.parse().unwrap();
     let peers : Vec<SocketAddr> = args.map(|s| s.parse().unwrap()).collect();
-    // Construct the engine
-    let mut network: TcpNetwork = TcpNetwork::connect(me, &peers).await;
-    let mut rng = rand::thread_rng();
-    let num : u32 = rng.gen_range(1..100);
-    println!("My id is {}", network.index);
-    println!("My number for today is: {num}");
 
-    let start = std::time::Instant::now();
+    // Setup TcpNetwork.
+    let mut network: TcpNetwork = TcpNetwork::connect(me, &peers).await;
+    println!("My id is {}", network.index);
+
+    // Just sending some messages.
     println!("Now I am going to talk with my friends!");
     network.broadcast(&"Hello!");
     let res : Vec<Box<str>> = network.receive_all().await;
@@ -44,6 +38,11 @@ async fn main() {
     }
 
     println!("Let's try some MPC");
+    let start = std::time::Instant::now();
+    let mut rng = rand::thread_rng();
+    let num : u32 = rng.gen_range(1..100);
+    println!("My number for today is: {num}");
+
     let num = curve25519_dalek::Scalar::from(num);
     let parties : Vec<_> = network.participants()
         .map(|id| (id + 1))

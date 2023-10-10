@@ -1,3 +1,7 @@
+//! Module for doing arbitrary communication in 'some' medium.
+//! This 'medium' can be anything that implements `AsyncRead`/`AsyncWrite`.
+//! There is built-in support for TLS and in-memory duplex-based connections.
+
 use std::{collections::BTreeMap, marker::PhantomData, net::SocketAddr, ops::Range};
 
 use futures::{future, SinkExt, StreamExt};
@@ -23,6 +27,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Drop for Connection<R,W> {
 
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,W> {
+    /// Construct a new connection from a reader and writer
+    /// Messages are serialized with bincode and length delimated.
+    ///
+    /// * `reader`: Reader to receive messages from
+    /// * `writer`: Writer to send messages to
     pub fn new(reader: R, writer: W) -> Self {
         let (input, mut outgoing) : (Sender<Box<[u8]>>, _) = tokio::sync::mpsc::channel(8);
         let codec = LengthDelimitedCodec::new();
@@ -39,11 +48,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R,W> {
+    /// Send a message without waiting
+    ///
+    /// * `msg`: Message to send
     pub fn send(&self, msg: &impl serde::Serialize) {
         let msg = bincode::serialize(msg).unwrap();
         self.input.try_send(msg.into()).unwrap();
     }
 
+    /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> T {
         let buf = self.reader.next().await.unwrap().unwrap();
         let buf = std::io::Cursor::new(buf);
@@ -53,6 +66,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R,W> {
 
 
 impl Connection<OwnedReadHalf, OwnedWriteHalf> {
+    /// New TCP-based connection from a stream
+    ///
+    /// * `stream`: TCP stream to use
     pub fn from_tcp(stream: TcpStream) -> Self {
         let (reader, writer) = stream.into_split();
         Self::new(reader, writer)
@@ -64,6 +80,7 @@ pub type DuplexConnection = Connection<ReadHalf<DuplexStream>, WriteHalf<DuplexS
 pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;
 
 impl DuplexConnection {
+    /// Construct a duplex/in-memory connection pair
     pub fn in_memory() -> (Self, Self) {
         let (s1, s2) = tokio::io::duplex(64);
 
@@ -74,26 +91,44 @@ impl DuplexConnection {
     }
 }
 
+/// Peer-2-peer network
+///
+/// * `connections`: Connections for each peer, sorted by their index.
+/// * `index`: My own index
 pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + Unpin> {
-    // connections should be sorted after their index.
     pub connections: Vec<Connection<R, W>>,
     pub index: usize,
 }
 
 //TODO: struct representing a group of messages from a broadcast?
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
+    /// Broadcast a message to all other parties.
+    ///
+    /// Asymmetric, non-waiting
+    ///
+    /// * `msg`: Message to send
     pub fn broadcast(&mut self, msg: &impl serde::Serialize) {
         for conn in &self.connections {
             conn.send(msg);
         }
     }
 
+    /// Unicast messages to each party
+    ///
+    /// Asymmetric, non-waiting
+    ///
+    /// * `msgs`: Messages to send
     pub fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
         for (conn, msg) in self.connections.iter().zip(msgs.iter()) {
             conn.send(msg);
         }
     }
 
+    /// Receive a message for each party.
+    ///
+    /// Asymmetric, waiting
+    ///
+    /// Returns: A list sorted by the connections (skipping yourself)
     pub async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
         // TODO: Concurrency
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
@@ -107,6 +142,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
         messages.into_iter().map(|(_,m)| m).collect()
     }
 
+    /// Broadcast a message to all parties and await their messages
+    /// Messages are ordered by their index.
+    ///
+    /// * `msg`: message to send and receive
     pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T> where T: serde::Serialize + serde::de::DeserializeOwned {
         self.broadcast(&msg);
         let mut messages = self.receive_all().await;
@@ -114,6 +153,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
         messages
     }
 
+    /// Unicast a message to each party and await their messages
+    /// Messages are ordered by their index.
+    ///
+    /// * `msg`: message to send and receive
     pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Vec<T> where T: serde::Serialize + serde::de::DeserializeOwned {
         let mine = msgs.remove(self.index);
         self.unicast(&msgs);
@@ -122,6 +165,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
         messages
     }
 
+    /// Resolute IDs
+    ///
+    /// Each party picks a random number then broadcasts it.
+    /// We then (all) sort the connection list by the numbers picked.
+    ///
+    /// * `rng`: Random number generator to use
     pub async fn resolute_ids(&mut self, rng: &mut impl Rng) {
         self.index = 0; // reset index.
         let num : u64 = rng.gen();
@@ -153,6 +202,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
 
     }
 
+    /// Returns a range for representing the participants.
     pub fn participants(&self) -> Range<u32> {
         let n = self.connections.len() as u32;
         let n = n + 1; // We need to count ourselves.
@@ -162,7 +212,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
 
 pub type InMemoryNetwork = Network<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 
-impl Network<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>> {
+impl InMemoryNetwork {
+    /// Construct a list of networks for each 'peer' in the peer-2-peer network.
+    ///
+    /// * `player_count`: Size of the network in terms of peers.
     fn in_memory(player_count: usize) -> Vec<Self> {
         // This could probably be created nicer,
         // but upper-triangular matrices are hard to construct.
@@ -194,6 +247,12 @@ impl Network<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>> {
 pub type TcpNetwork = Network<OwnedReadHalf, OwnedWriteHalf>;
 
 impl TcpNetwork {
+    /// Construct a TCP-based network by opening a socket and connecting to peers.
+    /// If peers cannot be connected to, we wait until we wait until they have
+    /// connected to us.
+    ///
+    /// * `me`: Socket address to open to
+    /// * `peers`: Socket addresses of other peers
     pub async fn connect(me: SocketAddr, peers: &[SocketAddr]) -> Self {
         let n = peers.len();
 
