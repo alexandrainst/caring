@@ -2,7 +2,7 @@
 //! This 'medium' can be anything that implements `AsyncRead`/`AsyncWrite`.
 //! There is built-in support for TLS and in-memory duplex-based connections.
 
-use std::{collections::BTreeMap, marker::PhantomData, net::SocketAddr, ops::Range};
+use std::{collections::BTreeMap, marker::PhantomData, net::SocketAddr, ops::Range, sync::Arc};
 
 use futures::{future, SinkExt, StreamExt};
 use itertools::Itertools;
@@ -18,14 +18,6 @@ pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     phantom: PhantomData<W> // Not needed, but nice
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Drop for Connection<R,W> {
-    fn drop(&mut self) {
-        // Not sure if this is nesscary, but it makes sense.
-        self.task.abort();
-    }
-}
-
-
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,W> {
     /// Construct a new connection from a reader and writer
     /// Messages are serialized with bincode and length delimated.
@@ -39,6 +31,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
         let mut writer = FramedWrite::new(writer, codec);
 
         let task = tokio::spawn(async move {
+            // This self-drops after the sender is gone.
             while let Some(msg) = outgoing.recv().await {
                 writer.send(msg.into()).await.unwrap();
             }
@@ -87,7 +80,7 @@ impl DuplexConnection {
         let (r1, w1) = tokio::io::split(s1);
         let (r2, w2) = tokio::io::split(s2);
 
-        (Self::new(r1, w2), Self::new(r2, w1))
+        (Self::new(r1, w1), Self::new(r2, w2))
     }
 }
 
@@ -216,7 +209,7 @@ impl InMemoryNetwork {
     /// Construct a list of networks for each 'peer' in the peer-2-peer network.
     ///
     /// * `player_count`: Size of the network in terms of peers.
-    fn in_memory(player_count: usize) -> Vec<Self> {
+    pub fn in_memory(player_count: usize) -> Vec<Self> {
         // This could probably be created nicer,
         // but upper-triangular matrices are hard to construct.
         let mut internet = BTreeMap::new();
@@ -288,7 +281,6 @@ mod test {
 
     use std::{net::SocketAddrV4, time::Duration};
 
-    use curve25519_dalek::Scalar;
     use tokio::net::{TcpSocket, TcpListener, TcpStream};
 
     use super::*;
@@ -313,6 +305,37 @@ mod test {
     }
 
     #[tokio::test]
+    async fn in_memory() {
+        let (conn1, conn2) = DuplexConnection::in_memory();
+        let h1 = tokio::spawn(async move {
+            let mut conn = conn1;
+            conn.send(&"Hello");
+            println!("[1] Message sent");
+            conn.send(&"Buddy");
+            println!("[1] Message sent");
+            let msg : Box<str> = conn.recv().await;
+            println!("[1] Message received");
+            assert_eq!(msg, "Greetings friend".into());
+
+        });
+        let h2 = tokio::spawn(async move {
+            let mut conn = conn2;
+            let msg : Box<str> = conn.recv().await;
+            println!("[2] Message received");
+            assert_eq!(msg, "Hello".into());
+            let msg : Box<str> = conn.recv().await;
+            println!("[2] Message received");
+            assert_eq!(msg, "Buddy".into());
+            conn.send(&"Greetings friend");
+            println!("[2] Message sent");
+        });
+
+
+        h2.await.unwrap();
+        h1.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn tcp() {
         let addr = "127.0.0.1:4321".parse::<SocketAddrV4>().unwrap();
         let listener = TcpListener::bind(addr).await.unwrap();
@@ -324,7 +347,7 @@ mod test {
             conn.send(&"Buddy");
             println!("[1] Message sent");
             let msg : Box<str> = conn.recv().await;
-            println!("[1] Messge received");
+            println!("[1] Message received");
             assert_eq!(msg, "Greetings friend".into());
 
         });

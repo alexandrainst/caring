@@ -58,6 +58,13 @@ impl<F: Field> ops::Sub for VerifiableShare<F> {
     }
 }
 
+
+impl <F: Field> std::iter::Sum for VerifiableShare<F> {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        VerifiableShare{ share: iter.map(|s| s.share).sum() }
+    }
+}
+
 pub struct Polynomial<F>(Box<[F]>);
 
 impl<F: Group> ops::Add for Polynomial<F> {
