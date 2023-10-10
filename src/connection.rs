@@ -1,16 +1,26 @@
-use std::{collections::BTreeMap, marker::PhantomData, io::Cursor, sync::{Arc, Mutex, RwLock}};
+use std::{collections::BTreeMap, marker::PhantomData, net::SocketAddr, ops::Range};
 
 use futures::{future, SinkExt, StreamExt};
-use tokio::{io::{AsyncReadExt, AsyncWrite, AsyncRead, DuplexStream, ReadHalf, WriteHalf}, sync::{mpsc::Sender}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}}};
+use itertools::Itertools;
+use rand::{Rng, thread_rng};
+use tokio::{io::{AsyncWrite, AsyncRead, DuplexStream, ReadHalf, WriteHalf}, sync::{mpsc::Sender}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}}};
 use tokio_util::codec::{FramedRead, LengthDelimitedCodec, FramedWrite};
 
 
 pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
-    task: tokio::task::JoinHandle<()>,
     input: tokio::sync::mpsc::Sender<Box<[u8]>>,
     reader: FramedRead<R, LengthDelimitedCodec>,
+    task: tokio::task::JoinHandle<()>, // Not needed either, but could be.
     phantom: PhantomData<W> // Not needed, but nice
 }
+
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Drop for Connection<R,W> {
+    fn drop(&mut self) {
+        // Not sure if this is nesscary, but it makes sense.
+        self.task.abort();
+    }
+}
+
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,W> {
     pub fn new(reader: R, writer: W) -> Self {
@@ -50,7 +60,10 @@ impl Connection<OwnedReadHalf, OwnedWriteHalf> {
 }
 
 
-impl Connection<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>> {
+pub type DuplexConnection = Connection<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
+pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;
+
+impl DuplexConnection {
     pub fn in_memory() -> (Self, Self) {
         let (s1, s2) = tokio::io::duplex(64);
 
@@ -69,8 +82,14 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
 
 //TODO: struct representing a group of messages from a broadcast?
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
-    pub async fn broadcast(&mut self, msg: &impl serde::Serialize) {
+    pub fn broadcast(&mut self, msg: &impl serde::Serialize) {
         for conn in &self.connections {
+            conn.send(msg);
+        }
+    }
+
+    pub fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
+        for (conn, msg) in self.connections.iter().zip(msgs.iter()) {
             conn.send(msg);
         }
     }
@@ -89,12 +108,60 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R,W> {
     }
 
     pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T> where T: serde::Serialize + serde::de::DeserializeOwned {
-        self.broadcast(&msg).await;
+        self.broadcast(&msg);
         let mut messages = self.receive_all().await;
         messages.insert(self.index, msg);
         messages
     }
+
+    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Vec<T> where T: serde::Serialize + serde::de::DeserializeOwned {
+        let mine = msgs.remove(self.index);
+        self.unicast(&msgs);
+        let mut messages = self.receive_all().await;
+        messages.insert(self.index, mine);
+        messages
+    }
+
+    pub async fn resolute_ids(&mut self, rng: &mut impl Rng) {
+        self.index = 0; // reset index.
+        let num : u64 = rng.gen();
+        let results = self.symmetric_broadcast(num).await;
+        // Enumerate the results, sort by the ballots and return the indices.
+        let mut results : Vec<_> = results.into_iter().enumerate().collect();
+        results.sort_unstable_by_key(|(_, n) : &(usize, u64)| *n);
+        // Results have `n` items
+        let mut results : Vec<_> = results.into_iter().map(|(i,_)| i).collect();
+
+        // Connections only have `n-1` items, since we do not connect to ourselves.
+        // Thus we need to add ourselves.
+        let connections = std::mem::take(&mut self.connections);
+        let mut connections : Vec<_> = connections.into_iter().map(Option::Some).collect();
+        connections.insert(0, None);
+
+        // Remove our own position, remember we are at zero.
+        let (i,_) = results.iter().find_position(|&i| *i == 0).unwrap();
+        results.remove(i); // remember we have removed it to not remove it twice.
+        self.index = i;
+
+        // Now we sort the connections by their index.
+        let sorted = results.into_iter().map(|i| {
+            std::mem::take(&mut connections[i])
+                .expect("No element should be removed twice")
+        });
+        // Add it back.
+        self.connections.extend(sorted);
+
+    }
+
+    pub fn participants(&self) -> Range<u32> {
+        let n = self.connections.len() as u32;
+        let n = n + 1; // We need to count ourselves.
+        0..n
+    }
 }
+
+pub type InMemoryNetwork = Network<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
+
 impl Network<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>> {
     fn in_memory(player_count: usize) -> Vec<Self> {
         // This could probably be created nicer,
@@ -124,6 +191,39 @@ impl Network<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>> {
     }
 }
 
+pub type TcpNetwork = Network<OwnedReadHalf, OwnedWriteHalf>;
+
+impl TcpNetwork {
+    pub async fn connect(me: SocketAddr, peers: &[SocketAddr]) -> Self {
+        let n = peers.len();
+
+        println!("Connecting to parties");
+        let results = future::join_all(peers.iter()
+            .map(|addr| tokio::task::spawn(tokio::net::TcpStream::connect(*addr)))
+        ).await;
+
+        let mut parties : Vec<_> = results.into_iter().map(|x| x.unwrap())
+            .filter_map(|x| x.ok())
+            .collect();
+
+        // If we are not able to connect to some, they will connect to us.
+        println!("Accepting connections");
+        let incoming = tokio::net::TcpListener::bind(me).await.unwrap();
+        loop {
+            if parties.len() >= n { break };
+            let (stream, _) = incoming.accept().await.unwrap();
+            parties.push(stream);
+        }
+
+        let connections = parties.into_iter().map(Connection::from_tcp).collect();
+        let mut network = Self { connections, index: 0};
+        network.resolute_ids(&mut thread_rng()).await;
+
+        network
+    }
+
+}
+
 #[cfg(test)]
 mod test {
 
@@ -134,37 +234,17 @@ mod test {
 
     use super::*;
 
-    // #[tokio::test]
-    // async fn send_recv() {
-    //     let mut conn = Connection::loopback();
-
-    //     conn.send(&"hello").await;
-    //     let msg : Box<str> = conn.recv().await;
-    //     let msg : &str = &msg;
-    //     assert_eq!(msg, "hello");
-    // }
-
-    // #[tokio::test]
-    // async fn send_recv_weird() {
-    //     let mut conn = Connection::loopback();
-
-    //     use curve25519_dalek::Scalar;
-    //     let a = Scalar::from(32u32);
-    //     conn.send(&a).await;
-    //     let b : Scalar = conn.recv().await;
-    //     assert_eq!(a, b);
-    // }
-
     #[tokio::test]
     async fn network() {
         println!("Spawning network!");
-        let players = Network::in_memory(1000);
+        let players = Network::in_memory(100);
+        // remember it's n^n messages, one for each party, to each party.
         println!("Done!");
         for p in players {
             tokio::spawn(async move {
                 let mut network = p;
                 let msg = "Joy to the world!".to_owned();
-                network.broadcast(&msg).await;
+                network.broadcast(&msg);
                 let post : Vec<String> = network.receive_all().await;
                 for package in post {
                     assert_eq!(package, "Joy to the world!");

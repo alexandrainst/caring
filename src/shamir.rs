@@ -71,6 +71,20 @@ impl<F: Field> std::ops::Add<F> for Share<F> {
     }
 }
 
+impl <F: Field> std::iter::Sum for Share<F> {
+    fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+        let Some(Share{x,y}) = iter.next() else {
+            return Share{x: F::ZERO, y: F::ZERO};
+        };
+        let mut acc = y;
+        for share in iter {
+            assert_eq!(share.x, x);
+            acc += share.y;
+        }
+        Share{x, y: acc}
+    }
+}
+
 impl<F: Field> std::ops::Mul<F> for Share<F> {
     type Output = Self;
 
