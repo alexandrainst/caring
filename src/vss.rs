@@ -97,7 +97,7 @@ where
     // 3. We need to provide commitments/macs to the corresponding shares.
     // Then pack these macs with the shares and output them.
 
-    // there are some code-duplication with `shamri.rs` currently.
+    // there are some code-duplication with `shamir.rs` currently.
     // that will probably be fixed.
 
     // Sample random t-degree polynomial

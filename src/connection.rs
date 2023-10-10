@@ -1,6 +1,6 @@
 //! Module for doing arbitrary communication in 'some' medium.
 //! This 'medium' can be anything that implements `AsyncRead`/`AsyncWrite`.
-//! There is built-in support for TLS and in-memory duplex-based connections.
+//! There is built-in support for TCP and in-memory duplex-based connections.
 
 use std::{collections::BTreeMap, marker::PhantomData, net::SocketAddr, ops::Range};
 
@@ -20,7 +20,7 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     input: tokio::sync::mpsc::Sender<Box<[u8]>>,
     reader: FramedRead<R, LengthDelimitedCodec>,
-    task: tokio::task::JoinHandle<()>, // Not needed either, but could be.
+    // task: tokio::task::JoinHandle<()>,
     phantom: PhantomData<W>,           // Not needed, but nice
 }
 
@@ -36,14 +36,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
         let reader = FramedRead::new(reader, codec.clone());
         let mut writer = FramedWrite::new(writer, codec);
 
-        let task = tokio::spawn(async move {
+        let _task = tokio::spawn(async move {
             // This self-drops after the sender is gone.
             while let Some(msg) = outgoing.recv().await {
                 writer.send(msg.into()).await.unwrap();
             }
         });
         Connection {
-            task,
+            // task,
             input,
             reader,
             phantom: PhantomData,
@@ -66,11 +66,13 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
         let buf = self.reader.next().await.unwrap().unwrap();
         let buf = std::io::Cursor::new(buf);
         // TODO: Handle bad deserialization (assume malicious?)
+        // We should probably use a Result<>
         bincode::deserialize_from(buf).unwrap()
     }
 }
 
-impl Connection<OwnedReadHalf, OwnedWriteHalf> {
+pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;
+impl TcpConnection {
     /// New TCP-based connection from a stream
     ///
     /// * `stream`: TCP stream to use
@@ -81,8 +83,6 @@ impl Connection<OwnedReadHalf, OwnedWriteHalf> {
 }
 
 pub type DuplexConnection = Connection<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
-pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;
-
 impl DuplexConnection {
     /// Construct a duplex/in-memory connection pair
     pub fn in_memory() -> (Self, Self) {
@@ -104,7 +104,7 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
     pub index: usize,
 }
 
-//TODO: struct representing a group of messages from a broadcast?
+// TODO: Do timeouts?
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// Broadcast a message to all other parties.
     ///
@@ -118,6 +118,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     }
 
     /// Unicast messages to each party
+    ///
+    /// Messages are supposed to be in order, meaning message `i`
+    /// will be send to party `i`, skipping your own index.
     ///
     /// Asymmetric, non-waiting
     ///
@@ -161,7 +164,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     }
 
     /// Unicast a message to each party and await their messages
-    /// Messages are ordered by their index.
+    /// Messages are supposed to be in order, meaning message `i`
+    /// will be send to party `i`.
     ///
     /// * `msg`: message to send and receive
     pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Vec<T>
@@ -296,7 +300,16 @@ impl TcpNetwork {
             parties.push(stream);
         }
 
-        let connections = parties.into_iter().map(Connection::from_tcp).collect();
+        // Not sure if a good idea?
+        // Fresco does it
+        for stream in &mut parties {
+            stream.set_nodelay(true).unwrap();
+        }
+
+        let connections = parties.into_iter()
+            .map(Connection::from_tcp).collect();
+
+
         let mut network = Self {
             connections,
             index: 0,
