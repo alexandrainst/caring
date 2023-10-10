@@ -62,8 +62,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
 
     /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> T {
+        // TODO: Handle unstable connections
         let buf = self.reader.next().await.unwrap().unwrap();
         let buf = std::io::Cursor::new(buf);
+        // TODO: Handle bad deserialization (assume malicious?)
         bincode::deserialize_from(buf).unwrap()
     }
 }
