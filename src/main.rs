@@ -4,10 +4,11 @@ mod element;
 pub mod engine;
 pub mod shamir;
 pub mod vss;
+//pub mod theater;
 
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, sync::Mutex};
 
-use rand::Rng;
+use rand::{Rng, thread_rng};
 
 use crate::connection::TcpNetwork;
 

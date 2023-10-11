@@ -145,6 +145,7 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
     shares
 }
 
+
 /// Reconstruct or open shares
 ///
 /// * `shares`: shares to be combined into an open value

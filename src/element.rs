@@ -2,7 +2,7 @@
 //! Here we have a prime field that is very close to 2^32.
 use ff::PrimeField;
 
-#[derive(PrimeField)]
+#[derive(PrimeField, serde::Serialize, serde::Deserialize)]
 #[PrimeFieldModulus = "4294967291"]
 #[PrimeFieldGenerator = "2"]
 #[PrimeFieldReprEndianness = "little"]
