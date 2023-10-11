@@ -1,5 +1,6 @@
 use std::{sync::Mutex, net::{SocketAddrV4, SocketAddr}};
 
+use fixed::traits::Fixed;
 use pyo3::{prelude::*, types::{PyDict, PyTuple}};
 
 use caring::{shamir, connection::TcpNetwork};
@@ -11,11 +12,14 @@ struct AdderEngine {
 }
 
 static ENGINE : Mutex<Option<Box<AdderEngine>>> = Mutex::new(None);
-fn mpc_sum(num: u32) -> u32 {
+fn mpc_sum(num: f64) -> f64 {
     let mut engine = ENGINE.lock().unwrap();
     let engine = engine.as_mut().unwrap().as_mut();
     let AdderEngine { network, runtime } = engine;
-    runtime.block_on(async {
+
+    type Fix = fixed::FixedU64<32>;
+    let num = Fix::from_num(num).to_bits();
+    let res = runtime.block_on(async {
         let num = curve25519_dalek::Scalar::from(num);
         
         // construct
@@ -37,9 +41,12 @@ fn mpc_sum(num: u32) -> u32 {
 
         // reconstruct
         let res = shamir::reconstruct(&open_shares);
-        let res: [u8; 4] = res.as_bytes()[0..4].try_into().unwrap();
-        u32::from_le_bytes(res)
-    })
+        let res: [u8; 8] = res.as_bytes()[0..8].try_into().unwrap();
+        u64::from_le_bytes(res)
+    });
+
+    let res = Fix::from_bits(res);
+    res.to_num()
 }
 
 /// Formats the sum of two numbers as string.
@@ -67,7 +74,7 @@ fn setup(my_addr: &str, others: &PyTuple) -> PyResult<()> {
 }
 
 #[pyfunction]
-fn sum(a: u32) -> u32 {
+fn sum(a: f64) -> f64 {
     mpc_sum(a)
 }
 
