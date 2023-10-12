@@ -1,27 +1,27 @@
-use std::{sync::Mutex, net::{SocketAddrV4, SocketAddr}};
-
-use fixed::traits::Fixed;
-use pyo3::{prelude::*, types::{PyDict, PyTuple}};
+use std::{sync::Mutex, net::SocketAddr};
+use pyo3::{prelude::*, types::PyTuple};
 
 use caring::{shamir, connection::TcpNetwork};
 use rand::thread_rng;
 
 struct AdderEngine {
     network: TcpNetwork,
-    runtime: tokio::runtime::Runtime
+    runtime: tokio::runtime::Runtime,
+    threshold: u64
 }
 
 static ENGINE : Mutex<Option<Box<AdderEngine>>> = Mutex::new(None);
 fn mpc_sum(num: f64) -> f64 {
     let mut engine = ENGINE.lock().unwrap();
     let engine = engine.as_mut().unwrap().as_mut();
-    let AdderEngine { network, runtime } = engine;
+    let AdderEngine { network, runtime, threshold } = engine;
 
-    type Fix = fixed::FixedU64<32>;
+
+    type Fix = fixed::FixedU128<64>;
     let num = Fix::from_num(num).to_bits();
     let res = runtime.block_on(async {
         let num = curve25519_dalek::Scalar::from(num);
-        
+
         // construct
         let parties: Vec<_> = network
             .participants()
@@ -30,7 +30,7 @@ fn mpc_sum(num: f64) -> f64 {
             .collect();
 
         let mut rng = thread_rng();
-        let shares = shamir::share::<curve25519_dalek::Scalar>(num, &parties, 2, &mut rng);
+        let shares = shamir::share::<curve25519_dalek::Scalar>(num, &parties, *threshold, &mut rng);
 
         // share my shares.
         let shares = network.symmetric_unicast(shares).await;
@@ -41,20 +41,15 @@ fn mpc_sum(num: f64) -> f64 {
 
         // reconstruct
         let res = shamir::reconstruct(&open_shares);
-        let res: [u8; 8] = res.as_bytes()[0..8].try_into().unwrap();
-        u64::from_le_bytes(res)
+        let res: [u8; 16] = res.as_bytes()[0..16].try_into().unwrap();
+        u128::from_le_bytes(res)
     });
 
     let res = Fix::from_bits(res);
     res.to_num()
 }
 
-/// Formats the sum of two numbers as string.
-#[pyfunction]
-fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-    Ok((a + b).to_string())
-}
-
+/// Setup a MPC addition engine connected to the given sockets.
 #[pyfunction]
 #[pyo3(signature = (my_addr, *others))]
 fn setup(my_addr: &str, others: &PyTuple) -> PyResult<()> {
@@ -63,19 +58,27 @@ fn setup(my_addr: &str, others: &PyTuple) -> PyResult<()> {
         .map(|s: &str| s.parse().unwrap())
         .collect();
 
+    let threshold = ((others.len() + 1) / 2 + 1) as u64; 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build().unwrap();
     let network = TcpNetwork::connect(my_addr, &others);
     let network = runtime.block_on(network);
-    let engine =  AdderEngine { network, runtime };
+    let engine =  AdderEngine { network, runtime, threshold };
     ENGINE.lock().unwrap().replace(Box::new(engine));
     Ok(())
 }
 
+/// Run a sum procedure in which each party supplies a double floating point
 #[pyfunction]
 fn sum(a: f64) -> f64 {
     mpc_sum(a)
+}
+
+/// Takedown the MPC engine, freeing the memory and dropping the connections
+#[pyfunction]
+fn takedown() {
+    ENGINE.lock().unwrap().as_mut().take();
 }
 
 /// A Python module implemented in Rust.
@@ -83,5 +86,6 @@ fn sum(a: f64) -> f64 {
 fn pycare(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_function(wrap_pyfunction!(sum, m)?)?;
+    m.add_function(wrap_pyfunction!(takedown, m)?)?;
     Ok(())
 }

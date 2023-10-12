@@ -3,12 +3,20 @@
 //! The scheme can be instansiated with any field F and a corresponding group G
 //! for which there exists a mapping F -> G using a generator `g`.
 //! It should also be noted that the discrete log problem in G should be *hard*.
+//!
+//! So we probably could use a 'automated' way to verify shares received.
+//! Now, we never need to verify our own shares, and the easy way is just to do it
+//! before each operation and reconstruction. However, these verifications could be done eagerly
+//! when receiving a share, parallel to everything else, and just 'awaited' before sending
+//! anything based on that.
+//!
 use std::{iter, ops};
 
 use crate::shamir::{self, Share};
 use ff::Field;
 use group::Group;
 use rand::RngCore;
+
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VerifiableShare<F: Field> {

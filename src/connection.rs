@@ -275,7 +275,7 @@ impl TcpNetwork {
     pub async fn connect(me: SocketAddr, peers: &[SocketAddr]) -> Self {
         let n = peers.len();
 
-        println!("Connecting to parties");
+        // Connecting to parties
         let results = future::join_all(
             peers
                 .iter()
@@ -290,7 +290,7 @@ impl TcpNetwork {
             .collect();
 
         // If we are not able to connect to some, they will connect to us.
-        println!("Accepting connections");
+        // Accepting connections
         let incoming = tokio::net::TcpListener::bind(me).await.unwrap();
         loop {
             if parties.len() >= n {
