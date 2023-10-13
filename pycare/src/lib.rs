@@ -10,24 +10,28 @@ struct AdderEngine {
     threshold: u64
 }
 
+type SignedFix = fixed::FixedI128<0>;
+fn to_offset(num: f64) -> u128 {
+    let num : i128 = SignedFix::from_num(num).to_bits(); // convert to signed fixed point
+    // Okay this a some voodoo why this 'just works', but the idea is that
+    // twos complement is actually just an offset from the max value.
+    // https://en.wikipedia.org/wiki/Offset_binary
+    num as u128
+}
+
+fn from_offset(num: u128) -> f64 {
+    // Same applies as above
+    let num = SignedFix::from_bits(num as i128);
+    num.to_num()
+}
+
 static ENGINE : Mutex<Option<Box<AdderEngine>>> = Mutex::new(None);
 fn mpc_sum(num: f64) -> f64 {
     let mut engine = ENGINE.lock().unwrap();
     let engine = engine.as_mut().unwrap().as_mut();
     let AdderEngine { network, runtime, threshold } = engine;
+    let num = to_offset(num);
 
-    assert!(num > 0.0, "Negative numbers are currently not supported");
-    // TODO: Support negative numbers?
-    // The sign-bit is not wellpreserbed when doing MPC in a finite field.
-    // As such we need another method of representing the negative numbers.
-    // A method could be to 'shift' all the numbers with 2^n, where
-    // we have 'n' negative numbers. To translate between back-and-forth we
-    // simply add/subtract the global offset.
-    // The conseqeunce of this, is we lose a lot of precision, since we now only have
-    // 128 - n bits to work with. Thus if the 'need' to have negative numbers isn't there
-    // we should probably not provide it.
-    type Fix = fixed::FixedU128<64>;
-    let num = Fix::from_num(num).to_bits();
     let res = runtime.block_on(async {
         let num = curve25519_dalek::Scalar::from(num);
 
@@ -55,9 +59,7 @@ fn mpc_sum(num: f64) -> f64 {
         let res: [u8; 16] = res.as_bytes()[0..16].try_into().unwrap();
         u128::from_le_bytes(res)
     });
-
-    let res = Fix::from_bits(res);
-    res.to_num()
+    from_offset(res)
 }
 
 /// Setup a MPC addition engine connected to the given sockets.
