@@ -25,6 +25,11 @@ pub struct VerifiableShare<F: Field> {
     // we only need the polynomial.
     // mac: Mac<G>,
 }
+// Consider adding the polynomial here for ease of use,
+// since they are always coupled. Note however that we
+// probably don't want to perform clones of the polynomial
+// when generating shares, sooooo we probably need to use
+// something like `Cow`, `Rc`, `Arc` or the like.
 
 impl<F: Field> VerifiableShare<F> {
     pub fn verify<G>(&self, poly: &Polynomial<G>) -> bool
@@ -73,7 +78,8 @@ impl<F: Field> std::iter::Sum for VerifiableShare<F> {
     }
 }
 
-pub struct Polynomial<F>(Box<[F]>);
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct Polynomial<G : Group>(Box<[G]>);
 
 impl<F: Group> ops::Add for Polynomial<F> {
     type Output = Self;
@@ -87,6 +93,16 @@ impl<F: Group> ops::Add for Polynomial<F> {
             .collect();
 
         Self(res)
+    }
+}
+
+impl<F: Group> std::iter::Sum for Polynomial<F> {
+    fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+        let mut acc = iter.next().expect("Can't sum zero polynomials");
+        for poly in iter {
+            acc = acc + poly;
+        }
+        acc
     }
 }
 
@@ -148,13 +164,17 @@ where
 
 pub fn reconstruct<F: Field, G: Group>(
     shares: &[VerifiableShare<F>],
-    _poly: &Polynomial<G>,
-) -> Option<F> {
+    poly: &Polynomial<G>,
+) -> Option<F>
+where G: Group + std::ops::Mul<F, Output = G> {
     // let (shares, macs) : (Vec<_>, Vec<_>) = shares.iter().map(|s| (s.share)).unzip();
+    for share in shares {
+        if !share.verify(poly) {
+            return None;
+        }
+    }
     let shares: Vec<_> = shares.iter().map(|s| s.share).collect();
     let res = shamir::reconstruct(&shares);
-
-    // ???
 
     Some(res)
 }

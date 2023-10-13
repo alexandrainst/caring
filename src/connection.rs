@@ -1,6 +1,20 @@
 //! Module for doing arbitrary communication in 'some' medium.
 //! This 'medium' can be anything that implements `AsyncRead`/`AsyncWrite`.
 //! There is built-in support for TCP and in-memory duplex-based connections.
+//!
+//! One thing to consider is multiplexing, in the case where we want to
+//! perform multiple protocols in parallel. Thus to ensure we receive the right packets
+//! back and forth, we need to open a connection for each 'protocol'.
+//! One method for this is to use something like:
+//! https://github.com/black-binary/async-smux
+//!
+//! In relation to the above, we might want to restrict 'send' with mut.
+//! although, maybe 'recv' is enough. We just need to prevent threads or other
+//! concurrent things from sending/receiving out of order.
+//!
+//! All in all, this is only relevant if we want to perform some form extra concurrent protocol.
+//! This could be background verification and 'anti-cheat' detection, error-reporting,
+//! background beaver share generation, or other preproccessing actions.
 
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range};
 
@@ -178,7 +192,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         // TODO: Concurrency
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv();
-            async move { (i, msg.await.unwrap() ) }
+            async move { (i, msg.await ) }
         });
         let mut messages = future::join_all(messages).await;
         // Maybe we should pass the id with it?

@@ -6,9 +6,9 @@ pub mod shamir;
 pub mod vss;
 //pub mod theater;
 
-use std::{env, net::SocketAddr, sync::Mutex};
+use std::{env, net::SocketAddr};
 
-use rand::{Rng, thread_rng};
+use rand::Rng;
 
 use crate::connection::TcpNetwork;
 
@@ -46,19 +46,25 @@ async fn main() {
         .map(|id| (id + 1))
         .map(curve25519_dalek::Scalar::from)
         .collect();
-    let shares = shamir::share::<curve25519_dalek::Scalar>(num, &parties, 2, &mut rng);
+    let (shares,poly) = vss::share::<curve25519_dalek::Scalar, curve25519_dalek::RistrettoPoint>(num, &parties, 2, &mut rng);
 
     // broadcast my shares.
     println!("Sharing shares...");
     let shares = network.symmetric_unicast(shares).await;
+    let polys = network.symmetric_broadcast(poly).await;
+    for (s,p) in shares.iter().zip(polys.iter()) {
+        assert!(s.verify(p), "Somebody is cheating!");
+    }
 
     // compute
     println!("Computing...");
     let my_result = shares.into_iter().sum();
+    // Should be the same for every party!
+    let polysum = polys.into_iter().sum();
     let open_shares = network.symmetric_broadcast(my_result).await;
 
     println!("Reconstructing...");
-    let res = shamir::reconstruct(&open_shares);
+    let res = vss::reconstruct(&open_shares, &polysum).expect("Bad");
 
     println!("Extractring u32...");
     let res: [u8; 4] = res.as_bytes()[0..4].try_into().unwrap();
