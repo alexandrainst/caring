@@ -16,7 +16,16 @@ fn mpc_sum(num: f64) -> f64 {
     let engine = engine.as_mut().unwrap().as_mut();
     let AdderEngine { network, runtime, threshold } = engine;
 
-
+    assert!(num > 0.0, "Negative numbers are currently not supported");
+    // TODO: Support negative numbers?
+    // The sign-bit is not wellpreserbed when doing MPC in a finite field.
+    // As such we need another method of representing the negative numbers.
+    // A method could be to 'shift' all the numbers with 2^n, where
+    // we have 'n' negative numbers. To translate between back-and-forth we
+    // simply add/subtract the global offset.
+    // The conseqeunce of this, is we lose a lot of precision, since we now only have
+    // 128 - n bits to work with. Thus if the 'need' to have negative numbers isn't there
+    // we should probably not provide it.
     type Fix = fixed::FixedU128<64>;
     let num = Fix::from_num(num).to_bits();
     let res = runtime.block_on(async {
@@ -41,6 +50,8 @@ fn mpc_sum(num: f64) -> f64 {
 
         // reconstruct
         let res = shamir::reconstruct(&open_shares);
+        // NOTE: Since we are only using half of this space, we have
+        // a possibility of 'checking' for computation failures.
         let res: [u8; 16] = res.as_bytes()[0..16].try_into().unwrap();
         u128::from_le_bytes(res)
     });

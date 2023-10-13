@@ -20,4 +20,5 @@ num-traits = "0.2.16"
 rand = "0.8.5"
 serde = "1.0.188"
 tokio = { version = "1.32.0", features = ["full"] }
+tokio-rustls = "0.24.1"
 tokio-util = { version = "0.7.9", features = ["io", "net", "io-util", "codec", "full"] }

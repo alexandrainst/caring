@@ -2,7 +2,7 @@
 //! This 'medium' can be anything that implements `AsyncRead`/`AsyncWrite`.
 //! There is built-in support for TCP and in-memory duplex-based connections.
 
-use std::{collections::BTreeMap, marker::PhantomData, net::SocketAddr, ops::Range};
+use std::{collections::BTreeMap, net::SocketAddr, ops::Range};
 
 use futures::{future, SinkExt, StreamExt};
 use itertools::Itertools;
@@ -15,13 +15,13 @@ use tokio::{
     },
     sync::mpsc::Sender,
 };
+
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     input: tokio::sync::mpsc::Sender<Box<[u8]>>,
     reader: FramedRead<R, LengthDelimitedCodec>,
-    // task: tokio::task::JoinHandle<()>,
-    phantom: PhantomData<W>,           // Not needed, but nice
+    task: tokio::task::JoinHandle<FramedWrite<W, LengthDelimitedCodec>>,
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R, W> {
@@ -36,23 +36,36 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
         let reader = FramedRead::new(reader, codec.clone());
         let mut writer = FramedWrite::new(writer, codec);
 
-        let _task = tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             // This self-drops after the sender is gone.
             while let Some(msg) = outgoing.recv().await {
                 writer.send(msg.into()).await.unwrap();
             }
+            // return the writer
+            writer
         });
         Connection {
-            // task,
+            task,
             input,
             reader,
-            phantom: PhantomData,
         }
+    }
+
+    pub async fn destroy(self) -> (R, W) {
+        let Self { input, reader, task } = self;
+        let reader = reader.into_inner();
+        drop(input);
+        // Should not wait much here since we drop input
+        // it is really only unsent packages holding us back
+        let writer = task.await.unwrap().into_inner();
+        (reader, writer)
     }
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Send a message without waiting
+    ///
+    /// The message is queued, if the queue is too full it panics.
     ///
     /// * `msg`: Message to send
     pub fn send(&self, msg: &impl serde::Serialize) {
@@ -63,6 +76,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> T {
         // TODO: Handle unstable connections
+        // TODO: Handle timeouts?
         let buf = self.reader.next().await.unwrap().unwrap();
         let buf = std::io::Cursor::new(buf);
         // TODO: Handle bad deserialization (assume malicious?)
@@ -80,7 +94,31 @@ impl TcpConnection {
         let (reader, writer) = stream.into_split();
         Self::new(reader, writer)
     }
+
+    pub async fn to_tcp(self) -> TcpStream {
+        let (r,w) = self.destroy().await;
+        // UNWRAP: Should never fail, as we build the connection from two
+        // streams before. However! One could construct TcpConnection manually
+        // suing `Connection::new`, thus it 'can' fail.
+        // But just don't do that.
+        r.reunite(w).unwrap()
+    }
 }
+
+pub type TlsConnection = Connection<
+    ReadHalf<tokio_rustls::TlsStream<TcpStream>>,
+    WriteHalf<tokio_rustls::TlsStream<TcpStream>>
+    >;
+impl TlsConnection {
+    /// New TLS-based connection from a stream
+    ///
+    /// * `stream`: TCP stream to use
+    pub fn from_tls(stream: tokio_rustls::TlsStream<TcpStream>) -> Self {
+        let (reader, writer) = tokio::io::split(stream);
+        Self::new(reader, writer)
+    }
+}
+
 
 pub type DuplexConnection = Connection<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 impl DuplexConnection {
@@ -140,7 +178,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         // TODO: Concurrency
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv();
-            async move { (i, msg.await) }
+            async move { (i, msg.await.unwrap() ) }
         });
         let mut messages = future::join_all(messages).await;
         // Maybe we should pass the id with it?
