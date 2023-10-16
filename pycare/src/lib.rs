@@ -10,7 +10,7 @@ struct AdderEngine {
     threshold: u64
 }
 
-type SignedFix = fixed::FixedI128<0>;
+type SignedFix = fixed::FixedI128<64>;
 fn to_offset(num: f64) -> u128 {
     let num : i128 = SignedFix::from_num(num).to_bits(); // convert to signed fixed point
     // Okay this a some voodoo why this 'just works', but the idea is that
@@ -23,6 +23,20 @@ fn from_offset(num: u128) -> f64 {
     // Same applies as above
     let num = SignedFix::from_bits(num as i128);
     num.to_num()
+}
+
+
+#[test]
+fn offset_binary() {
+    use curve25519_dalek::Scalar;
+    let a : Scalar  =  to_offset(1.1).into();
+    let b : Scalar = to_offset(2.2).into();
+    let c : Scalar  = to_offset(3.3).into();
+    let sum = a + b + c;
+    let sum: [u8; 16] = sum.as_bytes()[0..16].try_into().unwrap();
+    let sum = u128::from_le_bytes(sum);
+    let sum = from_offset(sum);
+    assert_eq!(sum, 6.6);
 }
 
 static ENGINE : Mutex<Option<Box<AdderEngine>>> = Mutex::new(None);
@@ -102,3 +116,4 @@ fn pycare(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(takedown, m)?)?;
     Ok(())
 }
+
