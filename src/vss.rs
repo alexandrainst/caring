@@ -10,20 +10,19 @@
 //! when receiving a share, parallel to everything else, and just 'awaited' before sending
 //! anything based on that.
 //!
-use std::{iter, ops};
+use std::{iter, ops, sync::Arc};
 
-use crate::shamir::{self, Share};
+use crate::{shamir::{self, Share}, poly::Polynomial};
+
 use ff::Field;
 use group::Group;
 use rand::RngCore;
 
 
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
-pub struct VerifiableShare<F: Field> {
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct VerifiableShare<F: Field, G: Group> {
     share: Share<F>,
-    // I have come to the realization that we don't need this,
-    // we only need the polynomial.
-    // mac: Mac<G>,
+    poly: Arc<Polynomial<G>>,
 }
 // Consider adding the polynomial here for ease of use,
 // since they are always coupled. Note however that we
@@ -31,12 +30,10 @@ pub struct VerifiableShare<F: Field> {
 // when generating shares, sooooo we probably need to use
 // something like `Cow`, `Rc`, `Arc` or the like.
 
-impl<F: Field> VerifiableShare<F> {
-    pub fn verify<G>(&self, poly: &Polynomial<G>) -> bool
-    where
-        G: Group + std::ops::Mul<F, Output = G>,
+impl<F: Field,G> VerifiableShare<F, G> where G: Group + std::ops::Mul<F, Output = G> {
+    pub fn verify(&self) -> bool
     {
-        let VerifiableShare { share } = self;
+        let VerifiableShare { share, poly } = self;
         let mut check = G::identity();
         for (i, &a) in poly.0.iter().enumerate() {
             check += a * share.x.pow([i as u64]);
@@ -45,64 +42,43 @@ impl<F: Field> VerifiableShare<F> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct Mac<F: Group>(F);
-
-impl<F: Field> ops::Add for VerifiableShare<F> {
+impl<F: Field, G: Group> ops::Add for VerifiableShare<F,G> {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self::Output {
+    fn add(mut self, rhs: Self) -> Self::Output {
+        let poly = Arc::make_mut(&mut self.poly);
+        poly.add_self(&rhs.poly);
         Self {
             share: self.share + rhs.share,
-            // mac: Mac(self.mac.0 + rhs.mac.0),
+            poly: self.poly
         }
     }
 }
 
-impl<F: Field> ops::Sub for VerifiableShare<F> {
+
+impl<F: Field, G: Group> ops::Sub for VerifiableShare<F,G> {
     type Output = Self;
 
-    fn sub(self, rhs: Self) -> Self::Output {
+    fn sub(mut self, rhs: Self) -> Self::Output {
+        let poly = Arc::make_mut(&mut self.poly);
+        poly.sub_self(&rhs.poly);
         Self {
             share: self.share - rhs.share,
-            // mac: Mac(self.mac.0 - rhs.mac.0),
+            poly: self.poly
         }
     }
 }
 
-impl<F: Field> std::iter::Sum for VerifiableShare<F> {
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        VerifiableShare {
-            share: iter.map(|s| s.share).sum(),
-        }
-    }
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-pub struct Polynomial<G : Group>(Box<[G]>);
-
-impl<F: Group> ops::Add for Polynomial<F> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        let res: Box<[_]> = self
-            .0
-            .iter()
-            .zip(rhs.0.iter())
-            .map(|(&a, &b)| a + b)
-            .collect();
-
-        Self(res)
-    }
-}
-
-impl<F: Group> std::iter::Sum for Polynomial<F> {
+impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F,G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
-        let mut acc = iter.next().expect("Can't sum zero polynomials");
-        for poly in iter {
-            acc = acc + poly;
+        let mut fst = iter.next().unwrap();
+        let mut share = fst.share;
+        let poly_ref = Arc::make_mut(&mut fst.poly);
+        for vs in iter {
+            share += vs.share;
+            poly_ref.add_self(&vs.poly);
         }
-        acc
+        VerifiableShare { share, poly: fst.poly }
     }
 }
 
@@ -111,7 +87,7 @@ pub fn share<F: Field, G: Group>(
     ids: &[F],
     threshold: u64,
     rng: &mut impl RngCore,
-) -> (Vec<VerifiableShare<F>>, Polynomial<G>)
+) -> Vec<VerifiableShare<F, G>>
 where
     G: std::ops::Mul<F, Output = G>,
 {
@@ -129,7 +105,6 @@ where
     let poly = (1..threshold).map(|_| F::random(&mut *rng));
     // I want to avoid this allocation :(
     let poly: Box<[F]> = iter::once(val).chain(poly).collect();
-
     let mac_poly: Box<[G]> = poly.iter().map(|a| G::generator() * *a).collect();
 
     // Sample n points from 1..=n in the polynomial
@@ -145,31 +120,22 @@ where
                 *a * x.pow([i as u64])
             }) // sum: s + a1 x + a2 x^2 + ...
             .fold(F::ZERO, |sum, x| sum + x);
-        let mac = mac_poly
-            .iter()
-            .enumerate()
-            .map(|(i, a)| {
-                // evaluate: a * x^i
-                *a * x.pow([i as u64])
-            }) // sum: s + a1 x + a2 x^2 + ...
-            .fold(G::identity(), |sum, x| sum + x);
         let share = Share::<F> { x, y: share };
-        let _mac = Mac(mac);
-        shares.push(VerifiableShare { share });
+        let poly = Polynomial(mac_poly.clone());
+        let poly = Arc::new(poly);
+        shares.push(VerifiableShare { share, poly });
     }
 
-    let mac_poly = Polynomial(mac_poly);
-    (shares, mac_poly)
+    shares
 }
 
 pub fn reconstruct<F: Field, G: Group>(
-    shares: &[VerifiableShare<F>],
-    poly: &Polynomial<G>,
+    shares: &[VerifiableShare<F, G>],
 ) -> Option<F>
 where G: Group + std::ops::Mul<F, Output = G> {
     // let (shares, macs) : (Vec<_>, Vec<_>) = shares.iter().map(|s| (s.share)).unzip();
     for share in shares {
-        if !share.verify(poly) {
+        if !share.verify() {
             return None;
         }
     }
@@ -193,11 +159,11 @@ mod test {
         let v = Scalar::random(&mut rng);
 
         let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
-        let (shares, poly) = share::<Scalar, RistrettoPoint>(v, &parties, 2, &mut rng);
+        let shares = share::<Scalar, RistrettoPoint>(v, &parties, 2, &mut rng);
         for share in &shares {
-            assert!(share.verify(&poly));
+            assert!(share.verify());
         }
-        let v2 = reconstruct(&shares, &poly).unwrap();
+        let v2 = reconstruct(&shares).unwrap();
         assert_eq!(v, v2);
     }
 
@@ -209,26 +175,25 @@ mod test {
         let v2 = Scalar::from_bytes_mod_order([10; 32]);
 
         let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
-        let (shares1, poly1) = share::<Scalar, RistrettoPoint>(v1, &parties, 2, &mut rng);
-        let (shares2, poly2) = share::<Scalar, RistrettoPoint>(v2, &parties, 2, &mut rng);
+        let shares1 = share::<Scalar, RistrettoPoint>(v1, &parties, 2, &mut rng);
+        let shares2 = share::<Scalar, RistrettoPoint>(v2, &parties, 2, &mut rng);
         for share in &shares1 {
-            assert!(share.verify(&poly1));
+            assert!(share.verify());
         }
         for share in &shares2 {
-            assert!(share.verify(&poly2));
+            assert!(share.verify());
         }
         let shares: Vec<_> = shares1
-            .iter()
-            .zip(shares2.iter())
-            .map(|(&s1, &s2)| s1 + s2)
+            .into_iter()
+            .zip(shares2)
+            .map(|(s1, s2)| s1 + s2)
             .collect();
 
-        let poly = poly1 + poly2;
         for share in &shares {
-            assert!(share.verify(&poly));
+            assert!(share.verify());
         }
 
-        let vsum = reconstruct(&shares, &poly).unwrap();
+        let vsum = reconstruct(&shares).unwrap();
         assert_eq!(v1 + v2, vsum);
     }
 
@@ -257,26 +222,25 @@ mod test {
 
         let mut rng = thread_rng();
         let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
-        let (shares1, poly1) = share::<Scalar, RistrettoPoint>(v1, &parties, 2, &mut rng);
-        let (shares2, poly2) = share::<Scalar, RistrettoPoint>(v2, &parties, 2, &mut rng);
+        let shares1 = share::<Scalar, RistrettoPoint>(v1, &parties, 2, &mut rng);
+        let shares2 = share::<Scalar, RistrettoPoint>(v2, &parties, 2, &mut rng);
         for share in &shares1 {
-            assert!(share.verify(&poly1));
+            assert!(share.verify());
         }
         for share in &shares2 {
-            assert!(share.verify(&poly2));
+            assert!(share.verify());
         }
         let shares: Vec<_> = shares1
-            .iter()
-            .zip(shares2.iter())
-            .map(|(&s1, &s2)| s1 + s2)
+            .into_iter()
+            .zip(shares2)
+            .map(|(s1, s2)| s1 + s2)
             .collect();
 
-        let poly = poly1 + poly2;
         for share in &shares {
-            assert!(share.verify(&poly));
+            assert!(share.verify());
         }
 
-        let vsum = reconstruct(&shares, &poly).unwrap();
+        let vsum = reconstruct(&shares).unwrap();
         let sum = &vsum.as_bytes()[0..4];
         let sum: [u8; 4] = sum.try_into().unwrap();
         let sum = Fix::from_le_bytes(sum);

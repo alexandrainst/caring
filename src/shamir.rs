@@ -39,6 +39,14 @@ impl<F: Field> std::ops::Add for Share<F> {
     }
 }
 
+impl<F: Field> std::ops::AddAssign for Share<F> {
+    fn add_assign(&mut self, rhs: Self) {
+        assert_eq!(self.x, rhs.x);
+        self.x += rhs.x;
+        self.y += rhs.y;
+    }
+}
+
 impl<F: Field> std::ops::Sub for Share<F> {
     type Output = Self;
 

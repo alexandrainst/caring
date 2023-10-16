@@ -1,16 +1,10 @@
 // #![allow(unused)]
-pub mod connection;
-mod element;
-pub mod engine;
-pub mod shamir;
-pub mod vss;
 //pub mod theater;
 
 use std::{env, net::SocketAddr};
 
+use caring::{connection::TcpNetwork, vss};
 use rand::Rng;
-
-use crate::connection::TcpNetwork;
 
 #[tokio::main]
 async fn main() {
@@ -46,25 +40,24 @@ async fn main() {
         .map(|id| (id + 1))
         .map(curve25519_dalek::Scalar::from)
         .collect();
-    let (shares,poly) = vss::share::<curve25519_dalek::Scalar, curve25519_dalek::RistrettoPoint>(num, &parties, 2, &mut rng);
+    let shares = vss::share::<curve25519_dalek::Scalar, curve25519_dalek::RistrettoPoint>(num, &parties, 2, &mut rng);
 
     // broadcast my shares.
     println!("Sharing shares...");
     let shares = network.symmetric_unicast(shares).await;
-    let polys = network.symmetric_broadcast(poly).await;
-    for (s,p) in shares.iter().zip(polys.iter()) {
-        assert!(s.verify(p), "Somebody is cheating!");
+
+    for s in shares.iter() {
+        assert!(s.verify(), "Somebody is cheating!");
     }
 
     // compute
     println!("Computing...");
     let my_result = shares.into_iter().sum();
     // Should be the same for every party!
-    let polysum = polys.into_iter().sum();
     let open_shares = network.symmetric_broadcast(my_result).await;
 
     println!("Reconstructing...");
-    let res = vss::reconstruct(&open_shares, &polysum).expect("Bad");
+    let res = vss::reconstruct(&open_shares).expect("Bad");
 
     println!("Extractring u32...");
     let res: [u8; 4] = res.as_bytes()[0..4].try_into().unwrap();

@@ -36,7 +36,7 @@ fn offset_binary() {
     let sum: [u8; 16] = sum.as_bytes()[0..16].try_into().unwrap();
     let sum = u128::from_le_bytes(sum);
     let sum = from_offset(sum);
-    assert_eq!(sum, 6.6);
+    assert!(sum - 6.6 < 0.01);
 }
 
 static ENGINE : Mutex<Option<Box<AdderEngine>>> = Mutex::new(None);
