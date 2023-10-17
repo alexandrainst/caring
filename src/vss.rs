@@ -46,8 +46,8 @@ impl<F: Field, G: Group> ops::Add for VerifiableShare<F,G> {
     type Output = Self;
 
     fn add(mut self, rhs: Self) -> Self::Output {
-        let poly = Arc::make_mut(&mut self.poly);
-        poly.add_self(&rhs.poly);
+        let mut poly = Arc::make_mut(&mut self.poly);
+        poly += &rhs.poly;
         Self {
             share: self.share + rhs.share,
             poly: self.poly
@@ -60,8 +60,8 @@ impl<F: Field, G: Group> ops::Sub for VerifiableShare<F,G> {
     type Output = Self;
 
     fn sub(mut self, rhs: Self) -> Self::Output {
-        let poly = Arc::make_mut(&mut self.poly);
-        poly.sub_self(&rhs.poly);
+        let mut poly = Arc::make_mut(&mut self.poly);
+        poly -= &rhs.poly;
         Self {
             share: self.share - rhs.share,
             poly: self.poly
@@ -73,10 +73,10 @@ impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F,G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         let mut fst = iter.next().unwrap();
         let mut share = fst.share;
-        let poly_ref = Arc::make_mut(&mut fst.poly);
+        let mut poly_ref = Arc::make_mut(&mut fst.poly);
         for vs in iter {
             share += vs.share;
-            poly_ref.add_self(&vs.poly);
+            poly_ref += &vs.poly;
         }
         VerifiableShare { share, poly: fst.poly }
     }

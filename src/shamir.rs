@@ -1,6 +1,9 @@
 //! This is vanilla Shamir Secret Sharing using an arbitrary field F.
 //! See https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing
 use ff::{derive::rand_core::RngCore, Field};
+use rand::thread_rng;
+
+use crate::{poly::Polynomial, connection::{Network, InMemoryNetwork}, vss::reconstruct};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -111,6 +114,57 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     // TODO: Maybe create the other way around?
 }
 
+struct BeaverTriple<F: Field> (Share<F>, Share<F>, Share<F>);
+
+impl<F: Field> BeaverTriple<F> {
+    pub fn fake(ids: &[F], threshold: u64, mut rng: &mut impl RngCore) -> Vec<Self> {
+        let a = F::random(&mut rng);
+        let b = F::random(&mut rng);
+        let c = a * b;
+        
+        // Share (preproccess)
+        let a = share(a, ids, threshold, &mut rng);
+        let b = share(b, ids, threshold, &mut rng);
+        let c = share(c, ids, threshold, &mut rng);
+        itertools::izip!(a,b,c).map(|(a,b,c)| Self(a,b,c))
+            .collect()
+    }
+}
+
+pub fn multiply_fst<F: Field>(x: Share<F>, y: Share<F>, triple: BeaverTriple<F>) -> (Share<F>, Share<F>, Share<F>, Share<F>, Share<F>) {
+    // Should be easy enough.
+    // Except... it requires interaction
+    let i = 0;
+    let threshold = 2;
+    let ids = &[F::ZERO; 2];
+    let mut rng = thread_rng();
+    
+    // Mask and Compute
+    let BeaverTriple(a,b,c) = triple;
+    let ax = a+x;
+    let by  = b+y;
+
+    (y, by, a, ax, c)
+}
+
+pub fn multiply_snd<F: Field>(y: Share<F>, by: F, a: Share<F>, ax: F, c: Share<F>) -> Share<F> {
+    y*by - a*ax + c
+}
+
+pub async fn multiply<F: Field + serde::Serialize + serde::de::DeserializeOwned>(
+    x: Share<F>,
+    y: Share<F>,
+    triple: BeaverTriple<F>,
+    network: &mut InMemoryNetwork,
+) -> Share<F> {
+    let (y, by, a, ax, c) = multiply_fst(x, y, triple);
+    let ax = network.symmetric_broadcast(ax).await;
+    let by = network.symmetric_broadcast(by).await;
+    let ax = reconstruct(&ax);
+    let by = reconstruct(&by);
+    multiply_snd(y, by, a, ax, c)
+}
+
 // TODO: Multiplication in some form
 
 /// Share/shard a secret value `v` into `n` shares
@@ -128,26 +182,16 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
     );
 
     // Sample random t-degree polynomial
-    let mut polynomial: Vec<F> = Vec::with_capacity(threshold as usize);
-    polynomial.push(v);
-    for _ in 1..threshold {
-        let a = F::random(&mut *rng);
-        polynomial.push(a);
-    }
+    let mut polynomial = Polynomial::random(threshold as usize, rng);
+    polynomial.0[0] = v;
+    let polynomial = polynomial;
 
     // Sample n points from 1..=n in the polynomial
     let mut shares: Vec<Share<F>> = Vec::with_capacity(n);
     for x in ids {
         let x = *x;
-        let share = polynomial
-            .iter()
-            .enumerate()
-            .map(|(i, a)| {
-                // evaluate: a * x^i
-                (*a) * x.pow([i as u64])
-            }) // sum: s + a1 x + a2 x^2 + ...
-            .fold(F::ZERO, |sum, x| sum + x);
-        shares.push(Share::<F> { x, y: share });
+        let y = polynomial.eval(x);
+        shares.push(Share::<F> { x, y });
     }
 
     shares
