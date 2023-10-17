@@ -1,9 +1,9 @@
 //! This is vanilla Shamir Secret Sharing using an arbitrary field F.
 //! See https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing
 use ff::{derive::rand_core::RngCore, Field};
-use rand::thread_rng;
+use itertools::multiunzip;
 
-use crate::{poly::Polynomial, connection::{Network, InMemoryNetwork}, vss::reconstruct};
+use crate::{poly::Polynomial, agency::Broadcast};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -111,17 +111,24 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
             ..self
         }
     }
-    // TODO: Maybe create the other way around?
 }
 
-struct BeaverTriple<F: Field> (Share<F>, Share<F>, Share<F>);
+#[derive(Clone)]
+pub struct BeaverTriple<F: Field> (Share<F>, Share<F>, Share<F>);
 
 impl<F: Field> BeaverTriple<F> {
+    /// Fake a set of beaver triples.
+    /// 
+    /// This produces `n` shares corresponding to a shared beaver triple,
+    /// however locally with the values known.
+    ///
+    /// * `ids`: ids to produce for
+    /// * `threshold`: threshold to reconstruct
+    /// * `rng`: rng to sample from
     pub fn fake(ids: &[F], threshold: u64, mut rng: &mut impl RngCore) -> Vec<Self> {
         let a = F::random(&mut rng);
         let b = F::random(&mut rng);
         let c = a * b;
-        
         // Share (preproccess)
         let a = share(a, ids, threshold, &mut rng);
         let b = share(b, ids, threshold, &mut rng);
@@ -131,38 +138,32 @@ impl<F: Field> BeaverTriple<F> {
     }
 }
 
-pub fn multiply_fst<F: Field>(x: Share<F>, y: Share<F>, triple: BeaverTriple<F>) -> (Share<F>, Share<F>, Share<F>, Share<F>, Share<F>) {
-    // Should be easy enough.
-    // Except... it requires interaction
-    let i = 0;
-    let threshold = 2;
-    let ids = &[F::ZERO; 2];
-    let mut rng = thread_rng();
-    
-    // Mask and Compute
-    let BeaverTriple(a,b,c) = triple;
-    let ax = a+x;
-    let by  = b+y;
-
-    (y, by, a, ax, c)
-}
-
-pub fn multiply_snd<F: Field>(y: Share<F>, by: F, a: Share<F>, ax: F, c: Share<F>) -> Share<F> {
-    y*by - a*ax + c
-}
-
-pub async fn multiply<F: Field + serde::Serialize + serde::de::DeserializeOwned>(
+/// Perform multiplication using beaver triples
+///
+/// * `x`: first share to multiply
+/// * `y`: second share to multiply
+/// * `triple`: beaver triple
+/// * `network`: unicasting network
+pub async fn multiply<
+    F: Field + serde::Serialize + serde::de::DeserializeOwned,
+> (
     x: Share<F>,
     y: Share<F>,
     triple: BeaverTriple<F>,
-    network: &mut InMemoryNetwork,
+    network: &mut impl Broadcast
 ) -> Share<F> {
-    let (y, by, a, ax, c) = multiply_fst(x, y, triple);
-    let ax = network.symmetric_broadcast(ax).await;
-    let by = network.symmetric_broadcast(by).await;
+    let BeaverTriple(a,b,c) = triple;
+    let ax = a+x;
+    let by = b+y;
+
+    // Sending both at once it more efficient.
+    let resp = network.symmetric_broadcast((ax, by)).await;
+    let (ax, by) : (Vec<_>, Vec<_>) = multiunzip(resp);
+
     let ax = reconstruct(&ax);
     let by = reconstruct(&by);
-    multiply_snd(y, by, a, ax, c)
+
+    y*ax + a*(-by) + c
 }
 
 // TODO: Multiplication in some form
@@ -225,7 +226,7 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
 
 #[cfg(test)]
 mod test {
-    use crate::element::Element32;
+    use crate::{element::Element32, connection::{Network, InMemoryNetwork}};
 
     use super::*;
 
@@ -267,6 +268,7 @@ mod test {
     }
 
     use fixed::FixedU32;
+    use rand::thread_rng;
 
     #[test]
     fn addition_fixpoint() {
@@ -302,5 +304,39 @@ mod test {
         let v: u32 = v.into();
         let v = Fix::from_bits(v);
         assert_eq!(v, a + b);
+    }
+
+    #[tokio::test]
+    async fn multiplication() {
+        let mut rng = thread_rng();
+        let parties: Vec<Element32> = (0..2u32).map(|i| i+1)
+            .map(Element32::from).collect();
+
+        let treshold: u64 = 2;
+
+        // preproccessing
+        let triples = BeaverTriple::fake(&parties, treshold, &mut rng);
+
+        let mut taskset = tokio::task::JoinSet::new();
+        // MPC
+        let cluster = InMemoryNetwork::in_memory(parties.len());
+        for network in cluster {
+            let parties = parties.clone();
+            let triple = triples[network.index].clone();
+            taskset.spawn({async move {
+                let mut network = network;
+                let v = Element32::from(5u32);
+                let shares = share(v, &parties, treshold, &mut thread_rng());
+                let shares = network.symmetric_unicast(shares).await;
+                let res = multiply(shares[0], shares[1], triple, &mut network).await;
+                let res = network.symmetric_broadcast(res).await;
+                let res = reconstruct(&res);
+                let res : u32 = res.into();
+                assert_eq!(res, 25);
+            }});
+        }
+        while let Some(res) = taskset.join_next().await {
+            res.unwrap();
+        }
     }
 }
