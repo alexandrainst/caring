@@ -3,7 +3,9 @@
 use ff::{derive::rand_core::RngCore, Field};
 use itertools::multiunzip;
 
-use crate::{poly::Polynomial, agency::Broadcast};
+// TODO: Important! Switch RngCore to CryptoRngCore
+
+use crate::{poly::Polynomial, agency::{Broadcast, Unicast}};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -144,7 +146,7 @@ impl<F: Field> BeaverTriple<F> {
 /// * `y`: second share to multiply
 /// * `triple`: beaver triple
 /// * `network`: unicasting network
-pub async fn multiply<
+pub async fn beaver_multiply<
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
 > (
     x: Share<F>,
@@ -166,7 +168,30 @@ pub async fn multiply<
     y*ax + a*(-by) + c
 }
 
-// TODO: Multiplication in some form
+
+pub async fn regular_multiply< // FIX: Doesn't work
+    F: Field + serde::Serialize + serde::de::DeserializeOwned,
+> (
+    x: Share<F>,
+    y: Share<F>,
+    network: &mut impl Unicast,
+    threshold: u64,
+    ids: &[F],
+    rng: &mut impl RngCore,
+) -> Share<F> {
+    let i = x.x;
+    // We need 2t < n, otherwise we cannot reconstruct,
+    // however 't' is hidden from before, so we jyst have to assume it is.
+    // x, y: degree t
+    let z = x.y * y.y; // z: degree 2t
+    // Now we need to reduce the polynomial back to t
+    let z = share(z, ids, threshold, rng); // share -> subshares
+    let z = network.symmetric_unicast(z).await; // publish
+    // ???
+    // Something about a recombination vector.
+    let z = reconstruct(&z); // reconstruct the subshare
+    Share{x: i, y: z}
+}
 
 /// Share/shard a secret value `v` into `n` shares
 /// where `n` is the number of the `ids`
@@ -233,7 +258,7 @@ mod test {
     #[test]
     fn simple() {
         // We test that we can secret-share a number and reconstruct it.
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         let v = Element32::from(42u32);
         let ids: Vec<_> = (1..=5u32).map(Element32::from).collect();
         let shares = share(v, &ids, 4, &mut rng);
@@ -244,18 +269,17 @@ mod test {
     #[test]
     fn addition() {
         // We test that we can secret-share a two numbers and add them.
+        let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let a = 3;
         let b = 7;
         let vs1 = {
             let v = Element32::from(a);
-            let mut rng = rand::thread_rng();
             let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
         let vs2 = {
             let v = Element32::from(b);
-            let mut rng = rand::thread_rng();
             let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
@@ -273,6 +297,7 @@ mod test {
     #[test]
     fn addition_fixpoint() {
         // We test that we can secret-share a two *fixed point* numbers and add them.
+        let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         type Fix = FixedU32<16>;
         let a = 1.0;
@@ -283,14 +308,12 @@ mod test {
         let vs1 = {
             let v = Element32::from(a.to_bits() as u64);
             dbg!(&v);
-            let mut rng = rand::thread_rng();
             let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
         let vs2 = {
             let v = Element32::from(b.to_bits() as u64);
             dbg!(&v);
-            let mut rng = rand::thread_rng();
             let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
@@ -307,8 +330,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn multiplication() {
-        let mut rng = thread_rng();
+    async fn beaver_mult() {
+        let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         let parties: Vec<Element32> = (0..2u32).map(|i| i+1)
             .map(Element32::from).collect();
 
@@ -324,11 +347,55 @@ mod test {
             let parties = parties.clone();
             let triple = triples[network.index].clone();
             taskset.spawn({async move {
+                let mut rng = rand::rngs::mock::StepRng::new(1, 7);
                 let mut network = network;
                 let v = Element32::from(5u32);
-                let shares = share(v, &parties, treshold, &mut thread_rng());
+                let shares = share(v, &parties, treshold, &mut rng);
                 let shares = network.symmetric_unicast(shares).await;
-                let res = multiply(shares[0], shares[1], triple, &mut network).await;
+                let res = beaver_multiply(shares[0], shares[1], triple, &mut network).await;
+                let res = network.symmetric_broadcast(res).await;
+                let res = reconstruct(&res);
+                let res : u32 = res.into();
+                assert_eq!(res, 25);
+            }});
+        }
+        while let Some(res) = taskset.join_next().await {
+            res.unwrap();
+        }
+    }
+
+
+    #[tokio::test]
+    async fn regular_mult() {
+        let mut rng = thread_rng();
+        let parties: Vec<Element32> = (0..10u32).map(|i| i+1)
+            .map(Element32::from).collect();
+
+        let treshold: u64 = 3;
+
+        // preproccessing
+        let triples = BeaverTriple::fake(&parties, treshold, &mut rng);
+
+        let mut taskset = tokio::task::JoinSet::new();
+        // MPC
+        let cluster = InMemoryNetwork::in_memory(parties.len());
+        for network in cluster {
+            let parties = parties.clone();
+            taskset.spawn({async move {
+                let mut rng = rand::rngs::mock::StepRng::new(1, 7);
+                let mut network = network;
+                let v = Element32::from(5u32);
+                let shares = share(v, &parties, treshold, &mut rng);
+                let shares = network.symmetric_unicast(shares).await;
+                // let res = regular_multiply(
+                //     shares[0],
+                //     shares[1], // we ignore the rest of the inputs
+                //     &mut network,
+                //     treshold,
+                //     &parties,
+                //     &mut rng,
+                // ).await;
+                let res = Share{x: shares[0].x, y: shares[0].y * shares[1].y};
                 let res = network.symmetric_broadcast(res).await;
                 let res = reconstruct(&res);
                 let res : u32 = res.into();
