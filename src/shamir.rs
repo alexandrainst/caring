@@ -188,7 +188,7 @@ pub async fn regular_multiply< // FIX: Doesn't work
     let z = share(z, ids, threshold, rng); // share -> subshares
     let z = network.symmetric_unicast(z).await; // publish
     // ???
-    // Something about a recombination vector.
+    // Something about a recombination vector and randomization.
     let z = reconstruct(&z); // reconstruct the subshare
     Share{x: i, y: z}
 }

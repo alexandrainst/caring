@@ -1,3 +1,27 @@
+//! This module describes traits for 'communication' functionalities.
+//! These are the broadcast: send a message to many
+//! and unicast: send a message to each
+//!
+//! The function of these is to provide an interface over the 
+//! concrete `Network` struct, allowing a looser API.
+//!
+//! ...Mostly due to the way `Network` have been constructed,
+//! thus carrying over the type parameters for the reader/writer.
+//!
+//! Although that allows us a rich number of possibilities with concrete stuff.
+//! Especially if muxing becomes relevant.
+//!
+//! Never mind, the point being that we want to add things here that
+//! more less abstracts to an ideal functionality.
+//!
+//! Other canditates for these could be other protocols, such as coin flips,
+//! oblivios transfer.
+//!
+//! A *protocol suite* in this manner might implement several of these,
+//! but in the same way it allows to build and construct protocols and suites
+//! from subprotocols in a very elegant manner IMO.
+//!
+
 use tokio::io::{AsyncWrite, AsyncRead};
 
 use crate::connection::Network;

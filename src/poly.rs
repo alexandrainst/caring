@@ -27,6 +27,9 @@ impl<G: ops::SubAssign + Clone> Polynomial<G> {
 }
 
 impl<G: Field> Polynomial<G> {
+    /// Evaluate `x` in the polynomial `f`, such you obtain `f(x)`
+    ///
+    /// * `x`: value to map from
     pub fn eval<F : Field>(&self, x : F) -> G where G: ops::Mul<F, Output = G> {
         self.0
             .iter()
@@ -48,6 +51,10 @@ impl<G> FromIterator<G> for Polynomial<G> {
 }
 
 impl<F: Field> Polynomial<F> {
+    /// Sample a random polynomial
+    ///
+    /// * `degree`: the degree of the polynomial
+    /// * `rng`: random number generator to use
     pub fn random(degree: usize, mut rng: &mut impl RngCore) -> Self {
         (0..degree).map(|_| F::random(&mut rng))
             .collect()
@@ -56,6 +63,16 @@ impl<F: Field> Polynomial<F> {
 
 impl<F: AddAssign + Clone> std::iter::Sum for Polynomial<F> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+        // This is sort of a hack, sum() should work on empty iterators.
+        // This requires some sort of default/'zero polynomial'
+        // While we could construct a 'zero' polynomial instead, where each
+        // coefficient is zero, this still leaves the question of the degree.
+        // This begs to differ if we want an empty polynomial (degree -1) or a constant polynomial
+        // (degree 0) with the single element zero.
+        //
+        // However neither these are particular usefull, so in most cases
+        // the sum would be an mistake, since you would not be able to perform very
+        // meaning operations between these and other polynomials.
         let mut acc = iter.next().expect("Can't sum zero polynomials");
         for poly in iter {
             acc += poly;

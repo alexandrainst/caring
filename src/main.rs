@@ -3,7 +3,7 @@
 
 use std::{env, net::SocketAddr};
 
-use caring::{connection::TcpNetwork, vss};
+use caring::{connection::TcpNetwork, feldman};
 use rand::Rng;
 
 #[tokio::main]
@@ -40,7 +40,7 @@ async fn main() {
         .map(|id| (id + 1))
         .map(curve25519_dalek::Scalar::from)
         .collect();
-    let shares = vss::share::<curve25519_dalek::Scalar, curve25519_dalek::RistrettoPoint>(num, &parties, 2, &mut rng);
+    let shares = feldman::share::<curve25519_dalek::Scalar, curve25519_dalek::RistrettoPoint>(num, &parties, 2, &mut rng);
 
     // broadcast my shares.
     println!("Sharing shares...");
@@ -57,7 +57,7 @@ async fn main() {
     let open_shares = network.symmetric_broadcast(my_result).await;
 
     println!("Reconstructing...");
-    let res = vss::reconstruct(&open_shares).expect("Bad");
+    let res = feldman::reconstruct(&open_shares).expect("Bad");
 
     println!("Extractring u32...");
     let res: [u8; 4] = res.as_bytes()[0..4].try_into().unwrap();

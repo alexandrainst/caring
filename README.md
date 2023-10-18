@@ -30,3 +30,6 @@ Our testing is done by cargo test
 ```sh
 cargo test
 ```
+
+## Documentation
+The ease the continued development it is best practice to refer to a high-level description of the given scheme/protocol in an implementation.
