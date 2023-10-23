@@ -115,6 +115,9 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     }
 }
 
+// TODO: Move beaver stuff out, and generify over any kind of share.
+// This might require a common 'Share' trait, or maybe just something that
+// implements multiplication, who knows.
 #[derive(Clone)]
 pub struct BeaverTriple<F: Field> (Share<F>, Share<F>, Share<F>);
 

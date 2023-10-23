@@ -24,11 +24,6 @@ pub struct VerifiableShare<F: Field, G: Group> {
     share: Share<F>,
     poly: Arc<Polynomial<G>>,
 }
-// Consider adding the polynomial here for ease of use,
-// since they are always coupled. Note however that we
-// probably don't want to perform clones of the polynomial
-// when generating shares, sooooo we probably need to use
-// something like `Cow`, `Rc`, `Arc` or the like.
 
 impl<F: Field,G> VerifiableShare<F, G> where G: Group + std::ops::Mul<F, Output = G> {
     pub fn verify(&self) -> bool
@@ -91,7 +86,6 @@ pub fn share<F: Field, G: Group>(
 where
     G: std::ops::Mul<F, Output = G>,
 {
-    // let shares = shamir::share(val, threshold, rng);
     // 1. We need to get the polynomial.
     // 2. We then need to do commitments to it.
     // 3. We need to provide commitments/macs to the corresponding shares.
