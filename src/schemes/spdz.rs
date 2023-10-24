@@ -6,6 +6,9 @@
 //! Further more stands the issue of sharing the input in a nice way, since a lot of
 //! preprocessing is needed in spdz beforehand.
 //!
+//! The spdz(2k) scheme is actually not that difficult in the online phase,
+//! however it requres some heavy machinery in the offline phase.
+//!
 use ff::Field;
 
 use derive_more::{Add, AddAssign, Sub, SubAssign};

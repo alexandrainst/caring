@@ -12,7 +12,7 @@
 //!
 use std::{iter, ops, sync::Arc};
 
-use crate::{shamir::{self, Share}, poly::Polynomial};
+use crate::{poly::Polynomial, schemes::shamir};
 
 use ff::Field;
 use group::Group;
@@ -21,7 +21,7 @@ use rand::RngCore;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VerifiableShare<F: Field, G: Group> {
-    share: Share<F>,
+    share: shamir::Share<F>,
     poly: Arc<Polynomial<G>>,
 }
 
@@ -114,7 +114,7 @@ where
                 *a * x.pow([i as u64])
             }) // sum: s + a1 x + a2 x^2 + ...
             .fold(F::ZERO, |sum, x| sum + x);
-        let share = Share::<F> { x, y: share };
+        let share = shamir::Share::<F> { x, y: share };
         let poly = Polynomial(mac_poly.clone());
         let poly = Arc::new(poly);
         shares.push(VerifiableShare { share, poly });
