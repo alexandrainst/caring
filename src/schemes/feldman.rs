@@ -144,6 +144,18 @@ pub struct VecVerifiableShare<F : Field, G: Group> {
     polys: Arc<[Polynomial<G>]>
 }
 
+impl<F: Field, G: Group> std::ops::Add for &VecVerifiableShare<F,G> {
+    type Output = VecVerifiableShare<F,G>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let shares = &self.shares + &rhs.shares;
+        let polys : Arc<[Polynomial<_>]> = self.polys.iter().cloned()
+            .zip(rhs.polys.iter())
+            .map(|(mut a, b)| {a+=b; a})
+            .collect();
+        VecVerifiableShare { shares, polys }
+    }
+}
 
 impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F,G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
@@ -193,7 +205,11 @@ where F: ops::Mul<G, Output=G>, Box<[G]>: FromIterator<<F as ops::Mul<G>>::Outpu
         n >= threshold as usize,
         "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
     );
-    let polys : Box<[_]> = vals.iter().map(|_| Polynomial::<F>::random(threshold as usize, rng)).collect();
+    let polys : Vec<_> = vals.iter().map(|v| {
+        let mut p = Polynomial::<F>::random(threshold as usize, rng);
+        p.0[0] = *v;
+        p
+    }).collect();
     let macs : Arc<[Polynomial<G>]> = polys.iter().map(|p| p * G::generator()).collect();
 
     let mut vshares: Vec<_> = Vec::with_capacity(n);
@@ -228,7 +244,7 @@ where G: Group + std::ops::Mul<F, Output = G> {
 #[cfg(test)]
 mod test {
     use curve25519_dalek::{RistrettoPoint, Scalar};
-    use rand::thread_rng;
+    use rand::{thread_rng, Rng};
 
     use super::*;
 
@@ -245,6 +261,28 @@ mod test {
         }
         let v2 = reconstruct(&shares).unwrap();
         assert_eq!(v, v2);
+    }
+
+    #[test]
+    fn sharing_many() {
+        const PARTIES: std::ops::Range<u32> = 1..5u32;
+        let mut rng = rand::rngs::mock::StepRng::new(42, 7);
+        let a : Vec<u32> = (0..32).map(|_| rng.gen()).collect();
+        let vs1 = {
+            let v : Vec<_> = a.clone().into_iter().map(to_scalar).collect();
+            let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
+            share_many::<_, RistrettoPoint>(&v, &ids, 4, &mut rng)
+        };
+        for share in &vs1 {
+            assert!(share.verify());
+        }
+        let vsum = reconstruct_many(&vs1).unwrap();
+        let v: Vec<u32> = vsum.into_iter().map(|x| {
+            let x = &x.as_bytes()[0..4];
+            let x: [u8; 4] = x.try_into().unwrap();
+            u32::from_le_bytes(x)
+        }).collect();
+        assert_eq!(v, a);
     }
 
     #[test]
@@ -277,6 +315,59 @@ mod test {
         assert_eq!(v1 + v2, vsum);
     }
 
+
+    #[test]
+    fn addition_many() {
+        const PARTIES: std::ops::Range<u32> = 1..5u32;
+        let mut rng = rand::rngs::mock::StepRng::new(42, 7);
+        let a : Vec<u32> = (0..32).map(|_| rng.gen()).collect();
+        let b : Vec<u32> = (0..32).map(|_| rng.gen()).collect();
+        let vs1 = {
+            let v : Vec<_> = a.clone().into_iter().map(to_scalar).collect();
+            let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
+            share_many::<_, RistrettoPoint>(&v, &ids, 4, &mut rng)
+        };
+        let vs2 = {
+            let v : Vec<_> = b.clone().into_iter().map(to_scalar).collect();
+            let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
+            share_many::<_, RistrettoPoint>(&v, &ids, 4, &mut rng)
+        };
+        for share in &vs1 {
+            assert!(share.verify());
+        }
+        for share in &vs2 {
+            assert!(share.verify());
+        }
+        let shares: Vec<VecVerifiableShare<_,_>> = vs1
+            .into_iter()
+            .zip(vs2)
+            .map(|(s1, s2)| &s1 + &s2)
+            .collect();
+
+        for share in &shares {
+            assert!(share.verify());
+        }
+
+        let vsum = reconstruct_many(&shares).unwrap();
+        let v: Vec<u32> = vsum.into_iter().map(|x| {
+            let x = &x.as_bytes()[0..4];
+            let x: [u8; 4] = x.try_into().unwrap();
+            u32::from_le_bytes(x)
+        }).collect();
+        assert_eq!(v, a.iter().zip(b).map(|(a,b)| a+b).collect::<Vec<_>>());
+    }
+
+    fn to_scalar(num: u32) -> Scalar {
+        let num = num.to_le_bytes();
+        let mut arr = [0; 32];
+        arr[0] = num[0];
+        arr[1] = num[1];
+        arr[2] = num[2];
+        arr[3] = num[3];
+        Scalar::from_bytes_mod_order(arr)
+    }
+
+
     #[test]
     fn addition_fixpoint() {
         const PARTIES: std::ops::Range<u32> = 1..5u32;
@@ -284,20 +375,11 @@ mod test {
         let b = 3.0;
         type Fix = fixed::FixedU32<16>;
         // Function to pad a u32 to a [u8; 32]
-        fn pad(num: u32) -> [u8; 32] {
-            let num = num.to_le_bytes();
-            let mut arr = [0; 32];
-            arr[0] = num[0];
-            arr[1] = num[1];
-            arr[2] = num[2];
-            arr[3] = num[3];
-            arr
-        }
 
         let a = Fix::from_num(a);
         let b = Fix::from_num(b);
-        let v1 = Scalar::from_bytes_mod_order(pad(a.to_bits()));
-        let v2 = Scalar::from_bytes_mod_order(pad(b.to_bits()));
+        let v1 = to_scalar(a.to_bits());
+        let v2 = to_scalar(b.to_bits());
         v2.invert();
 
         let mut rng = thread_rng();

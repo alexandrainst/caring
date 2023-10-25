@@ -380,8 +380,8 @@ mod test {
         let v = Element32::from(42u32);
         let ids: Vec<_> = (1..=5u32).map(Element32::from).collect();
         let shares = share(v, &ids, 4, &mut rng);
-        let v = reconstruct(&shares);
-        assert_eq!(v, Element32::from(42u32));
+        let v : u32 = reconstruct(&shares).into();
+        assert_eq!(v, 42u32);
     }
 
     #[test]
