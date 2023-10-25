@@ -1,5 +1,7 @@
 //! This is vanilla Shamir Secret Sharing using an arbitrary field F.
 //! See https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing
+use std::borrow::Borrow;
+
 use ff::{derive::rand_core::RngCore, Field};
 use itertools::multiunzip;
 
@@ -252,6 +254,119 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
     sum
 }
 
+/// A secret shared vector
+///
+/// * `x`: the id
+/// * `ys`: share values
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct VecShare<F : Field> {
+    pub(crate) x: F,
+    pub(crate) ys: Box<[F]>
+}
+
+// impl<F: Field> AsRef<Self> for VecShare<F> {
+//     fn as_ref(&self) -> &Self {
+//         self
+//     }
+// }
+
+impl<F: Field> std::ops::Add for &VecShare<F> {
+    type Output = VecShare<F>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let x = self.x;
+        let ys = self.ys.iter().zip(rhs.ys.iter()).map(|(&a,&b)| a+b).collect();
+        VecShare {x, ys}
+    }
+}
+
+impl<F: Field> std::ops::AddAssign for VecShare<F> {
+    fn add_assign(&mut self, rhs: Self) {
+        self.ys.iter_mut().zip(rhs.ys.iter()).for_each(|(a,b)| *a += b)
+    }
+}
+
+impl<F: Field> From<Vec<Share<F>>> for VecShare<F> {
+    fn from(value: Vec<Share<F>>) -> Self {
+        let x = value[0].x;
+        let ys = value.into_iter().map(|Share { x: _, y }| y).collect();
+        VecShare {x, ys}
+    }
+}
+
+impl<F: Field> From<VecShare<F>> for Vec<Share<F>> {
+    fn from(value: VecShare<F>) -> Self {
+        let VecShare { x, ys } = value;
+        ys.iter().map(|&y| Share{x, y}).collect()
+    }
+}
+
+impl<F: Field> std::iter::Sum for VecShare<F> {
+    fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+        let mut first = iter.next().expect("Please don't sum zero things togehtor");
+        for elem in iter {
+            first += elem;
+        }
+        first
+    }
+}
+
+pub fn share_many<F: Field>(vs: &[F], ids: &[F], threshold: u64, rng: &mut impl RngCore) -> Vec<VecShare<F>> {
+    // FIX: Code duplication with 'share'
+    let n = ids.len();
+    assert!(
+        n >= threshold as usize,
+        "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
+    );
+
+    // Sample random t-degree polynomial
+    let polynomials : Vec<_> = vs.iter().map(|v| {
+        let mut p = Polynomial::random(threshold as usize, rng);
+        p.0[0] = *v;
+        p
+    }).collect();
+
+    // Sample n points from 1..=n in the polynomial
+    let mut shares: Vec<VecShare<F>> = Vec::with_capacity(n);
+    for x in ids {
+        let x = *x;
+        let mut vecshare = Vec::with_capacity(vs.len());
+        for (i,_) in vs.iter().enumerate() {
+            let y = polynomials[i].eval(x);
+            vecshare.push(y);
+        }
+        shares.push(VecShare{x, ys: vecshare.into_boxed_slice()})
+    }
+
+    shares
+}
+
+pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F> {
+    // FIX: Code duplication with 'reconstruction'
+    //
+    // Lagrange interpolation:
+    // L(x) = sum( y_i * l_i(x) )
+    // where l_i(x) = prod( (x - x_k)/(x_i - x_k) | k != i)
+    // here we always evaluate with x = 0
+    let m = shares[0].borrow().ys.len();
+    let mut sum = vec![F::ZERO; m];
+    for share in shares.iter() {
+        let xi = share.borrow().x;
+        let yi = &share.borrow().ys;
+
+        let mut prod = F::ONE;
+        for VecShare { x: xk, ys: _ } in shares.iter().map(|s| s.borrow()) {
+            let xk = *xk;
+            if xk != xi {
+                prod *= -xk * (xi - xk).invert().unwrap_or(F::ZERO)
+            }
+        }
+        sum.iter_mut().zip(yi.iter()).for_each(|(sum, &yi)| *sum += yi * prod);
+    }
+    sum
+}
+
+
 #[cfg(test)]
 mod test {
     use crate::{element::Element32, connection::{Network, InMemoryNetwork}};
@@ -294,8 +409,34 @@ mod test {
         assert_eq!(v, a + b);
     }
 
+
+    #[test]
+    fn addition_many() {
+        // We test that we can secret-share a two numbers and add them.
+        let mut rng = rand::rngs::mock::StepRng::new(0, 7);
+        const PARTIES: std::ops::Range<u32> = 1..5u32;
+        let a : Vec<u32> = (0..256).map(|_| rng.gen_range(1..100)).collect();
+        let b : Vec<u32> = (0..256).map(|_| rng.gen_range(1..100)).collect();
+        let vs1 = {
+            let v : Vec<_> = a.clone().into_iter().map(Element32::from).collect();
+            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
+            share_many(&v, &ids, 4, &mut rng)
+        };
+        let vs2 = {
+            let v : Vec<_> = b.clone().into_iter().map(Element32::from).collect();
+            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
+            share_many(&v, &ids, 4, &mut rng)
+        };
+
+        // MPC
+        let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(a, b)| a + b).collect();
+        let v = reconstruct_many(&shares);
+        let v: Vec<u32> = v.into_iter().map(|x| x.into()).collect();
+        assert_eq!(v, a.iter().zip(b).map(|(a,b)| a+b).collect::<Vec<_>>());
+    }
+
     use fixed::FixedU32;
-    use rand::thread_rng;
+    use rand::{thread_rng, Rng};
 
     #[test]
     fn addition_fixpoint() {

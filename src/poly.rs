@@ -8,6 +8,7 @@ use rand::{Rng, RngCore};
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Polynomial<G>(pub Box<[G]>);
 
+
 impl<G: ops::AddAssign + Clone> Polynomial<G> {
     fn add_self(&mut self, other: &Self) {
         self.0
@@ -61,6 +62,25 @@ impl<F: Field> Polynomial<F> {
     }
 }
 
+// impl<F: Copy, G> ops::Mul<&G> for Polynomial<F>
+// where F: for<'a> ops::Mul<&'a G>, Box<[G]>: for<'a> FromIterator<<F as ops::Mul<&'a G>>::Output> {
+//     type Output = Polynomial<G>;
+
+//     fn mul(self, rhs: &G) -> Self::Output {
+//         Polynomial(self.0.iter().map(|&a| a * rhs).collect())
+//     }
+// }
+
+
+impl<F: Copy, G: Clone> ops::Mul<G> for &Polynomial<F>
+where F: ops::Mul<G, Output=G>, Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output> {
+    type Output = Polynomial<G>;
+
+    fn mul(self, rhs: G) -> Self::Output {
+        Polynomial(self.0.iter().map(|&a| -> G {a * rhs.clone()}).collect())
+    }
+}
+
 impl<F: AddAssign + Clone> std::iter::Sum for Polynomial<F> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         // This is sort of a hack, sum() should work on empty iterators.
@@ -82,7 +102,7 @@ impl<F: AddAssign + Clone> std::iter::Sum for Polynomial<F> {
 }
 
 impl<F: ops::AddAssign + num_traits::Zero + Clone, G: ops::Mul<Output = F> + Copy> Polynomial<G> {
-    fn mult(&self, other: &Self) -> Polynomial<F> {
+    pub fn mult(&self, other: &Self) -> Polynomial<F> {
         // degree is length - 1.
         let n = self.0.len() + other.0.len();
         let iter = self.0.iter().enumerate().cartesian_product(other.0.iter().enumerate())

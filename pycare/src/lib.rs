@@ -1,7 +1,8 @@
 use std::{sync::Mutex, net::SocketAddr};
-use pyo3::{prelude::*, types::PyTuple};
+use curve25519_dalek::Scalar;
+use pyo3::{prelude::*, types::{PyTuple, PyList}};
 
-use caring::{shamir, connection::TcpNetwork};
+use caring::{schemes::feldman, connection::TcpNetwork};
 use rand::thread_rng;
 
 struct AdderEngine {
@@ -40,14 +41,17 @@ fn offset_binary() {
 }
 
 static ENGINE : Mutex<Option<Box<AdderEngine>>> = Mutex::new(None);
-fn mpc_sum(num: f64) -> f64 {
+fn mpc_sum(nums: &[f64]) -> Vec<f64> {
     let mut engine = ENGINE.lock().unwrap();
     let engine = engine.as_mut().unwrap().as_mut();
     let AdderEngine { network, runtime, threshold } = engine;
-    let num = to_offset(num);
+    let nums : Vec<_> = nums.into_iter().map(|&num| {
+        let num = to_offset(num);
+        
+        curve25519_dalek::Scalar::from(num)
+    }).collect();
 
     let res = runtime.block_on(async {
-        let num = curve25519_dalek::Scalar::from(num);
 
         // construct
         let parties: Vec<_> = network
@@ -57,23 +61,26 @@ fn mpc_sum(num: f64) -> f64 {
             .collect();
 
         let mut rng = thread_rng();
-        let shares = shamir::share::<curve25519_dalek::Scalar>(num, &parties, *threshold, &mut rng);
+        let shares = feldman::share_many::<curve25519_dalek::Scalar, curve25519_dalek::RistrettoPoint>(&nums, &parties, *threshold, &mut rng);
 
         // share my shares.
         let shares = network.symmetric_unicast(shares).await;
 
         // compute
         let my_result = shares.into_iter().sum();
-        let open_shares = network.symmetric_broadcast(my_result).await;
+        let open_shares : Vec<feldman::VecVerifiableShare<_,_>> = network.symmetric_broadcast(my_result).await;
 
         // reconstruct
-        let res = shamir::reconstruct(&open_shares);
+        let res = feldman::reconstruct_many(&open_shares).unwrap();
         // NOTE: Since we are only using half of this space, we have
         // a possibility of 'checking' for computation failures.
-        let res: [u8; 16] = res.as_bytes()[0..16].try_into().unwrap();
-        u128::from_le_bytes(res)
+        res.iter().map(|res : &Scalar| {
+            let res =  res.as_bytes()[0..16].try_into().unwrap();
+            let res = u128::from_le_bytes(res);
+            from_offset(res)
+        }).collect()
     });
-    from_offset(res)
+    res
 }
 
 /// Setup a MPC addition engine connected to the given sockets.
@@ -99,7 +106,13 @@ fn setup(my_addr: &str, others: &PyTuple) -> PyResult<()> {
 /// Run a sum procedure in which each party supplies a double floating point
 #[pyfunction]
 fn sum(a: f64) -> f64 {
-    mpc_sum(a)
+    mpc_sum(&[a])[0]
+}
+
+
+#[pyfunction]
+fn sum_many(a: Vec<f64>) -> Vec<f64> {
+    mpc_sum(&a)
 }
 
 /// Takedown the MPC engine, freeing the memory and dropping the connections
@@ -113,6 +126,7 @@ fn takedown() {
 fn pycare(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_function(wrap_pyfunction!(sum, m)?)?;
+    m.add_function(wrap_pyfunction!(sum_many, m)?)?;
     m.add_function(wrap_pyfunction!(takedown, m)?)?;
     Ok(())
 }

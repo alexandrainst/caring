@@ -10,9 +10,9 @@
 //! when receiving a share, parallel to everything else, and just 'awaited' before sending
 //! anything based on that.
 //!
-use std::{iter, ops, sync::Arc};
+use std::{iter, ops, sync::Arc, borrow::Borrow};
 
-use crate::{poly::Polynomial, schemes::shamir};
+use crate::{poly::Polynomial, schemes::shamir::{self}};
 
 use ff::Field;
 use group::Group;
@@ -119,7 +119,6 @@ where
         let poly = Arc::new(poly);
         shares.push(VerifiableShare { share, poly });
     }
-
     shares
 }
 
@@ -137,6 +136,93 @@ where G: Group + std::ops::Mul<F, Output = G> {
     let res = shamir::reconstruct(&shares);
 
     Some(res)
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct VecVerifiableShare<F : Field, G: Group> {
+    shares: shamir::VecShare<F>,
+    polys: Arc<[Polynomial<G>]>
+}
+
+
+impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F,G> {
+    fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+        let fst = iter.next().unwrap();
+        let mut shares = fst.shares;
+        // let polys : &mut [Polynomial<_>] = match Arc::get_mut(&mut fst.polys) {
+        let mut polys : Vec<Polynomial<_>> = fst.polys.iter().cloned().collect();
+
+        for vs in iter {
+            shares += vs.shares;
+            polys.iter_mut().zip(vs.polys.iter()).for_each(|(mut acc, p)| acc += p);
+        }
+        let polys : Arc<[_]> = polys.into();
+        VecVerifiableShare { shares, polys }
+    }
+}
+
+impl<F: Field,G> VecVerifiableShare<F, G> where G: Group + std::ops::Mul<F, Output = G> {
+    pub fn verify(&self) -> bool
+    {
+        let VecVerifiableShare { shares, polys } = self;
+        let x = shares.x;
+        for (&y, poly) in shares.ys.iter().zip(polys.iter()) {
+            let mut check = G::identity();
+            for (i, &a) in poly.0.iter().enumerate() {
+                check += a * x.pow([i as u64]);
+            }
+            if check != G::generator() * y {
+                return false
+            }
+        }
+        true
+    }
+}
+
+pub fn share_many<F: Field, G: Group>(
+    vals: &[F],
+    ids: &[F],
+    threshold: u64,
+    rng: &mut impl RngCore,
+) -> Vec<VecVerifiableShare<F, G>>
+// FIX: This `where` clause is a bit much.
+where F: ops::Mul<G, Output=G>, Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>, for<'a> &'a crate::poly::Polynomial<F>: std::ops::Mul<G, Output = Polynomial<G>>
+{
+    let n = ids.len();
+    assert!(
+        n >= threshold as usize,
+        "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
+    );
+    let polys : Box<[_]> = vals.iter().map(|_| Polynomial::<F>::random(threshold as usize, rng)).collect();
+    let macs : Arc<[Polynomial<G>]> = polys.iter().map(|p| p * G::generator()).collect();
+
+    let mut vshares: Vec<_> = Vec::with_capacity(n);
+    for x in ids {
+        let x = *x;
+        let mut vecshare = Vec::with_capacity(vals.len());
+        for (i,_) in vals.iter().enumerate() {
+            let y = polys[i].eval(x);
+            vecshare.push(y);
+        }
+        let shares = shamir::VecShare{x, ys: vecshare.into_boxed_slice()};
+        let polys = macs.clone();
+        vshares.push(VecVerifiableShare {shares, polys})
+    }
+
+
+    vshares
+}
+
+pub fn reconstruct_many<F: Field, G: Group, T: Borrow<VecVerifiableShare<F, G>>>(
+    vec_shares: &[T],
+) -> Option<Vec<F>>
+where G: Group + std::ops::Mul<F, Output = G> {
+    for shares in vec_shares {
+        assert!(shares.borrow().verify());
+    }
+
+    let shares : Vec<_> = vec_shares.iter().map(|x| &x.borrow().shares).collect();
+    Some(shamir::reconstruct_many(&shares))
 }
 
 #[cfg(test)]

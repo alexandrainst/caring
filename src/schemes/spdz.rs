@@ -11,7 +11,7 @@
 //!
 use ff::Field;
 
-use derive_more::{Add, AddAssign, Sub, SubAssign};
+use derive_more::{Add, AddAssign};
 use rand::RngCore;
 
 #[derive(Clone, Copy, Add, AddAssign)]
@@ -37,20 +37,22 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
 
 pub fn share<F: Field>(val: F, n: usize, key: F, mut rng: &mut impl RngCore) -> Vec<Share<F>> {
     // HACK: This is really not secure at all.
-    let mut shares : Vec<_> = (0..n).map(|_| {
-        F::random(&mut rng)
-    }).collect();
+    let mut shares: Vec<_> = (0..n).map(|_| F::random(&mut rng)).collect();
 
-    let sum : F = shares.iter().sum();
-    shares[0] -=  sum - val;
+    let sum: F = shares.iter().sum();
+    shares[0] -= sum - val;
     // In Fresco, this is all very interactive
 
-    shares.into_iter().map(|x| {
-        Share{val: x, mac: key * x}
-    }).collect()
+    shares
+        .into_iter()
+        .map(|x| Share {
+            val: x,
+            mac: key * x,
+        })
+        .collect()
 }
 
-pub fn input<F: Field>(val: F, n: usize) -> Vec<Share<F>> {
+pub fn input<F: Field>(_val: F, _n: usize) -> Vec<Share<F>> {
 
     // 1. Everyone sends party `i` their share (partial opening)
     // 2. Party `i` then broadcasts `x^i - r`.
