@@ -19,7 +19,11 @@ group = "0.13.0"
 itertools = "0.11.0"
 num-traits = "0.2.16"
 rand = "0.8.5"
+rayon = "1.8.0"
 serde = { version = "1.0.188", features = ["rc"] }
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-rustls = "0.24.1"
 tokio-util = { version = "0.7.9", features = ["io", "net", "io-util", "codec", "full"] }
+
+[features]
+rayon = []

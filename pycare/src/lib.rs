@@ -1,6 +1,6 @@
 use std::{sync::Mutex, net::SocketAddr};
 use curve25519_dalek::Scalar;
-use pyo3::{prelude::*, types::{PyTuple, PyList}};
+use pyo3::{prelude::*, types::{PyTuple}};
 
 use caring::{schemes::feldman, connection::TcpNetwork};
 use rand::thread_rng;

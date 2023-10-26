@@ -173,7 +173,9 @@ pub async fn beaver_multiply<
     y*ax + a*(-by) + c
 }
 
-
+// TODO: Maybe cut the regular multiplication protocol out and allow multiplying shares directly,
+// at the conseqeunce of increasing their degree? (Sidenote: maybe introduce degree tracking?)
+// Instead provide a protocol for the degree reduction.
 pub async fn regular_multiply< // FIX: Doesn't work
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
 > (
@@ -210,6 +212,10 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
     assert!(
         n >= threshold as usize,
         "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
+    );
+    assert!(
+        ids.iter().all(|x| !x.is_zero_vartime()),
+        "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
     );
 
     // Sample random t-degree polynomial
@@ -275,14 +281,22 @@ impl<F: Field> std::ops::Add for &VecShare<F> {
 
     fn add(self, rhs: Self) -> Self::Output {
         let x = self.x;
-        let ys = self.ys.iter().zip(rhs.ys.iter()).map(|(&a,&b)| a+b).collect();
+        let ys = if cfg!(feature = "rayon") {
+            self.ys.par_iter().zip(rhs.ys.par_iter()).map(|(&a,&b)| a+b).collect()
+        } else {
+            self.ys.iter().zip(rhs.ys.iter()).map(|(&a,&b)| a+b).collect()
+        };
         VecShare {x, ys}
     }
 }
 
 impl<F: Field> std::ops::AddAssign for VecShare<F> {
     fn add_assign(&mut self, rhs: Self) {
-        self.ys.iter_mut().zip(rhs.ys.iter()).for_each(|(a,b)| *a += b)
+        if cfg!(feature = "rayon") {
+            self.ys.par_iter_mut().zip(rhs.ys.par_iter()).for_each(|(a,b)| *a += b)
+        } else {
+            self.ys.iter_mut().zip(rhs.ys.iter()).for_each(|(a,b)| *a += b)
+        }
     }
 }
 
@@ -303,7 +317,7 @@ impl<F: Field> From<VecShare<F>> for Vec<Share<F>> {
 
 impl<F: Field> std::iter::Sum for VecShare<F> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
-        let mut first = iter.next().expect("Please don't sum zero things togehtor");
+        let mut first = iter.next().expect("Please don't sum zero items together");
         for elem in iter {
             first += elem;
         }
@@ -316,7 +330,7 @@ pub fn share_many<F: Field>(vs: &[F], ids: &[F], threshold: u64, rng: &mut impl 
     let n = ids.len();
     assert!(
         n >= threshold as usize,
-        "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
+        "Threshold should be less-than-or-equal to the number of shares: t={threshold}, n={n}"
     );
 
     // Sample random t-degree polynomial
@@ -330,16 +344,18 @@ pub fn share_many<F: Field>(vs: &[F], ids: &[F], threshold: u64, rng: &mut impl 
     let mut shares: Vec<VecShare<F>> = Vec::with_capacity(n);
     for x in ids {
         let x = *x;
-        let mut vecshare = Vec::with_capacity(vs.len());
-        for (i,_) in vs.iter().enumerate() {
-            let y = polynomials[i].eval(x);
-            vecshare.push(y);
-        }
-        shares.push(VecShare{x, ys: vecshare.into_boxed_slice()})
+        let vecshare : Box<[_]>= if cfg!(feature = "rayon") {
+            vs.par_iter().enumerate().map(|(i,_)| { polynomials[i].eval(x) }).collect()
+        } else {
+            vs.iter().enumerate().map(|(i,_)| { polynomials[i].eval(x) }).collect()
+        };
+        shares.push(VecShare{x, ys: vecshare})
     }
 
     shares
 }
+
+use rayon::prelude::*;
 
 pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F> {
     // FIX: Code duplication with 'reconstruction'
@@ -361,7 +377,12 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
                 prod *= -xk * (xi - xk).invert().unwrap_or(F::ZERO)
             }
         }
-        sum.iter_mut().zip(yi.iter()).for_each(|(sum, &yi)| *sum += yi * prod);
+        // If we are using rayon (running in parallel)
+        if cfg!(feature = "rayon") {
+            sum.par_iter_mut().zip(yi.par_iter()).for_each(|(sum, &yi)| *sum += yi * prod);
+        } else {
+            sum.iter_mut().zip(yi.iter()).for_each(|(sum, &yi)| *sum += yi * prod);
+        }
     }
     sum
 }
@@ -369,7 +390,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
 
 #[cfg(test)]
 mod test {
-    use crate::{element::Element32, connection::{Network, InMemoryNetwork}};
+    use crate::{element::Element32, connection::InMemoryNetwork};
 
     use super::*;
 
@@ -518,7 +539,7 @@ mod test {
         let treshold: u64 = 3;
 
         // preproccessing
-        let triples = BeaverTriple::fake(&parties, treshold, &mut rng);
+        let _triples = BeaverTriple::fake(&parties, treshold, &mut rng);
 
         let mut taskset = tokio::task::JoinSet::new();
         // MPC

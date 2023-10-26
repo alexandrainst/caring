@@ -205,6 +205,10 @@ where F: ops::Mul<G, Output=G>, Box<[G]>: FromIterator<<F as ops::Mul<G>>::Outpu
         n >= threshold as usize,
         "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
     );
+    assert!(
+        ids.iter().all(|x| !x.is_zero_vartime()),
+        "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
+    );
     let polys : Vec<_> = vals.iter().map(|v| {
         let mut p = Polynomial::<F>::random(threshold as usize, rng);
         p.0[0] = *v;
@@ -224,7 +228,6 @@ where F: ops::Mul<G, Output=G>, Box<[G]>: FromIterator<<F as ops::Mul<G>>::Outpu
         let polys = macs.clone();
         vshares.push(VecVerifiableShare {shares, polys})
     }
-
 
     vshares
 }

@@ -65,6 +65,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
         }
     }
 
+    /// Destroy the connection, returning the internal reader and writer.
     pub async fn destroy(self) -> (R, W) {
         let Self { input, reader, task } = self;
         let reader = reader.into_inner();

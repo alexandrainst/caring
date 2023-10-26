@@ -3,7 +3,7 @@ use ff::Field;
 
 use itertools::{self, Itertools};
 use num_traits::Zero;
-use rand::{Rng, RngCore};
+use rand::{RngCore};
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Polynomial<G>(pub Box<[G]>);
