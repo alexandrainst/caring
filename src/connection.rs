@@ -67,7 +67,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
 
     /// Destroy the connection, returning the internal reader and writer.
     pub async fn destroy(self) -> (R, W) {
-        let Self { input, reader, task } = self;
+        let Self {
+            input,
+            reader,
+            task,
+        } = self;
         let reader = reader.into_inner();
         drop(input);
         // Should not wait much here since we drop input
@@ -111,7 +115,7 @@ impl TcpConnection {
     }
 
     pub async fn to_tcp(self) -> TcpStream {
-        let (r,w) = self.destroy().await;
+        let (r, w) = self.destroy().await;
         // UNWRAP: Should never fail, as we build the connection from two
         // streams before. However! One could construct TcpConnection manually
         // suing `Connection::new`, thus it 'can' fail.
@@ -122,8 +126,8 @@ impl TcpConnection {
 
 pub type TlsConnection = Connection<
     ReadHalf<tokio_rustls::TlsStream<TcpStream>>,
-    WriteHalf<tokio_rustls::TlsStream<TcpStream>>
-    >;
+    WriteHalf<tokio_rustls::TlsStream<TcpStream>>,
+>;
 impl TlsConnection {
     /// New TLS-based connection from a stream
     ///
@@ -133,7 +137,6 @@ impl TlsConnection {
         Self::new(reader, writer)
     }
 }
-
 
 pub type DuplexConnection = Connection<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 impl DuplexConnection {
@@ -193,7 +196,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         // TODO: Concurrency
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv();
-            async move { (i, msg.await ) }
+            async move { (i, msg.await) }
         });
         let mut messages = future::join_all(messages).await;
         // Maybe we should pass the id with it?
@@ -359,9 +362,7 @@ impl TcpNetwork {
             stream.set_nodelay(true).unwrap();
         }
 
-        let connections = parties.into_iter()
-            .map(Connection::from_tcp).collect();
-
+        let connections = parties.into_iter().map(Connection::from_tcp).collect();
 
         let mut network = Self {
             connections,

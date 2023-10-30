@@ -2,7 +2,7 @@
 //! These are the broadcast: send a message to many
 //! and unicast: send a message to each
 //!
-//! The function of these is to provide an interface over the 
+//! The function of these is to provide an interface over the
 //! concrete `Network` struct, allowing a looser API.
 //!
 //! ...Mostly due to the way `Network` have been constructed,
@@ -23,7 +23,7 @@
 //!
 
 use itertools::Itertools;
-use tokio::io::{AsyncWrite, AsyncRead};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::connection::Network;
 
@@ -33,8 +33,8 @@ pub trait Broadcast {
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
     async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T>
-        where T: serde::Serialize + serde::de::DeserializeOwned;
-
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T>;
@@ -46,40 +46,42 @@ pub trait Unicast {
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
     async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Vec<T>
-        where T: serde::Serialize + serde::de::DeserializeOwned;
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T>;
 }
 
-
 // TODO: Move to network
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R,W> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
         self.unicast(msgs)
     }
 
     async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Vec<T>
-        where T: serde::Serialize + serde::de::DeserializeOwned {
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
         self.symmetric_unicast(msgs).await
     }
-
 
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
         self.receive_all().await
     }
-
 }
 
 // TODO: Move to network
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R,W> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
     fn broadcast(&mut self, msg: &impl serde::Serialize) {
         self.broadcast(msg)
     }
 
     async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T>
-        where T: serde::Serialize + serde::de::DeserializeOwned {
-            self.symmetric_broadcast(msg).await
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        self.symmetric_broadcast(msg).await
     }
 
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
@@ -87,16 +89,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R,W> {
     }
 }
 
-
 use digest::Digest;
 // INFO: Reconsider if Broadcast should be a supertrait or just a type parameter
 // There is also the question if we should overload the existing methods or provide
 // new methods prefixed with 'verified' or something.
-trait VerifiedBroadcast<D : Digest> : Broadcast {
-
+trait VerifiedBroadcast<D: Digest>: Broadcast {
     /// Ensure that a received broadcast is the same across all parties.
     async fn symmetric_broadcast<T: AsRef<[u8]>>(&mut self, msg: T) -> Vec<T>
-        where T: serde::Serialize + serde::de::DeserializeOwned
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
     {
         // TODO: Major clean-up here
         // TODO: Testing
@@ -110,8 +111,8 @@ trait VerifiedBroadcast<D : Digest> : Broadcast {
         // 1. Send messages along with hash
         let mut digest = D::new();
         digest.update(&msg);
-        let hash : Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let packets = Broadcast::symmetric_broadcast(self, (msg, hash)) .await;
+        let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
+        let packets = Broadcast::symmetric_broadcast(self, (msg, hash)).await;
 
         // 2. Check that the hashes match
         for (msg, hash) in &packets {
@@ -123,13 +124,13 @@ trait VerifiedBroadcast<D : Digest> : Broadcast {
         }
 
         // 3. Hash the hashes together and broadcast that
-        let (packets, hashes) : (Vec<_>, Vec<_>)= packets.into_iter().unzip();
+        let (packets, hashes): (Vec<_>, Vec<_>) = packets.into_iter().unzip();
         let mut digest = D::new();
         for hash in hashes {
             digest.update(hash);
         }
-        let hash : Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let hashes : Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, hash).await;
+        let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
+        let hashes: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, hash).await;
         let check = hashes.iter().all_equal();
         if !check {
             // If some of the hashes are different, someone has gotten different results.
@@ -140,11 +141,9 @@ trait VerifiedBroadcast<D : Digest> : Broadcast {
         packets
     }
 
-
     fn broadcast(&mut self, _msg: &impl serde::Serialize) {
         todo!("Need to apply verification layer")
     }
-
 
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
         todo!("Need to apply verification layer")

@@ -15,12 +15,14 @@ use derive_more::{Add, AddAssign};
 use rand::RngCore;
 
 #[derive(Clone, Copy, Add, AddAssign)]
-pub struct Share<F: Field>{val: F, mac: F}
+pub struct Share<F: Field> {
+    val: F,
+    mac: F,
+}
 
 impl<F: Field> Share<F> {
-
     pub fn validate(&self, key: F) -> bool {
-        let Share{val, mac} = *self;
+        let Share { val, mac } = *self;
         val * key == mac
     }
 }
@@ -29,7 +31,10 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     type Output = Share<F>;
 
     fn mul(self, rhs: F) -> Self::Output {
-        Share{val:self.val * rhs, mac: self.mac * rhs}
+        Share {
+            val: self.val * rhs,
+            mac: self.mac * rhs,
+        }
     }
 }
 
@@ -53,7 +58,6 @@ pub fn share<F: Field>(val: F, n: usize, key: F, mut rng: &mut impl RngCore) -> 
 }
 
 pub fn input<F: Field>(_val: F, _n: usize) -> Vec<Share<F>> {
-
     // 1. Everyone sends party `i` their share (partial opening)
     // 2. Party `i` then broadcasts `x^i - r`.
     //    Party 1 sets their share to `x^i_1 = r1 + x^i - r`.
@@ -77,14 +81,13 @@ mod test {
     #[test]
     fn sharing() {
         use crate::element::Element32;
-        let mut rng  = rand::rngs::mock::StepRng::new(42, 7);
+        let mut rng = rand::rngs::mock::StepRng::new(42, 7);
         // Key should probablu be derived from a random somewhere
-        let key  = 7u32.into();
-        let v  = 42u32;
+        let key = 7u32.into();
+        let v = 42u32;
         let shares = share(Element32::from(v), 3, key, &mut rng);
 
-        let v2 : u32 = reconstruct(&shares).into();
+        let v2: u32 = reconstruct(&shares).into();
         assert_eq!(v, v2);
     }
-
 }

@@ -1,13 +1,20 @@
-use std::ops::{self, AddAssign};
 use ff::Field;
+use std::ops::{self, AddAssign};
 
 use itertools::{self, Itertools};
 use num_traits::Zero;
-use rand::{RngCore};
+use rand::RngCore;
+// NOTE: Consider basing a lot of these generic vectorized data structeres on a common
+// one as to limit the mental and code overhead of duplicated implementations of
+// addition, multiplication, etc.
+// Maybe this task should be delegated out to a crate itself?
+// --
+// Currently, the common functionaly is a dynamically allocated but constant sized vector,
+// which supports addition with itself and multiplication with another type in which it maps over
+// to. There is also the randomness, and iterating over values.
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Polynomial<G>(pub Box<[G]>);
-
 
 impl<G: ops::AddAssign + Clone> Polynomial<G> {
     fn add_self(&mut self, other: &Self) {
@@ -31,7 +38,10 @@ impl<G: Field> Polynomial<G> {
     /// Evaluate `x` in the polynomial `f`, such you obtain `f(x)`
     ///
     /// * `x`: value to map from
-    pub fn eval<F : Field>(&self, x : F) -> G where G: ops::Mul<F, Output = G> {
+    pub fn eval<F: Field>(&self, x: F) -> G
+    where
+        G: ops::Mul<F, Output = G>,
+    {
         self.0
             .iter()
             .enumerate()
@@ -43,10 +53,9 @@ impl<G: Field> Polynomial<G> {
     }
 }
 
-
 impl<G> FromIterator<G> for Polynomial<G> {
     fn from_iter<T: IntoIterator<Item = G>>(iter: T) -> Self {
-        let poly : Box<[_]> = iter.into_iter().collect();
+        let poly: Box<[_]> = iter.into_iter().collect();
         Polynomial(poly)
     }
 }
@@ -57,8 +66,7 @@ impl<F: Field> Polynomial<F> {
     /// * `degree`: the degree of the polynomial
     /// * `rng`: random number generator to use
     pub fn random(degree: usize, mut rng: &mut impl RngCore) -> Self {
-        (0..degree).map(|_| F::random(&mut rng))
-            .collect()
+        (0..degree).map(|_| F::random(&mut rng)).collect()
     }
 }
 
@@ -71,13 +79,15 @@ impl<F: Field> Polynomial<F> {
 //     }
 // }
 
-
 impl<F: Copy, G: Clone> ops::Mul<G> for &Polynomial<F>
-where F: ops::Mul<G, Output=G>, Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output> {
+where
+    F: ops::Mul<G, Output = G>,
+    Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>,
+{
     type Output = Polynomial<G>;
 
     fn mul(self, rhs: G) -> Self::Output {
-        Polynomial(self.0.iter().map(|&a| -> G {a * rhs.clone()}).collect())
+        Polynomial(self.0.iter().map(|&a| -> G { a * rhs.clone() }).collect())
     }
 }
 
@@ -105,8 +115,12 @@ impl<F: ops::AddAssign + num_traits::Zero + Clone, G: ops::Mul<Output = F> + Cop
     pub fn mult(&self, other: &Self) -> Polynomial<F> {
         // degree is length - 1.
         let n = self.0.len() + other.0.len();
-        let iter = self.0.iter().enumerate().cartesian_product(other.0.iter().enumerate())
-            .map(| ((i, &a), (j, &b)) | (i+j, a*b));
+        let iter = self
+            .0
+            .iter()
+            .enumerate()
+            .cartesian_product(other.0.iter().enumerate())
+            .map(|((i, &a), (j, &b))| (i + j, a * b));
 
         let mut vec = vec![F::zero(); n - 1];
         for (i, a) in iter {
@@ -203,7 +217,6 @@ impl<G: ops::SubAssign + Clone> ops::Sub<&Polynomial<G>> for Polynomial<G> {
     }
 }
 
-
 impl<'a, 'b, G: ops::SubAssign + Clone> ops::Sub<&'a Polynomial<G>> for &'b Polynomial<G> {
     type Output = Polynomial<G>;
 
@@ -212,10 +225,4 @@ impl<'a, 'b, G: ops::SubAssign + Clone> ops::Sub<&'a Polynomial<G>> for &'b Poly
         new -= rhs;
         new
     }
-}
-
-
-
-#[cfg(test)]
-mod test {
 }

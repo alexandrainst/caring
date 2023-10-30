@@ -10,14 +10,16 @@
 //! when receiving a share, parallel to everything else, and just 'awaited' before sending
 //! anything based on that.
 //!
-use std::{iter, ops, sync::Arc, borrow::Borrow};
+use std::{borrow::Borrow, iter, ops, sync::Arc};
 
-use crate::{poly::Polynomial, schemes::shamir::{self}};
+use crate::{
+    poly::Polynomial,
+    schemes::shamir::{self},
+};
 
 use ff::Field;
 use group::Group;
 use rand::RngCore;
-
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VerifiableShare<F: Field, G: Group> {
@@ -25,9 +27,11 @@ pub struct VerifiableShare<F: Field, G: Group> {
     poly: Arc<Polynomial<G>>,
 }
 
-impl<F: Field,G> VerifiableShare<F, G> where G: Group + std::ops::Mul<F, Output = G> {
-    pub fn verify(&self) -> bool
-    {
+impl<F: Field, G> VerifiableShare<F, G>
+where
+    G: Group + std::ops::Mul<F, Output = G>,
+{
+    pub fn verify(&self) -> bool {
         let VerifiableShare { share, poly } = self;
         let mut check = G::identity();
         for (i, &a) in poly.0.iter().enumerate() {
@@ -37,7 +41,7 @@ impl<F: Field,G> VerifiableShare<F, G> where G: Group + std::ops::Mul<F, Output 
     }
 }
 
-impl<F: Field, G: Group> ops::Add for VerifiableShare<F,G> {
+impl<F: Field, G: Group> ops::Add for VerifiableShare<F, G> {
     type Output = Self;
 
     fn add(mut self, rhs: Self) -> Self::Output {
@@ -45,13 +49,12 @@ impl<F: Field, G: Group> ops::Add for VerifiableShare<F,G> {
         poly += &rhs.poly;
         Self {
             share: self.share + rhs.share,
-            poly: self.poly
+            poly: self.poly,
         }
     }
 }
 
-
-impl<F: Field, G: Group> ops::Sub for VerifiableShare<F,G> {
+impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
     type Output = Self;
 
     fn sub(mut self, rhs: Self) -> Self::Output {
@@ -59,12 +62,12 @@ impl<F: Field, G: Group> ops::Sub for VerifiableShare<F,G> {
         poly -= &rhs.poly;
         Self {
             share: self.share - rhs.share,
-            poly: self.poly
+            poly: self.poly,
         }
     }
 }
 
-impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F,G> {
+impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         let mut fst = iter.next().unwrap();
         let mut share = fst.share;
@@ -73,7 +76,10 @@ impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F,G> {
             share += vs.share;
             poly_ref += &vs.poly;
         }
-        VerifiableShare { share, poly: fst.poly }
+        VerifiableShare {
+            share,
+            poly: fst.poly,
+        }
     }
 }
 
@@ -122,10 +128,10 @@ where
     shares
 }
 
-pub fn reconstruct<F: Field, G: Group>(
-    shares: &[VerifiableShare<F, G>],
-) -> Option<F>
-where G: Group + std::ops::Mul<F, Output = G> {
+pub fn reconstruct<F: Field, G: Group>(shares: &[VerifiableShare<F, G>]) -> Option<F>
+where
+    G: Group + std::ops::Mul<F, Output = G>,
+{
     // let (shares, macs) : (Vec<_>, Vec<_>) = shares.iter().map(|s| (s.share)).unzip();
     for share in shares {
         if !share.verify() {
@@ -139,43 +145,54 @@ where G: Group + std::ops::Mul<F, Output = G> {
 }
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct VecVerifiableShare<F : Field, G: Group> {
+pub struct VecVerifiableShare<F: Field, G: Group> {
     shares: shamir::VecShare<F>,
-    polys: Arc<[Polynomial<G>]>
+    polys: Arc<[Polynomial<G>]>,
 }
 
-impl<F: Field, G: Group> std::ops::Add for &VecVerifiableShare<F,G> {
-    type Output = VecVerifiableShare<F,G>;
+impl<F: Field, G: Group> std::ops::Add for &VecVerifiableShare<F, G> {
+    type Output = VecVerifiableShare<F, G>;
 
     fn add(self, rhs: Self) -> Self::Output {
         let shares = &self.shares + &rhs.shares;
-        let polys : Arc<[Polynomial<_>]> = self.polys.iter().cloned()
+        let polys: Arc<[Polynomial<_>]> = self
+            .polys
+            .iter()
+            .cloned()
             .zip(rhs.polys.iter())
-            .map(|(mut a, b)| {a+=b; a})
+            .map(|(mut a, b)| {
+                a += b;
+                a
+            })
             .collect();
         VecVerifiableShare { shares, polys }
     }
 }
 
-impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F,G> {
+impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         let fst = iter.next().unwrap();
         let mut shares = fst.shares;
         // let polys : &mut [Polynomial<_>] = match Arc::get_mut(&mut fst.polys) {
-        let mut polys : Vec<Polynomial<_>> = fst.polys.iter().cloned().collect();
+        let mut polys: Vec<Polynomial<_>> = fst.polys.iter().cloned().collect();
 
         for vs in iter {
             shares += vs.shares;
-            polys.iter_mut().zip(vs.polys.iter()).for_each(|(mut acc, p)| acc += p);
+            polys
+                .iter_mut()
+                .zip(vs.polys.iter())
+                .for_each(|(mut acc, p)| acc += p);
         }
-        let polys : Arc<[_]> = polys.into();
+        let polys: Arc<[_]> = polys.into();
         VecVerifiableShare { shares, polys }
     }
 }
 
-impl<F: Field,G> VecVerifiableShare<F, G> where G: Group + std::ops::Mul<F, Output = G> {
-    pub fn verify(&self) -> bool
-    {
+impl<F: Field, G> VecVerifiableShare<F, G>
+where
+    G: Group + std::ops::Mul<F, Output = G>,
+{
+    pub fn verify(&self) -> bool {
         let VecVerifiableShare { shares, polys } = self;
         let x = shares.x;
         for (&y, poly) in shares.ys.iter().zip(polys.iter()) {
@@ -184,7 +201,7 @@ impl<F: Field,G> VecVerifiableShare<F, G> where G: Group + std::ops::Mul<F, Outp
                 check += a * x.pow([i as u64]);
             }
             if check != G::generator() * y {
-                return false
+                return false;
             }
         }
         true
@@ -197,8 +214,11 @@ pub fn share_many<F: Field, G: Group>(
     threshold: u64,
     rng: &mut impl RngCore,
 ) -> Vec<VecVerifiableShare<F, G>>
-// FIX: This `where` clause is a bit much.
-where F: ops::Mul<G, Output=G>, Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>, for<'a> &'a crate::poly::Polynomial<F>: std::ops::Mul<G, Output = Polynomial<G>>
+// FIX: This `where` clause is a bit much, it does however work.
+where
+    F: ops::Mul<G, Output = G>,
+    Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>,
+    for<'a> &'a crate::poly::Polynomial<F>: std::ops::Mul<G, Output = Polynomial<G>>,
 {
     let n = ids.len();
     assert!(
@@ -209,24 +229,30 @@ where F: ops::Mul<G, Output=G>, Box<[G]>: FromIterator<<F as ops::Mul<G>>::Outpu
         ids.iter().all(|x| !x.is_zero_vartime()),
         "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
     );
-    let polys : Vec<_> = vals.iter().map(|v| {
-        let mut p = Polynomial::<F>::random(threshold as usize, rng);
-        p.0[0] = *v;
-        p
-    }).collect();
-    let macs : Arc<[Polynomial<G>]> = polys.iter().map(|p| p * G::generator()).collect();
+    let polys: Vec<_> = vals
+        .iter()
+        .map(|v| {
+            let mut p = Polynomial::<F>::random(threshold as usize, rng);
+            p.0[0] = *v;
+            p
+        })
+        .collect();
+    let macs: Arc<[Polynomial<G>]> = polys.iter().map(|p| p * G::generator()).collect();
 
     let mut vshares: Vec<_> = Vec::with_capacity(n);
     for x in ids {
         let x = *x;
         let mut vecshare = Vec::with_capacity(vals.len());
-        for (i,_) in vals.iter().enumerate() {
+        for (i, _) in vals.iter().enumerate() {
             let y = polys[i].eval(x);
             vecshare.push(y);
         }
-        let shares = shamir::VecShare{x, ys: vecshare.into_boxed_slice()};
+        let shares = shamir::VecShare {
+            x,
+            ys: vecshare.into_boxed_slice(),
+        };
         let polys = macs.clone();
-        vshares.push(VecVerifiableShare {shares, polys})
+        vshares.push(VecVerifiableShare { shares, polys })
     }
 
     vshares
@@ -235,12 +261,14 @@ where F: ops::Mul<G, Output=G>, Box<[G]>: FromIterator<<F as ops::Mul<G>>::Outpu
 pub fn reconstruct_many<F: Field, G: Group, T: Borrow<VecVerifiableShare<F, G>>>(
     vec_shares: &[T],
 ) -> Option<Vec<F>>
-where G: Group + std::ops::Mul<F, Output = G> {
+where
+    G: Group + std::ops::Mul<F, Output = G>,
+{
     for shares in vec_shares {
         assert!(shares.borrow().verify());
     }
 
-    let shares : Vec<_> = vec_shares.iter().map(|x| &x.borrow().shares).collect();
+    let shares: Vec<_> = vec_shares.iter().map(|x| &x.borrow().shares).collect();
     Some(shamir::reconstruct_many(&shares))
 }
 
@@ -270,9 +298,9 @@ mod test {
     fn sharing_many() {
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let mut rng = rand::rngs::mock::StepRng::new(42, 7);
-        let a : Vec<u32> = (0..32).map(|_| rng.gen()).collect();
+        let a: Vec<u32> = (0..32).map(|_| rng.gen()).collect();
         let vs1 = {
-            let v : Vec<_> = a.clone().into_iter().map(to_scalar).collect();
+            let v: Vec<_> = a.clone().into_iter().map(to_scalar).collect();
             let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
             share_many::<_, RistrettoPoint>(&v, &ids, 4, &mut rng)
         };
@@ -280,11 +308,14 @@ mod test {
             assert!(share.verify());
         }
         let vsum = reconstruct_many(&vs1).unwrap();
-        let v: Vec<u32> = vsum.into_iter().map(|x| {
-            let x = &x.as_bytes()[0..4];
-            let x: [u8; 4] = x.try_into().unwrap();
-            u32::from_le_bytes(x)
-        }).collect();
+        let v: Vec<u32> = vsum
+            .into_iter()
+            .map(|x| {
+                let x = &x.as_bytes()[0..4];
+                let x: [u8; 4] = x.try_into().unwrap();
+                u32::from_le_bytes(x)
+            })
+            .collect();
         assert_eq!(v, a);
     }
 
@@ -318,20 +349,19 @@ mod test {
         assert_eq!(v1 + v2, vsum);
     }
 
-
     #[test]
     fn addition_many() {
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let mut rng = rand::rngs::mock::StepRng::new(42, 7);
-        let a : Vec<u32> = (0..32).map(|_| rng.gen()).collect();
-        let b : Vec<u32> = (0..32).map(|_| rng.gen()).collect();
+        let a: Vec<u32> = (0..32).map(|_| rng.gen()).collect();
+        let b: Vec<u32> = (0..32).map(|_| rng.gen()).collect();
         let vs1 = {
-            let v : Vec<_> = a.clone().into_iter().map(to_scalar).collect();
+            let v: Vec<_> = a.clone().into_iter().map(to_scalar).collect();
             let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
             share_many::<_, RistrettoPoint>(&v, &ids, 4, &mut rng)
         };
         let vs2 = {
-            let v : Vec<_> = b.clone().into_iter().map(to_scalar).collect();
+            let v: Vec<_> = b.clone().into_iter().map(to_scalar).collect();
             let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
             share_many::<_, RistrettoPoint>(&v, &ids, 4, &mut rng)
         };
@@ -341,23 +371,23 @@ mod test {
         for share in &vs2 {
             assert!(share.verify());
         }
-        let shares: Vec<VecVerifiableShare<_,_>> = vs1
-            .into_iter()
-            .zip(vs2)
-            .map(|(s1, s2)| &s1 + &s2)
-            .collect();
+        let shares: Vec<VecVerifiableShare<_, _>> =
+            vs1.into_iter().zip(vs2).map(|(s1, s2)| &s1 + &s2).collect();
 
         for share in &shares {
             assert!(share.verify());
         }
 
         let vsum = reconstruct_many(&shares).unwrap();
-        let v: Vec<u32> = vsum.into_iter().map(|x| {
-            let x = &x.as_bytes()[0..4];
-            let x: [u8; 4] = x.try_into().unwrap();
-            u32::from_le_bytes(x)
-        }).collect();
-        assert_eq!(v, a.iter().zip(b).map(|(a,b)| a+b).collect::<Vec<_>>());
+        let v: Vec<u32> = vsum
+            .into_iter()
+            .map(|x| {
+                let x = &x.as_bytes()[0..4];
+                let x: [u8; 4] = x.try_into().unwrap();
+                u32::from_le_bytes(x)
+            })
+            .collect();
+        assert_eq!(v, a.iter().zip(b).map(|(a, b)| a + b).collect::<Vec<_>>());
     }
 
     fn to_scalar(num: u32) -> Scalar {
@@ -369,7 +399,6 @@ mod test {
         arr[3] = num[3];
         Scalar::from_bytes_mod_order(arr)
     }
-
 
     #[test]
     fn addition_fixpoint() {

@@ -40,7 +40,9 @@ async fn main() {
         .map(|id| (id + 1))
         .map(curve25519_dalek::Scalar::from)
         .collect();
-    let shares = feldman::share::<curve25519_dalek::Scalar, curve25519_dalek::RistrettoPoint>(num, &parties, 2, &mut rng);
+    let shares = feldman::share::<curve25519_dalek::Scalar, curve25519_dalek::RistrettoPoint>(
+        num, &parties, 2, &mut rng,
+    );
 
     // broadcast my shares.
     println!("Sharing shares...");

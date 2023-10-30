@@ -7,7 +7,10 @@ use itertools::multiunzip;
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
-use crate::{poly::Polynomial, agency::{Broadcast, Unicast}};
+use crate::{
+    agency::{Broadcast, Unicast},
+    poly::Polynomial,
+};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -121,11 +124,11 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
 // This might require a common 'Share' trait, or maybe just something that
 // implements multiplication, who knows.
 #[derive(Clone)]
-pub struct BeaverTriple<F: Field> (Share<F>, Share<F>, Share<F>);
+pub struct BeaverTriple<F: Field>(Share<F>, Share<F>, Share<F>);
 
 impl<F: Field> BeaverTriple<F> {
     /// Fake a set of beaver triples.
-    /// 
+    ///
     /// This produces `n` shares corresponding to a shared beaver triple,
     /// however locally with the values known.
     ///
@@ -140,7 +143,8 @@ impl<F: Field> BeaverTriple<F> {
         let a = share(a, ids, threshold, &mut rng);
         let b = share(b, ids, threshold, &mut rng);
         let c = share(c, ids, threshold, &mut rng);
-        itertools::izip!(a,b,c).map(|(a,b,c)| Self(a,b,c))
+        itertools::izip!(a, b, c)
+            .map(|(a, b, c)| Self(a, b, c))
             .collect()
     }
 }
@@ -151,34 +155,33 @@ impl<F: Field> BeaverTriple<F> {
 /// * `y`: second share to multiply
 /// * `triple`: beaver triple
 /// * `network`: unicasting network
-pub async fn beaver_multiply<
-    F: Field + serde::Serialize + serde::de::DeserializeOwned,
-> (
+pub async fn beaver_multiply<F: Field + serde::Serialize + serde::de::DeserializeOwned>(
     x: Share<F>,
     y: Share<F>,
     triple: BeaverTriple<F>,
-    network: &mut impl Broadcast
+    network: &mut impl Broadcast,
 ) -> Share<F> {
-    let BeaverTriple(a,b,c) = triple;
-    let ax = a+x;
-    let by = b+y;
+    let BeaverTriple(a, b, c) = triple;
+    let ax = a + x;
+    let by = b + y;
 
     // Sending both at once it more efficient.
     let resp = network.symmetric_broadcast((ax, by)).await;
-    let (ax, by) : (Vec<_>, Vec<_>) = multiunzip(resp);
+    let (ax, by): (Vec<_>, Vec<_>) = multiunzip(resp);
 
     let ax = reconstruct(&ax);
     let by = reconstruct(&by);
 
-    y*ax + a*(-by) + c
+    y * ax + a * (-by) + c
 }
 
 // TODO: Maybe cut the regular multiplication protocol out and allow multiplying shares directly,
 // at the conseqeunce of increasing their degree? (Sidenote: maybe introduce degree tracking?)
 // Instead provide a protocol for the degree reduction.
-pub async fn regular_multiply< // FIX: Doesn't work
+pub async fn regular_multiply<
+    // FIX: Doesn't work
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
-> (
+>(
     x: Share<F>,
     y: Share<F>,
     network: &mut impl Unicast,
@@ -191,13 +194,13 @@ pub async fn regular_multiply< // FIX: Doesn't work
     // however 't' is hidden from before, so we jyst have to assume it is.
     // x, y: degree t
     let z = x.y * y.y; // z: degree 2t
-    // Now we need to reduce the polynomial back to t
+                       // Now we need to reduce the polynomial back to t
     let z = share(z, ids, threshold, rng); // share -> subshares
     let z = network.symmetric_unicast(z).await; // publish
-    // ???
-    // Something about a recombination vector and randomization.
+                                                // ???
+                                                // Something about a recombination vector and randomization.
     let z = reconstruct(&z); // reconstruct the subshare
-    Share{x: i, y: z}
+    Share { x: i, y: z }
 }
 
 /// Share/shard a secret value `v` into `n` shares
@@ -234,7 +237,6 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
     shares
 }
 
-
 /// Reconstruct or open shares
 ///
 /// * `shares`: shares to be combined into an open value
@@ -265,9 +267,9 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
 /// * `x`: the id
 /// * `ys`: share values
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct VecShare<F : Field> {
+pub struct VecShare<F: Field> {
     pub(crate) x: F,
-    pub(crate) ys: Box<[F]>
+    pub(crate) ys: Box<[F]>,
 }
 
 // impl<F: Field> AsRef<Self> for VecShare<F> {
@@ -282,20 +284,34 @@ impl<F: Field> std::ops::Add for &VecShare<F> {
     fn add(self, rhs: Self) -> Self::Output {
         let x = self.x;
         let ys = if cfg!(feature = "rayon") {
-            self.ys.par_iter().zip(rhs.ys.par_iter()).map(|(&a,&b)| a+b).collect()
+            self.ys
+                .par_iter()
+                .zip(rhs.ys.par_iter())
+                .map(|(&a, &b)| a + b)
+                .collect()
         } else {
-            self.ys.iter().zip(rhs.ys.iter()).map(|(&a,&b)| a+b).collect()
+            self.ys
+                .iter()
+                .zip(rhs.ys.iter())
+                .map(|(&a, &b)| a + b)
+                .collect()
         };
-        VecShare {x, ys}
+        VecShare { x, ys }
     }
 }
 
 impl<F: Field> std::ops::AddAssign for VecShare<F> {
     fn add_assign(&mut self, rhs: Self) {
         if cfg!(feature = "rayon") {
-            self.ys.par_iter_mut().zip(rhs.ys.par_iter()).for_each(|(a,b)| *a += b)
+            self.ys
+                .par_iter_mut()
+                .zip(rhs.ys.par_iter())
+                .for_each(|(a, b)| *a += b)
         } else {
-            self.ys.iter_mut().zip(rhs.ys.iter()).for_each(|(a,b)| *a += b)
+            self.ys
+                .iter_mut()
+                .zip(rhs.ys.iter())
+                .for_each(|(a, b)| *a += b)
         }
     }
 }
@@ -304,14 +320,14 @@ impl<F: Field> From<Vec<Share<F>>> for VecShare<F> {
     fn from(value: Vec<Share<F>>) -> Self {
         let x = value[0].x;
         let ys = value.into_iter().map(|Share { x: _, y }| y).collect();
-        VecShare {x, ys}
+        VecShare { x, ys }
     }
 }
 
 impl<F: Field> From<VecShare<F>> for Vec<Share<F>> {
     fn from(value: VecShare<F>) -> Self {
         let VecShare { x, ys } = value;
-        ys.iter().map(|&y| Share{x, y}).collect()
+        ys.iter().map(|&y| Share { x, y }).collect()
     }
 }
 
@@ -325,7 +341,12 @@ impl<F: Field> std::iter::Sum for VecShare<F> {
     }
 }
 
-pub fn share_many<F: Field>(vs: &[F], ids: &[F], threshold: u64, rng: &mut impl RngCore) -> Vec<VecShare<F>> {
+pub fn share_many<F: Field>(
+    vs: &[F],
+    ids: &[F],
+    threshold: u64,
+    rng: &mut impl RngCore,
+) -> Vec<VecShare<F>> {
     // FIX: Code duplication with 'share'
     let n = ids.len();
     assert!(
@@ -334,22 +355,31 @@ pub fn share_many<F: Field>(vs: &[F], ids: &[F], threshold: u64, rng: &mut impl 
     );
 
     // Sample random t-degree polynomial
-    let polynomials : Vec<_> = vs.iter().map(|v| {
-        let mut p = Polynomial::random(threshold as usize, rng);
-        p.0[0] = *v;
-        p
-    }).collect();
+    let polynomials: Vec<_> = vs
+        .iter()
+        .map(|v| {
+            let mut p = Polynomial::random(threshold as usize, rng);
+            p.0[0] = *v;
+            p
+        })
+        .collect();
 
     // Sample n points from 1..=n in the polynomial
     let mut shares: Vec<VecShare<F>> = Vec::with_capacity(n);
     for x in ids {
         let x = *x;
-        let vecshare : Box<[_]>= if cfg!(feature = "rayon") {
-            vs.par_iter().enumerate().map(|(i,_)| { polynomials[i].eval(x) }).collect()
+        let vecshare: Box<[_]> = if cfg!(feature = "rayon") {
+            vs.par_iter()
+                .enumerate()
+                .map(|(i, _)| polynomials[i].eval(x))
+                .collect()
         } else {
-            vs.iter().enumerate().map(|(i,_)| { polynomials[i].eval(x) }).collect()
+            vs.iter()
+                .enumerate()
+                .map(|(i, _)| polynomials[i].eval(x))
+                .collect()
         };
-        shares.push(VecShare{x, ys: vecshare})
+        shares.push(VecShare { x, ys: vecshare })
     }
 
     shares
@@ -379,18 +409,21 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
         }
         // If we are using rayon (running in parallel)
         if cfg!(feature = "rayon") {
-            sum.par_iter_mut().zip(yi.par_iter()).for_each(|(sum, &yi)| *sum += yi * prod);
+            sum.par_iter_mut()
+                .zip(yi.par_iter())
+                .for_each(|(sum, &yi)| *sum += yi * prod);
         } else {
-            sum.iter_mut().zip(yi.iter()).for_each(|(sum, &yi)| *sum += yi * prod);
+            sum.iter_mut()
+                .zip(yi.iter())
+                .for_each(|(sum, &yi)| *sum += yi * prod);
         }
     }
     sum
 }
 
-
 #[cfg(test)]
 mod test {
-    use crate::{element::Element32, connection::InMemoryNetwork};
+    use crate::{connection::InMemoryNetwork, element::Element32};
 
     use super::*;
 
@@ -401,7 +434,7 @@ mod test {
         let v = Element32::from(42u32);
         let ids: Vec<_> = (1..=5u32).map(Element32::from).collect();
         let shares = share(v, &ids, 4, &mut rng);
-        let v : u32 = reconstruct(&shares).into();
+        let v: u32 = reconstruct(&shares).into();
         assert_eq!(v, 42u32);
     }
 
@@ -430,21 +463,20 @@ mod test {
         assert_eq!(v, a + b);
     }
 
-
     #[test]
     fn addition_many() {
         // We test that we can secret-share a two numbers and add them.
         let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         const PARTIES: std::ops::Range<u32> = 1..5u32;
-        let a : Vec<u32> = (0..256).map(|_| rng.gen_range(1..100)).collect();
-        let b : Vec<u32> = (0..256).map(|_| rng.gen_range(1..100)).collect();
+        let a: Vec<u32> = (0..256).map(|_| rng.gen_range(1..100)).collect();
+        let b: Vec<u32> = (0..256).map(|_| rng.gen_range(1..100)).collect();
         let vs1 = {
-            let v : Vec<_> = a.clone().into_iter().map(Element32::from).collect();
+            let v: Vec<_> = a.clone().into_iter().map(Element32::from).collect();
             let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share_many(&v, &ids, 4, &mut rng)
         };
         let vs2 = {
-            let v : Vec<_> = b.clone().into_iter().map(Element32::from).collect();
+            let v: Vec<_> = b.clone().into_iter().map(Element32::from).collect();
             let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share_many(&v, &ids, 4, &mut rng)
         };
@@ -453,7 +485,7 @@ mod test {
         let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(a, b)| a + b).collect();
         let v = reconstruct_many(&shares);
         let v: Vec<u32> = v.into_iter().map(|x| x.into()).collect();
-        assert_eq!(v, a.iter().zip(b).map(|(a,b)| a+b).collect::<Vec<_>>());
+        assert_eq!(v, a.iter().zip(b).map(|(a, b)| a + b).collect::<Vec<_>>());
     }
 
     use fixed::FixedU32;
@@ -497,8 +529,7 @@ mod test {
     #[tokio::test]
     async fn beaver_mult() {
         let mut rng = rand::rngs::mock::StepRng::new(0, 7);
-        let parties: Vec<Element32> = (0..2u32).map(|i| i+1)
-            .map(Element32::from).collect();
+        let parties: Vec<Element32> = (0..2u32).map(|i| i + 1).map(Element32::from).collect();
 
         let treshold: u64 = 2;
 
@@ -511,30 +542,30 @@ mod test {
         for network in cluster {
             let parties = parties.clone();
             let triple = triples[network.index].clone();
-            taskset.spawn({async move {
-                let mut rng = rand::rngs::mock::StepRng::new(1, 7);
-                let mut network = network;
-                let v = Element32::from(5u32);
-                let shares = share(v, &parties, treshold, &mut rng);
-                let shares = network.symmetric_unicast(shares).await;
-                let res = beaver_multiply(shares[0], shares[1], triple, &mut network).await;
-                let res = network.symmetric_broadcast(res).await;
-                let res = reconstruct(&res);
-                let res : u32 = res.into();
-                assert_eq!(res, 25);
-            }});
+            taskset.spawn({
+                async move {
+                    let mut rng = rand::rngs::mock::StepRng::new(1, 7);
+                    let mut network = network;
+                    let v = Element32::from(5u32);
+                    let shares = share(v, &parties, treshold, &mut rng);
+                    let shares = network.symmetric_unicast(shares).await;
+                    let res = beaver_multiply(shares[0], shares[1], triple, &mut network).await;
+                    let res = network.symmetric_broadcast(res).await;
+                    let res = reconstruct(&res);
+                    let res: u32 = res.into();
+                    assert_eq!(res, 25);
+                }
+            });
         }
         while let Some(res) = taskset.join_next().await {
             res.unwrap();
         }
     }
 
-
     #[tokio::test]
     async fn regular_mult() {
         let mut rng = thread_rng();
-        let parties: Vec<Element32> = (0..10u32).map(|i| i+1)
-            .map(Element32::from).collect();
+        let parties: Vec<Element32> = (0..10u32).map(|i| i + 1).map(Element32::from).collect();
 
         let treshold: u64 = 3;
 
@@ -546,26 +577,31 @@ mod test {
         let cluster = InMemoryNetwork::in_memory(parties.len());
         for network in cluster {
             let parties = parties.clone();
-            taskset.spawn({async move {
-                let mut rng = rand::rngs::mock::StepRng::new(1, 7);
-                let mut network = network;
-                let v = Element32::from(5u32);
-                let shares = share(v, &parties, treshold, &mut rng);
-                let shares = network.symmetric_unicast(shares).await;
-                // let res = regular_multiply(
-                //     shares[0],
-                //     shares[1], // we ignore the rest of the inputs
-                //     &mut network,
-                //     treshold,
-                //     &parties,
-                //     &mut rng,
-                // ).await;
-                let res = Share{x: shares[0].x, y: shares[0].y * shares[1].y};
-                let res = network.symmetric_broadcast(res).await;
-                let res = reconstruct(&res);
-                let res : u32 = res.into();
-                assert_eq!(res, 25);
-            }});
+            taskset.spawn({
+                async move {
+                    let mut rng = rand::rngs::mock::StepRng::new(1, 7);
+                    let mut network = network;
+                    let v = Element32::from(5u32);
+                    let shares = share(v, &parties, treshold, &mut rng);
+                    let shares = network.symmetric_unicast(shares).await;
+                    // let res = regular_multiply(
+                    //     shares[0],
+                    //     shares[1], // we ignore the rest of the inputs
+                    //     &mut network,
+                    //     treshold,
+                    //     &parties,
+                    //     &mut rng,
+                    // ).await;
+                    let res = Share {
+                        x: shares[0].x,
+                        y: shares[0].y * shares[1].y,
+                    };
+                    let res = network.symmetric_broadcast(res).await;
+                    let res = reconstruct(&res);
+                    let res: u32 = res.into();
+                    assert_eq!(res, 25);
+                }
+            });
         }
         while let Some(res) = taskset.join_next().await {
             res.unwrap();
