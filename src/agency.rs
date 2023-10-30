@@ -22,7 +22,10 @@
 //! from subprotocols in a very elegant manner IMO.
 //!
 
+use std::error::Error;
+
 use itertools::Itertools;
+use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::connection::Network;
@@ -32,12 +35,12 @@ pub trait Broadcast {
 
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
-    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T>
+    async fn symmetric_broadcast<T, E>(&mut self, msg: T) -> Result<Vec<T>, E>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T>;
+    async fn receive_all<T: serde::de::DeserializeOwned, E>(&mut self) -> Result<Vec<T>, E>;
 }
 
 pub trait Unicast {
@@ -45,12 +48,12 @@ pub trait Unicast {
 
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
-    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Vec<T>
+    async fn symmetric_unicast<T, E>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, E>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T>;
+    async fn receive_all<T: serde::de::DeserializeOwned, E>(&mut self) -> Result<Vec<T>, E>;
 }
 
 // TODO: Move to network
@@ -59,15 +62,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
         self.unicast(msgs)
     }
 
-    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Vec<T>
+    async fn symmetric_unicast<T,E>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, E>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        self.symmetric_unicast(msgs).await
+        Ok(self.symmetric_unicast(msgs).await)
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
-        self.receive_all().await
+    async fn receive_all<T: serde::de::DeserializeOwned, E>(&mut self) -> Result<Vec<T>, E> {
+        Ok(self.receive_all().await)
     }
 }
 
@@ -77,15 +80,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
         self.broadcast(msg)
     }
 
-    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T>
+    async fn symmetric_broadcast<T, E>(&mut self, msg: T) -> Result<Vec<T>, E>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        self.symmetric_broadcast(msg).await
+        Ok(self.symmetric_broadcast(msg).await)
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
-        self.receive_all().await
+    async fn receive_all<T: serde::de::DeserializeOwned, E>(&mut self) -> Result<Vec<T>, E> {
+        Ok(self.receive_all().await)
     }
 }
 
@@ -95,7 +98,7 @@ use digest::Digest;
 // new methods prefixed with 'verified' or something.
 trait VerifiedBroadcast<D: Digest>: Broadcast {
     /// Ensure that a received broadcast is the same across all parties.
-    async fn symmetric_broadcast<T: AsRef<[u8]>>(&mut self, msg: T) -> Vec<T>
+    async fn symmetric_broadcast<T: AsRef<[u8]>, E>(&mut self, msg: T) -> Result<Vec<T>, BroadcastVerificationError<E>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -112,7 +115,7 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
         let mut digest = D::new();
         digest.update(&msg);
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let packets = Broadcast::symmetric_broadcast(self, (msg, hash)).await;
+        let packets = Broadcast::symmetric_broadcast(self, (msg, hash)).await?;
 
         // 2. Check that the hashes match
         for (msg, hash) in &packets {
@@ -120,7 +123,9 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
             let mut digest = D::new();
             digest.update(msg);
             let res = digest.finalize().to_vec().into_boxed_slice();
-            assert_eq!(&res, hash, "Hash does not match");
+            if &res != hash {
+                return Err(BroadcastVerificationError::VerificationFailure);
+            }
         }
 
         // 3. Hash the hashes together and broadcast that
@@ -130,15 +135,15 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
             digest.update(hash);
         }
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let hashes: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, hash).await;
+        let hashes: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, hash).await?;
         let check = hashes.iter().all_equal();
         if !check {
             // If some of the hashes are different, someone has gotten different results.
-            panic!("Some hashes were wrong");
+            return Err(BroadcastVerificationError::VerificationFailure);
         }
 
         // Finally, return the packets
-        packets
+        Ok(packets)
     }
 
     fn broadcast(&mut self, _msg: &impl serde::Serialize) {
@@ -148,4 +153,10 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
         todo!("Need to apply verification layer")
     }
+}
+
+#[derive(Error)]
+pub enum BroadcastVerificationError<E> {
+    VerificationFailure,
+    Other(E)
 }

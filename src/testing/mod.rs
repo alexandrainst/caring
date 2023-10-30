@@ -1,12 +1,13 @@
 //! This module documents various tools which can be used to test or benchmark schemes.
 
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, sync::Arc, cell::RefCell};
 
 use tokio::{task::JoinError, sync::broadcast::Receiver};
 
 use crate::connection::{InMemoryNetwork, Network, self};
 
 pub struct Cluster {
+    //players: Vec<Arc<RefCell<InMemoryNetwork>>>
     players: Vec<InMemoryNetwork>
 
     //players: tokio::task::JoinSet<InMemoryNetwork>,
@@ -15,7 +16,11 @@ pub struct Cluster {
 impl Cluster {
 
     pub fn new(size: usize) -> Self {
-        Self {players: InMemoryNetwork::in_memory(size)}
+        let players = InMemoryNetwork::in_memory(size);
+        // let players = players.into_iter()
+        //     .map(RefCell::new)
+        //     .map(Arc::new).collect();
+        Self {players}
 
     }
 
@@ -64,11 +69,12 @@ mod test {
     #[tokio::test]
     async fn hello() {
         // Yes this is a problem.
+        // We really need scoped async tasks, but those don't really exist.
         let cluster = Cluster::new(32);
         let cluster = Box::new(cluster);
         let cluster = Box::leak(cluster);
 
-        cluster.run(|network| async {
+        cluster.run(|network| async move {
                 let msg = "Joy to the world!".to_owned();
                 network.broadcast(&msg);
                 let post: Vec<String> = network.receive_all().await;

@@ -166,7 +166,7 @@ pub async fn beaver_multiply<F: Field + serde::Serialize + serde::de::Deserializ
     let by = b + y;
 
     // Sending both at once it more efficient.
-    let resp = network.symmetric_broadcast((ax, by)).await;
+    let resp = network.symmetric_broadcast::<_, ()>((ax, by)).await.expect("Do error handling");
     let (ax, by): (Vec<_>, Vec<_>) = multiunzip(resp);
 
     let ax = reconstruct(&ax);
@@ -196,7 +196,7 @@ pub async fn regular_multiply<
     let z = x.y * y.y; // z: degree 2t
                        // Now we need to reduce the polynomial back to t
     let z = share(z, ids, threshold, rng); // share -> subshares
-    let z = network.symmetric_unicast(z).await; // publish
+    let z = network.symmetric_unicast::<_, ()>(z).await.expect("Proper error handling"); // publish
                                                 // ???
                                                 // Something about a recombination vector and randomization.
     let z = reconstruct(&z); // reconstruct the subshare
