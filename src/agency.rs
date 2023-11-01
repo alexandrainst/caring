@@ -22,13 +22,11 @@
 //! from subprotocols in a very elegant manner IMO.
 //!
 
-use std::error::Error;
-
 use itertools::Itertools;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::connection::Network;
+use crate::network::Network;
 
 pub trait Broadcast {
     fn broadcast(&mut self, msg: &impl serde::Serialize);
@@ -111,39 +109,38 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
         // NOTE: Maybe send `msg` after the hash check?
         // I.e. do 3, then 1, 2.
 
-        // 1. Send messages along with hash
+        // 1. Send hash of the message
         let mut digest = D::new();
         digest.update(&msg);
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let packets = Broadcast::symmetric_broadcast(self, (msg, hash)).await?;
-
-        // 2. Check that the hashes match
-        for (msg, hash) in &packets {
-            // PERF: Maybe just reset the digest?
-            let mut digest = D::new();
-            digest.update(msg);
-            let res = digest.finalize().to_vec().into_boxed_slice();
-            if &res != hash {
-                return Err(BroadcastVerificationError::VerificationFailure);
-            }
-        }
+        let msg_hashes = Broadcast::symmetric_broadcast(self, hash).await?;
 
         // 3. Hash the hashes together and broadcast that
-        let (packets, hashes): (Vec<_>, Vec<_>) = packets.into_iter().unzip();
         let mut digest = D::new();
-        for hash in hashes {
+        for hash in msg_hashes.iter() {
             digest.update(hash);
         }
-        let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let hashes: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, hash).await?;
-        let check = hashes.iter().all_equal();
+        let sum: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
+        let sum_all: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, sum).await?;
+        let check = sum_all.iter().all_equal();
         if !check {
             // If some of the hashes are different, someone has gotten different results.
             return Err(BroadcastVerificationError::VerificationFailure);
         }
 
+        // 2. Send the message and check that the hashes match
+        let messages = Broadcast::symmetric_broadcast(self, msg).await?;
+        for (msg, hash) in messages.iter().zip(msg_hashes) {
+            // PERF: Maybe just reset the digest?
+            let mut digest = D::new();
+            digest.update(msg);
+            let res = digest.finalize().to_vec().into_boxed_slice();
+            if res != hash {
+                return Err(BroadcastVerificationError::VerificationFailure);
+            }
+        }
         // Finally, return the packets
-        Ok(packets)
+        Ok(messages)
     }
 
     fn broadcast(&mut self, _msg: &impl serde::Serialize) {

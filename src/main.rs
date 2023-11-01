@@ -3,7 +3,7 @@
 
 use std::{env, net::SocketAddr};
 
-use caring::{connection::TcpNetwork, schemes::feldman};
+use caring::{network::TcpNetwork, schemes::feldman};
 use rand::Rng;
 
 #[tokio::main]

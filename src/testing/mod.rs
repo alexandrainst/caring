@@ -4,7 +4,7 @@ use std::{future::Future, pin::Pin, sync::Arc, cell::RefCell};
 
 use tokio::{task::JoinError, sync::broadcast::Receiver};
 
-use crate::connection::{InMemoryNetwork, Network, self};
+use crate::network::{InMemoryNetwork, Network, self};
 
 pub struct Cluster {
     //players: Vec<Arc<RefCell<InMemoryNetwork>>>

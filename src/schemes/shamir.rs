@@ -423,7 +423,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
 
 #[cfg(test)]
 mod test {
-    use crate::{connection::InMemoryNetwork, element::Element32};
+    use crate::{network::InMemoryNetwork, element::Element32};
 
     use super::*;
 

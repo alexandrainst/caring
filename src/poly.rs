@@ -2,7 +2,6 @@ use ff::Field;
 use std::ops::{self, AddAssign};
 
 use itertools::{self, Itertools};
-use num_traits::Zero;
 use rand::RngCore;
 // NOTE: Consider basing a lot of these generic vectorized data structeres on a common
 // one as to limit the mental and code overhead of duplicated implementations of
