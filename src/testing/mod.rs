@@ -77,7 +77,7 @@ mod test {
         cluster.run(|network| async move {
                 let msg = "Joy to the world!".to_owned();
                 network.broadcast(&msg);
-                let post: Vec<String> = network.receive_all().await;
+                let post: Vec<String> = network.receive_all().await.unwrap();
                 for package in post {
                     assert_eq!(package, "Joy to the world!");
                 }

@@ -9,7 +9,7 @@ use tokio::{
 };
 
 
-use crate::connection::Connection;
+use crate::{connection::{Connection, ConnectionError}, agency::{Unicast, Broadcast}};
 
 /// Peer-2-peer network
 ///
@@ -58,7 +58,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// Asymmetric, waiting
     ///
     /// Returns: A list sorted by the connections (skipping yourself)
-    pub async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
+    pub async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, ConnectionError> {
         // TODO: Concurrency
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv();
@@ -75,14 +75,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// Messages are ordered by their index.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> Vec<T>
+    pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, ConnectionError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
         self.broadcast(&msg);
-        let mut messages = self.receive_all().await;
+        let mut messages = self.receive_all().await?;
         messages.insert(self.index, msg);
-        messages
+        Ok(messages)
     }
 
     /// Unicast a message to each party and await their messages
@@ -90,15 +90,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// will be send to party `i`.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Vec<T>
+    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Result<Vec<T>, ConnectionError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
         let mine = msgs.remove(self.index);
         self.unicast(&msgs);
-        let mut messages = self.receive_all().await;
+        let mut messages = self.receive_all().await?;
         messages.insert(self.index, mine);
-        messages
+        Ok(messages)
     }
 
     /// Resolute IDs
@@ -107,10 +107,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// We then (all) sort the connection list by the numbers picked.
     ///
     /// * `rng`: Random number generator to use
-    pub async fn resolute_ids(&mut self, rng: &mut impl Rng) {
+    pub async fn resolute_ids(&mut self, rng: &mut impl Rng) -> Result<(), ConnectionError> {
         self.index = 0; // reset index.
         let num: u64 = rng.gen();
-        let results = self.symmetric_broadcast(num).await;
+        let results = self.symmetric_broadcast(num).await?;
         // Enumerate the results, sort by the ballots and return the indices.
         let mut results: Vec<_> = results.into_iter().enumerate().collect();
         results.sort_unstable_by_key(|(_, n): &(usize, u64)| *n);
@@ -134,6 +134,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         });
         // Add it back.
         self.connections.extend(sorted);
+        Ok(())
     }
 
     /// Returns a range for representing the participants.
@@ -141,6 +142,43 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         let n = self.connections.len() as u32;
         let n = n + 1; // We need to count ourselves.
         0..n
+    }
+}
+
+
+// TODO: Move to network
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast<ConnectionError> for Network<R, W> {
+    fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
+        self.unicast(msgs)
+    }
+
+    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, ConnectionError>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        self.symmetric_unicast(msgs).await
+    }
+
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, ConnectionError> {
+        self.receive_all().await
+    }
+}
+
+// TODO: Move to network
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast<ConnectionError> for Network<R, W> {
+    fn broadcast(&mut self, msg: &impl serde::Serialize) {
+        self.broadcast(msg)
+    }
+
+    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, ConnectionError>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        self.symmetric_broadcast(msg).await
+    }
+
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, ConnectionError> {
+        self.receive_all().await
     }
 }
 
@@ -197,7 +235,7 @@ impl TcpNetwork {
     ///
     /// * `me`: Socket address to open to
     /// * `peers`: Socket addresses of other peers
-    pub async fn connect(me: SocketAddr, peers: &[SocketAddr]) -> Self {
+    pub async fn connect(me: SocketAddr, peers: &[SocketAddr]) -> Result<Self, ConnectionError> {
         let n = peers.len();
 
         // Connecting to parties
@@ -237,9 +275,9 @@ impl TcpNetwork {
             connections,
             index: 0,
         };
-        network.resolute_ids(&mut thread_rng()).await;
+        network.resolute_ids(&mut thread_rng()).await?;
 
-        network
+        Ok(network)
     }
 }
 
@@ -259,7 +297,7 @@ mod test {
                 let mut network = p;
                 let msg = "Joy to the world!".to_owned();
                 network.broadcast(&msg);
-                let post: Vec<String> = network.receive_all().await;
+                let post: Vec<String> = network.receive_all().await.unwrap();
                 for package in post {
                     assert_eq!(package, "Joy to the world!");
                 }

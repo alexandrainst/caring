@@ -24,79 +24,42 @@
 
 use itertools::Itertools;
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::network::Network;
 
-pub trait Broadcast {
+pub trait Broadcast<E> {
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
-    async fn symmetric_broadcast<T, E>(&mut self, msg: T) -> Result<Vec<T>, E>
+    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, E>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned, E>(&mut self) -> Result<Vec<T>, E>;
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, E>;
 }
 
-pub trait Unicast {
+pub trait Unicast<E> {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]);
 
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
-    async fn symmetric_unicast<T, E>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, E>
+    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, E>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned, E>(&mut self) -> Result<Vec<T>, E>;
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, E>;
 }
 
-// TODO: Move to network
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
-    fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
-        self.unicast(msgs)
-    }
-
-    async fn symmetric_unicast<T,E>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, E>
-    where
-        T: serde::Serialize + serde::de::DeserializeOwned,
-    {
-        Ok(self.symmetric_unicast(msgs).await)
-    }
-
-    async fn receive_all<T: serde::de::DeserializeOwned, E>(&mut self) -> Result<Vec<T>, E> {
-        Ok(self.receive_all().await)
-    }
-}
-
-// TODO: Move to network
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
-    fn broadcast(&mut self, msg: &impl serde::Serialize) {
-        self.broadcast(msg)
-    }
-
-    async fn symmetric_broadcast<T, E>(&mut self, msg: T) -> Result<Vec<T>, E>
-    where
-        T: serde::Serialize + serde::de::DeserializeOwned,
-    {
-        Ok(self.symmetric_broadcast(msg).await)
-    }
-
-    async fn receive_all<T: serde::de::DeserializeOwned, E>(&mut self) -> Result<Vec<T>, E> {
-        Ok(self.receive_all().await)
-    }
-}
 
 use digest::Digest;
 // INFO: Reconsider if Broadcast should be a supertrait or just a type parameter
 // There is also the question if we should overload the existing methods or provide
 // new methods prefixed with 'verified' or something.
-trait VerifiedBroadcast<D: Digest>: Broadcast {
+trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> {
     /// Ensure that a received broadcast is the same across all parties.
-    async fn symmetric_broadcast<T: AsRef<[u8]>, E>(&mut self, msg: T) -> Result<Vec<T>, BroadcastVerificationError<E>>
+    async fn symmetric_broadcast<T: AsRef<[u8]>>(&mut self, msg: T) -> Result<Vec<T>, BroadcastVerificationError<E>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {

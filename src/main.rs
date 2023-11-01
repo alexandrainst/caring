@@ -3,11 +3,11 @@
 
 use std::{env, net::SocketAddr};
 
-use caring::{network::TcpNetwork, schemes::feldman};
+use caring::{network::TcpNetwork, schemes::feldman, connection::ConnectionError};
 use rand::Rng;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), ConnectionError> {
     // Argument parsing
     let mut args = env::args();
     args.next();
@@ -16,13 +16,13 @@ async fn main() {
     let peers: Vec<SocketAddr> = args.map(|s| s.parse().unwrap()).collect();
 
     // Setup TcpNetwork.
-    let mut network: TcpNetwork = TcpNetwork::connect(me, &peers).await;
+    let mut network: TcpNetwork = TcpNetwork::connect(me, &peers).await?;
     println!("My id is {}", network.index);
 
     // Just sending some messages.
     println!("Now I am going to talk with my friends!");
     network.broadcast(&"Hello!");
-    let res: Vec<Box<str>> = network.receive_all().await;
+    let res: Vec<Box<str>> = network.receive_all().await?;
     println!("I got a message!");
     for (i, s) in res.iter().enumerate() {
         println!("I got something: {s} from {i}");
@@ -46,7 +46,7 @@ async fn main() {
 
     // broadcast my shares.
     println!("Sharing shares...");
-    let shares = network.symmetric_unicast(shares).await;
+    let shares = network.symmetric_unicast(shares).await?;
 
     for s in shares.iter() {
         assert!(s.verify(), "Somebody is cheating!");
@@ -56,7 +56,7 @@ async fn main() {
     println!("Computing...");
     let my_result = shares.into_iter().sum();
     // Should be the same for every party!
-    let open_shares = network.symmetric_broadcast(my_result).await;
+    let open_shares = network.symmetric_broadcast(my_result).await?;
 
     println!("Reconstructing...");
     let res = feldman::reconstruct(&open_shares).expect("Bad");
@@ -66,4 +66,6 @@ async fn main() {
     let res = u32::from_le_bytes(res);
     println!("We got {res}!");
     println!("Took {:#?}", start.elapsed());
+
+    Ok(())
 }

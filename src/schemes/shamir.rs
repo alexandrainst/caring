@@ -155,24 +155,24 @@ impl<F: Field> BeaverTriple<F> {
 /// * `y`: second share to multiply
 /// * `triple`: beaver triple
 /// * `network`: unicasting network
-pub async fn beaver_multiply<F: Field + serde::Serialize + serde::de::DeserializeOwned>(
+pub async fn beaver_multiply<F: Field + serde::Serialize + serde::de::DeserializeOwned, E>(
     x: Share<F>,
     y: Share<F>,
     triple: BeaverTriple<F>,
-    network: &mut impl Broadcast,
-) -> Share<F> {
+    network: &mut impl Broadcast<E>,
+) -> Result<Share<F>, E> {
     let BeaverTriple(a, b, c) = triple;
     let ax = a + x;
     let by = b + y;
 
     // Sending both at once it more efficient.
-    let resp = network.symmetric_broadcast::<_, ()>((ax, by)).await.expect("Do error handling");
+    let resp = network.symmetric_broadcast::<_>((ax, by)).await?;
     let (ax, by): (Vec<_>, Vec<_>) = multiunzip(resp);
 
     let ax = reconstruct(&ax);
     let by = reconstruct(&by);
 
-    y * ax + a * (-by) + c
+    Ok(y * ax + a * (-by) + c)
 }
 
 // TODO: Maybe cut the regular multiplication protocol out and allow multiplying shares directly,
@@ -180,15 +180,15 @@ pub async fn beaver_multiply<F: Field + serde::Serialize + serde::de::Deserializ
 // Instead provide a protocol for the degree reduction.
 pub async fn regular_multiply<
     // FIX: Doesn't work
-    F: Field + serde::Serialize + serde::de::DeserializeOwned,
+    F: Field + serde::Serialize + serde::de::DeserializeOwned, E
 >(
     x: Share<F>,
     y: Share<F>,
-    network: &mut impl Unicast,
+    network: &mut impl Unicast<E>,
     threshold: u64,
     ids: &[F],
     rng: &mut impl RngCore,
-) -> Share<F> {
+) -> Result<Share<F>, E> {
     let i = x.x;
     // We need 2t < n, otherwise we cannot reconstruct,
     // however 't' is hidden from before, so we jyst have to assume it is.
@@ -196,11 +196,10 @@ pub async fn regular_multiply<
     let z = x.y * y.y; // z: degree 2t
                        // Now we need to reduce the polynomial back to t
     let z = share(z, ids, threshold, rng); // share -> subshares
-    let z = network.symmetric_unicast::<_, ()>(z).await.expect("Proper error handling"); // publish
-                                                // ???
+    let z = network.symmetric_unicast::<_>(z).await?;
                                                 // Something about a recombination vector and randomization.
     let z = reconstruct(&z); // reconstruct the subshare
-    Share { x: i, y: z }
+    Ok(Share { x: i, y: z })
 }
 
 /// Share/shard a secret value `v` into `n` shares
@@ -548,9 +547,9 @@ mod test {
                     let mut network = network;
                     let v = Element32::from(5u32);
                     let shares = share(v, &parties, treshold, &mut rng);
-                    let shares = network.symmetric_unicast(shares).await;
-                    let res = beaver_multiply(shares[0], shares[1], triple, &mut network).await;
-                    let res = network.symmetric_broadcast(res).await;
+                    let shares = network.symmetric_unicast(shares).await.unwrap();
+                    let res = beaver_multiply(shares[0], shares[1], triple, &mut network).await.unwrap();
+                    let res = network.symmetric_broadcast(res).await.unwrap();
                     let res = reconstruct(&res);
                     let res: u32 = res.into();
                     assert_eq!(res, 25);
@@ -583,7 +582,7 @@ mod test {
                     let mut network = network;
                     let v = Element32::from(5u32);
                     let shares = share(v, &parties, treshold, &mut rng);
-                    let shares = network.symmetric_unicast(shares).await;
+                    let shares = network.symmetric_unicast(shares).await.unwrap();
                     // let res = regular_multiply(
                     //     shares[0],
                     //     shares[1], // we ignore the rest of the inputs
@@ -596,7 +595,7 @@ mod test {
                         x: shares[0].x,
                         y: shares[0].y * shares[1].y,
                     };
-                    let res = network.symmetric_broadcast(res).await;
+                    let res = network.symmetric_broadcast(res).await.unwrap();
                     let res = reconstruct(&res);
                     let res: u32 = res.into();
                     assert_eq!(res, 25);

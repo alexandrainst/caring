@@ -17,7 +17,10 @@
 //! background beaver share generation, or other preproccessing actions.
 
 
+use std::error::Error;
+
 use futures::{SinkExt, StreamExt};
+use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, DuplexStream, ReadHalf, WriteHalf},
     net::{
@@ -50,7 +53,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
         let task = tokio::spawn(async move {
             // This self-drops after the sender is gone.
             while let Some(msg) = outgoing.recv().await {
-                writer.send(msg.into()).await.unwrap();
+                writer.send(msg.into()).await.expect("Something went wrong sending a message")
             }
             // return the writer
             writer
@@ -78,6 +81,18 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ConnectionError {
+    #[error("Deserialization failed")]
+    BadSerialization(#[from] bincode::Error),
+    #[error("Connection timed out")]
+    TimeOut,
+    #[error("No message to receive")]
+    Closed,
+    #[error("Unknown error")]
+    Unknown(#[from] Box<dyn Error + Send>)
+}
+
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Send a message without waiting
     ///
@@ -90,14 +105,13 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     }
 
     /// Receive a message waiting for arrival
-    pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> T {
-        // TODO: Handle unstable connections
+    pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
         // TODO: Handle timeouts?
-        let buf = self.reader.next().await.unwrap().unwrap();
+        let buf = self.reader.next().await
+            .ok_or(ConnectionError::Closed)?
+            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
         let buf = std::io::Cursor::new(buf);
-        // TODO: Handle bad deserialization (assume malicious?)
-        // We should probably use a Result<>
-        bincode::deserialize_from(buf).unwrap()
+        bincode::deserialize_from(buf).map_err(|e| ConnectionError::BadSerialization(e))
     }
 }
 
@@ -168,16 +182,16 @@ mod test {
             println!("[1] Message sent");
             conn.send(&"Buddy");
             println!("[1] Message sent");
-            let msg: Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await.unwrap();
             println!("[1] Message received");
             assert_eq!(msg, "Greetings friend".into());
         });
         let h2 = tokio::spawn(async move {
             let mut conn = conn2;
-            let msg: Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Hello".into());
-            let msg: Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Buddy".into());
             conn.send(&"Greetings friend");
@@ -199,17 +213,17 @@ mod test {
             println!("[1] Message sent");
             conn.send(&"Buddy");
             println!("[1] Message sent");
-            let msg: Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await.unwrap();
             println!("[1] Message received");
             assert_eq!(msg, "Greetings friend".into());
         });
         let h2 = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut conn = Connection::from_tcp(stream);
-            let msg: Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Hello".into());
-            let msg: Box<str> = conn.recv().await;
+            let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Buddy".into());
             conn.send(&"Greetings friend");
