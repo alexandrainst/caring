@@ -180,7 +180,8 @@ pub async fn beaver_multiply<F: Field + serde::Serialize + serde::de::Deserializ
 // Instead provide a protocol for the degree reduction.
 pub async fn regular_multiply<
     // FIX: Doesn't work
-    F: Field + serde::Serialize + serde::de::DeserializeOwned, E
+    F: Field + serde::Serialize + serde::de::DeserializeOwned,
+    E,
 >(
     x: Share<F>,
     y: Share<F>,
@@ -197,7 +198,7 @@ pub async fn regular_multiply<
                        // Now we need to reduce the polynomial back to t
     let z = share(z, ids, threshold, rng); // share -> subshares
     let z = network.symmetric_unicast::<_>(z).await?;
-                                                // Something about a recombination vector and randomization.
+    // Something about a recombination vector and randomization.
     let z = reconstruct(&z); // reconstruct the subshare
     Ok(Share { x: i, y: z })
 }
@@ -422,7 +423,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
 
 #[cfg(test)]
 mod test {
-    use crate::{network::InMemoryNetwork, element::Element32};
+    use crate::{element::Element32, network::InMemoryNetwork};
 
     use super::*;
 
@@ -548,7 +549,9 @@ mod test {
                     let v = Element32::from(5u32);
                     let shares = share(v, &parties, treshold, &mut rng);
                     let shares = network.symmetric_unicast(shares).await.unwrap();
-                    let res = beaver_multiply(shares[0], shares[1], triple, &mut network).await.unwrap();
+                    let res = beaver_multiply(shares[0], shares[1], triple, &mut network)
+                        .await
+                        .unwrap();
                     let res = network.symmetric_broadcast(res).await.unwrap();
                     let res = reconstruct(&res);
                     let res: u32 = res.into();

@@ -1,27 +1,23 @@
 //! This module documents various tools which can be used to test or benchmark schemes.
 
-use std::{future::Future, pin::Pin, sync::Arc, cell::RefCell};
+use std::future::Future;
 
-use tokio::{task::JoinError, sync::broadcast::Receiver};
+use tokio::task::JoinError;
 
-use crate::network::{InMemoryNetwork, Network, self};
+use crate::network::InMemoryNetwork;
 
 pub struct Cluster {
     //players: Vec<Arc<RefCell<InMemoryNetwork>>>
-    players: Vec<InMemoryNetwork>
-
-    //players: tokio::task::JoinSet<InMemoryNetwork>,
+    players: Vec<InMemoryNetwork>, //players: tokio::task::JoinSet<InMemoryNetwork>,
 }
 
 impl Cluster {
-
     pub fn new(size: usize) -> Self {
         let players = InMemoryNetwork::in_memory(size);
         // let players = players.into_iter()
         //     .map(RefCell::new)
         //     .map(Arc::new).collect();
-        Self {players}
-
+        Self { players }
     }
 
     // pub fn spawn(players: usize) -> Self {
@@ -45,7 +41,7 @@ impl Cluster {
     where
         T: Send + 'static,
         P: Fn(&'a mut InMemoryNetwork) -> F,
-        F: Future<Output=T> + Send + 'static
+        F: Future<Output = T> + Send + 'static,
     {
         let futures: Vec<_> = self
             .players
@@ -74,13 +70,16 @@ mod test {
         let cluster = Box::new(cluster);
         let cluster = Box::leak(cluster);
 
-        cluster.run(|network| async move {
+        cluster
+            .run(|network| async move {
                 let msg = "Joy to the world!".to_owned();
                 network.broadcast(&msg);
                 let post: Vec<String> = network.receive_all().await.unwrap();
                 for package in post {
                     assert_eq!(package, "Joy to the world!");
                 }
-        }).await.unwrap();
+            })
+            .await
+            .unwrap();
     }
 }

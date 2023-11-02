@@ -16,7 +16,6 @@
 //! This could be background verification and 'anti-cheat' detection, error-reporting,
 //! background beaver share generation, or other preproccessing actions.
 
-
 use std::error::Error;
 
 use futures::{SinkExt, StreamExt};
@@ -53,7 +52,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
         let task = tokio::spawn(async move {
             // This self-drops after the sender is gone.
             while let Some(msg) = outgoing.recv().await {
-                writer.send(msg.into()).await.expect("Something went wrong sending a message")
+                writer
+                    .send(msg.into())
+                    .await
+                    .expect("Something went wrong sending a message")
             }
             // return the writer
             writer
@@ -90,7 +92,7 @@ pub enum ConnectionError {
     #[error("No message to receive")]
     Closed,
     #[error("Unknown error")]
-    Unknown(#[from] Box<dyn Error + Send>)
+    Unknown(#[from] Box<dyn Error + Send>),
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
@@ -107,11 +109,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
         // TODO: Handle timeouts?
-        let buf = self.reader.next().await
+        let buf = self
+            .reader
+            .next()
+            .await
             .ok_or(ConnectionError::Closed)?
             .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
         let buf = std::io::Cursor::new(buf);
-        bincode::deserialize_from(buf).map_err(|e| ConnectionError::BadSerialization(e))
+        bincode::deserialize_from(buf).map_err(ConnectionError::BadSerialization)
     }
 }
 

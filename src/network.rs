@@ -8,8 +8,10 @@ use tokio::{
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 
-
-use crate::{connection::{Connection, ConnectionError}, agency::{Unicast, Broadcast}};
+use crate::{
+    agency::{Broadcast, Unicast},
+    connection::{Connection, ConnectionError},
+};
 
 /// Peer-2-peer network
 ///
@@ -58,7 +60,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// Asymmetric, waiting
     ///
     /// Returns: A list sorted by the connections (skipping yourself)
-    pub async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, ConnectionError> {
+    pub async fn receive_all<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> Result<Vec<T>, ConnectionError> {
         // TODO: Concurrency
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv();
@@ -90,7 +94,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// will be send to party `i`.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Result<Vec<T>, ConnectionError>
+    pub async fn symmetric_unicast<T>(
+        &mut self,
+        mut msgs: Vec<T>,
+    ) -> Result<Vec<T>, ConnectionError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -145,7 +152,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     }
 }
 
-
 // TODO: Move to network
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast<ConnectionError> for Network<R, W> {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
@@ -159,7 +165,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast<ConnectionError> for N
         self.symmetric_unicast(msgs).await
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, ConnectionError> {
+    async fn receive_all<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> Result<Vec<T>, ConnectionError> {
         self.receive_all().await
     }
 }
@@ -177,7 +185,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast<ConnectionError> for
         self.symmetric_broadcast(msg).await
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, ConnectionError> {
+    async fn receive_all<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> Result<Vec<T>, ConnectionError> {
         self.receive_all().await
     }
 }
@@ -280,7 +290,6 @@ impl TcpNetwork {
         Ok(network)
     }
 }
-
 
 #[cfg(test)]
 mod test {

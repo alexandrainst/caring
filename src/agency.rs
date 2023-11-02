@@ -25,7 +25,6 @@
 use itertools::Itertools;
 use thiserror::Error;
 
-
 pub trait Broadcast<E> {
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
@@ -52,14 +51,16 @@ pub trait Unicast<E> {
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, E>;
 }
 
-
 use digest::Digest;
 // INFO: Reconsider if Broadcast should be a supertrait or just a type parameter
 // There is also the question if we should overload the existing methods or provide
 // new methods prefixed with 'verified' or something.
 trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> {
     /// Ensure that a received broadcast is the same across all parties.
-    async fn symmetric_broadcast<T: AsRef<[u8]>>(&mut self, msg: T) -> Result<Vec<T>, BroadcastVerificationError<E>>
+    async fn symmetric_broadcast<T: AsRef<[u8]>>(
+        &mut self,
+        msg: T,
+    ) -> Result<Vec<T>, BroadcastVerificationError<E>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -117,6 +118,8 @@ trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> 
 
 #[derive(Error)]
 pub enum BroadcastVerificationError<E> {
+    #[error("Could not verify broadcast")]
     VerificationFailure,
-    Other(E)
+    #[error(transparent)]
+    Other(E),
 }

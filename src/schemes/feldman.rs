@@ -258,11 +258,12 @@ where
     vshares
 }
 
-pub fn reconstruct_many<F, G, T>(
-    vec_shares: &[T],
-) -> Option<Vec<F>>
+pub fn reconstruct_many<F, G, T>(vec_shares: &[T]) -> Option<Vec<F>>
 where
-    G: Group + std::ops::Mul<F, Output = G>, F: Field, G: Group, T: Borrow<VecVerifiableShare<F, G>>
+    G: Group + std::ops::Mul<F, Output = G>,
+    F: Field,
+    G: Group,
+    T: Borrow<VecVerifiableShare<F, G>>,
 {
     for shares in vec_shares {
         assert!(shares.borrow().verify());
