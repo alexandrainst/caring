@@ -2,7 +2,7 @@ use std::{sync::Mutex, net::SocketAddr};
 use curve25519_dalek::Scalar;
 use pyo3::{prelude::*, types::{PyTuple}};
 
-use caring::{schemes::feldman, connection::TcpNetwork};
+use caring::{schemes::feldman, network::TcpNetwork};
 use rand::thread_rng;
 
 struct AdderEngine {
@@ -64,21 +64,22 @@ fn mpc_sum(nums: &[f64]) -> Vec<f64> {
         let shares = feldman::share_many::<curve25519_dalek::Scalar, curve25519_dalek::RistrettoPoint>(&nums, &parties, *threshold, &mut rng);
 
         // share my shares.
-        let shares = network.symmetric_unicast(shares).await;
+        let shares = network.symmetric_unicast(shares).await.unwrap();
 
         // compute
         let my_result = shares.into_iter().sum();
-        let open_shares : Vec<feldman::VecVerifiableShare<_,_>> = network.symmetric_broadcast(my_result).await;
+        let open_shares : Vec<feldman::VecVerifiableShare<_,_>> = network.symmetric_broadcast(my_result).await.unwrap();
 
         // reconstruct
-        let res = feldman::reconstruct_many(&open_shares).unwrap();
+        let res = feldman::reconstruct_many(&open_shares).unwrap()
+            .into_iter()
+            .map(|x| x.as_bytes()[0..8].try_into().unwrap())
+            .map(u128::from_le_bytes)
+            .map(from_offset)
+            .collect();
         // NOTE: Since we are only using half of this space, we have
         // a possibility of 'checking' for computation failures.
-        res.iter().map(|res : &Scalar| {
-            let res =  res.as_bytes()[0..16].try_into().unwrap();
-            let res = u128::from_le_bytes(res);
-            from_offset(res)
-        }).collect()
+        res
     });
     res
 }
@@ -97,7 +98,7 @@ fn setup(my_addr: &str, others: &PyTuple) -> PyResult<()> {
         .enable_all()
         .build().unwrap();
     let network = TcpNetwork::connect(my_addr, &others);
-    let network = runtime.block_on(network);
+    let network = runtime.block_on(network).expect("Failed to set up network");
     let engine =  AdderEngine { network, runtime, threshold };
     ENGINE.lock().unwrap().replace(Box::new(engine));
     Ok(())

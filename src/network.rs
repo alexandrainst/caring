@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range};
 
-use futures::{future, SinkExt, StreamExt};
+use futures::future;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use tokio::{
@@ -63,7 +63,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     pub async fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
     ) -> Result<Vec<T>, ConnectionError> {
-        // TODO: Concurrency
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv();
             async move { (i, msg.await) }
