@@ -22,14 +22,14 @@ impl<F: Field, C, S: Shared<F, Context = C>> BeaverTriple<F, S> {
     /// * `ids`: ids to produce for
     /// * `threshold`: threshold to reconstruct
     /// * `rng`: rng to sample from
-    pub fn fake(ctx: &mut C, mut rng: &mut impl RngCore) -> Vec<Self> {
+    pub fn fake(ctx: &C, mut rng: &mut impl RngCore) -> Vec<Self> {
         let a = F::random(&mut rng);
         let b = F::random(&mut rng);
         let c: F = a * b;
         // Share (preproccess)
-        let a = S::share(ctx, a);
-        let b = S::share(ctx, b);
-        let c = S::share(ctx, c);
+        let a = S::share(ctx, a, rng);
+        let b = S::share(ctx, b, rng);
+        let c = S::share(ctx, c, rng);
         itertools::izip!(a, b, c)
             .map(|(a, b, c)| Self {
                 shares: (a, b, c),
@@ -51,7 +51,7 @@ pub async fn beaver_multiply<
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
     E : std::fmt::Debug,
 >(
-    ctx: &mut C,
+    ctx: &C,
     x: S,
     y: S,
     triple: BeaverTriple<F, S>,
@@ -76,9 +76,8 @@ pub async fn beaver_multiply<
 
 #[cfg(test)]
 mod test {
-    use rand::{thread_rng, RngCore};
 
-    use crate::{element::Element32, schemes::{beaver::{BeaverTriple, beaver_multiply}, shamir::{share, self}, ShamirParams}, network::InMemoryNetwork};
+    use crate::{element::Element32, schemes::{beaver::{BeaverTriple, beaver_multiply}, shamir::{self}, ShamirParams}, network::InMemoryNetwork};
 
 
     #[tokio::test]
@@ -90,18 +89,18 @@ mod test {
 
 
         // preproccessing
-        let ctx = ShamirParams {threshold, ids, rng: Box::new(rng)};
-        let triples = BeaverTriple::fake(&mut ctx, &mut rng);
+        let ctx = ShamirParams {threshold, ids};
+        let triples = BeaverTriple::fake(&ctx, &mut rng);
 
         let mut taskset = tokio::task::JoinSet::new();
         // MPC
-        async fn do_mpc(triple: BeaverTriple<Element32, shamir::Share<Element32>>, network: InMemoryNetwork, mut ctx: ShamirParams<Element32>) {
+        async fn do_mpc(triple: BeaverTriple<Element32, shamir::Share<Element32>>, network: InMemoryNetwork, ctx: ShamirParams<Element32>) {
             let mut rng = rand::rngs::mock::StepRng::new(1, 7);
             let mut network = network;
             let v = Element32::from(5u32);
             let shares = shamir::share(v, &ctx.ids, ctx.threshold, &mut rng);
             let shares = network.symmetric_unicast(shares).await.unwrap();
-            let res = beaver_multiply(&mut ctx, shares[0], shares[1], triple, &mut network)
+            let res = beaver_multiply(&ctx, shares[0], shares[1], triple, &mut network)
                 .await
                 .unwrap();
             let res = network.symmetric_broadcast(res).await.unwrap();
@@ -110,11 +109,10 @@ mod test {
             assert_eq!(res, 25);
 
         }
-        let cluster = InMemoryNetwork::in_memory(ids.len());
+        let cluster = InMemoryNetwork::in_memory(ctx.ids.len());
         for network in cluster {
-            let ids = ids.clone();
             let triple = triples[network.index].clone();
-            let ctx = ShamirParams {threshold, ids, rng: Box::new(rng)};
+            let ctx = ctx.clone();
             taskset.spawn(do_mpc(triple, network, ctx));
         }
         while let Some(res) = taskset.join_next().await {
