@@ -16,7 +16,7 @@
 //! This could be background verification and 'anti-cheat' detection, error-reporting,
 //! background beaver share generation, or other preproccessing actions.
 
-use std::{error::Error};
+use std::error::Error;
 
 use futures::{SinkExt, StreamExt};
 use thiserror::Error;
