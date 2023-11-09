@@ -1,3 +1,4 @@
+pub mod beaver;
 pub mod feldman;
 pub mod shamir;
 pub mod spdz;

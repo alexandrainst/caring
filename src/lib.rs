@@ -1,4 +1,5 @@
 #![deny(unsafe_code)]
+#![allow(refining_impl_trait)]
 
 pub mod agency;
 pub mod connection;

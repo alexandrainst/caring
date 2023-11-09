@@ -90,6 +90,17 @@ where
     }
 }
 
+impl<'a, 'b, F: Copy, G: Clone> ops::MulAssign<&'a G> for &'b mut Polynomial<F>
+where
+    &'b mut F: ops::MulAssign<&'a G>,
+{
+    fn mul_assign(&mut self, rhs: &'a G) {
+        for mut a in self.0.iter_mut() {
+            a *= rhs;
+        }
+    }
+}
+
 impl<F: AddAssign + Clone> std::iter::Sum for Polynomial<F> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         // This is sort of a hack, sum() should work on empty iterators.

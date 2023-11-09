@@ -152,7 +152,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
 }
 
 // TODO: Move to network
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast<ConnectionError> for Network<R, W> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
         self.unicast(msgs)
     }
@@ -172,7 +172,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast<ConnectionError> for N
 }
 
 // TODO: Move to network
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast<ConnectionError> for Network<R, W> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
     fn broadcast(&mut self, msg: &impl serde::Serialize) {
         self.broadcast(msg)
     }

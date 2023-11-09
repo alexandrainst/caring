@@ -25,42 +25,42 @@
 use itertools::Itertools;
 use thiserror::Error;
 
-pub trait Broadcast<E> {
+pub trait Broadcast {
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
-    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, E>
+    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, impl std::error::Error>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, E>;
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, impl std::error::Error>;
 }
 
-pub trait Unicast<E> {
+pub trait Unicast {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]);
 
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
-    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, E>
+    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, impl std::error::Error>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, E>;
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, impl std::error::Error>;
 }
 
 use digest::Digest;
 // INFO: Reconsider if Broadcast should be a supertrait or just a type parameter
 // There is also the question if we should overload the existing methods or provide
 // new methods prefixed with 'verified' or something.
-trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> {
+trait VerifiedBroadcast<D: Digest>: Broadcast {
     /// Ensure that a received broadcast is the same across all parties.
     async fn symmetric_broadcast<T: AsRef<[u8]>>(
         &mut self,
         msg: T,
-    ) -> Result<Vec<T>, BroadcastVerificationError<E>>
+    ) -> Result<Vec<T>, impl std::error::Error>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -116,10 +116,10 @@ trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> 
     }
 }
 
-#[derive(Error)]
-pub enum BroadcastVerificationError<E> {
+#[derive(Error, Debug)]
+pub enum BroadcastVerificationError {
     #[error("Could not verify broadcast")]
     VerificationFailure,
     #[error(transparent)]
-    Other(E),
+    Other(Box<dyn std::error::Error>),
 }

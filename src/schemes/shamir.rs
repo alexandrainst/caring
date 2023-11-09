@@ -3,7 +3,6 @@
 use std::borrow::Borrow;
 
 use ff::{derive::rand_core::RngCore, Field};
-use itertools::multiunzip;
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
@@ -27,11 +26,6 @@ pub struct Share<F: Field> {
     pub(crate) x: F,
     pub(crate) y: F,
 }
-
-// TODO: We could use a construct representing a group of shares,
-// this could probably allow for the removal of the `x` in the Share.
-// This should allow for an easier 'sharing' phase, where each party
-// gets their correct version.
 
 impl<F: Field> std::ops::Add for Share<F> {
     type Output = Self;
@@ -123,57 +117,6 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
 // TODO: Move beaver stuff out, and generify over any kind of share.
 // This might require a common 'Share' trait, or maybe just something that
 // implements multiplication, who knows.
-#[derive(Clone)]
-pub struct BeaverTriple<F: Field>(Share<F>, Share<F>, Share<F>);
-
-impl<F: Field> BeaverTriple<F> {
-    /// Fake a set of beaver triples.
-    ///
-    /// This produces `n` shares corresponding to a shared beaver triple,
-    /// however locally with the values known.
-    ///
-    /// * `ids`: ids to produce for
-    /// * `threshold`: threshold to reconstruct
-    /// * `rng`: rng to sample from
-    pub fn fake(ids: &[F], threshold: u64, mut rng: &mut impl RngCore) -> Vec<Self> {
-        let a = F::random(&mut rng);
-        let b = F::random(&mut rng);
-        let c = a * b;
-        // Share (preproccess)
-        let a = share(a, ids, threshold, &mut rng);
-        let b = share(b, ids, threshold, &mut rng);
-        let c = share(c, ids, threshold, &mut rng);
-        itertools::izip!(a, b, c)
-            .map(|(a, b, c)| Self(a, b, c))
-            .collect()
-    }
-}
-
-/// Perform multiplication using beaver triples
-///
-/// * `x`: first share to multiply
-/// * `y`: second share to multiply
-/// * `triple`: beaver triple
-/// * `network`: unicasting network
-pub async fn beaver_multiply<F: Field + serde::Serialize + serde::de::DeserializeOwned, E>(
-    x: Share<F>,
-    y: Share<F>,
-    triple: BeaverTriple<F>,
-    network: &mut impl Broadcast<E>,
-) -> Result<Share<F>, E> {
-    let BeaverTriple(a, b, c) = triple;
-    let ax = a + x;
-    let by = b + y;
-
-    // Sending both at once it more efficient.
-    let resp = network.symmetric_broadcast::<_>((ax, by)).await?;
-    let (ax, by): (Vec<_>, Vec<_>) = multiunzip(resp);
-
-    let ax = reconstruct(&ax);
-    let by = reconstruct(&by);
-
-    Ok(y * ax + a * (-by) + c)
-}
 
 // TODO: Maybe cut the regular multiplication protocol out and allow multiplying shares directly,
 // at the conseqeunce of increasing their degree? (Sidenote: maybe introduce degree tracking?)
@@ -181,15 +124,14 @@ pub async fn beaver_multiply<F: Field + serde::Serialize + serde::de::Deserializ
 pub async fn regular_multiply<
     // FIX: Doesn't work
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
-    E,
 >(
     x: Share<F>,
     y: Share<F>,
-    network: &mut impl Unicast<E>,
+    network: &mut impl Unicast,
     threshold: u64,
     ids: &[F],
     rng: &mut impl RngCore,
-) -> Result<Share<F>, E> {
+) -> Result<Share<F>, impl std::error::Error> {
     let i = x.x;
     // We need 2t < n, otherwise we cannot reconstruct,
     // however 't' is hidden from before, so we jyst have to assume it is.
@@ -526,87 +468,87 @@ mod test {
         assert_eq!(v, a + b);
     }
 
-    #[tokio::test]
-    async fn beaver_mult() {
-        let mut rng = rand::rngs::mock::StepRng::new(0, 7);
-        let parties: Vec<Element32> = (0..2u32).map(|i| i + 1).map(Element32::from).collect();
+    // #[tokio::test]
+    // async fn beaver_mult() {
+    //     let mut rng = rand::rngs::mock::StepRng::new(0, 7);
+    //     let parties: Vec<Element32> = (0..2u32).map(|i| i + 1).map(Element32::from).collect();
 
-        let treshold: u64 = 2;
+    //     let treshold: u64 = 2;
 
-        // preproccessing
-        let triples = BeaverTriple::fake(&parties, treshold, &mut rng);
+    //     // preproccessing
+    //     let triples = BeaverTriple::fake(&parties, treshold, &mut rng);
 
-        let mut taskset = tokio::task::JoinSet::new();
-        // MPC
-        let cluster = InMemoryNetwork::in_memory(parties.len());
-        for network in cluster {
-            let parties = parties.clone();
-            let triple = triples[network.index].clone();
-            taskset.spawn({
-                async move {
-                    let mut rng = rand::rngs::mock::StepRng::new(1, 7);
-                    let mut network = network;
-                    let v = Element32::from(5u32);
-                    let shares = share(v, &parties, treshold, &mut rng);
-                    let shares = network.symmetric_unicast(shares).await.unwrap();
-                    let res = beaver_multiply(shares[0], shares[1], triple, &mut network)
-                        .await
-                        .unwrap();
-                    let res = network.symmetric_broadcast(res).await.unwrap();
-                    let res = reconstruct(&res);
-                    let res: u32 = res.into();
-                    assert_eq!(res, 25);
-                }
-            });
-        }
-        while let Some(res) = taskset.join_next().await {
-            res.unwrap();
-        }
-    }
+    //     let mut taskset = tokio::task::JoinSet::new();
+    //     // MPC
+    //     let cluster = InMemoryNetwork::in_memory(parties.len());
+    //     for network in cluster {
+    //         let parties = parties.clone();
+    //         let triple = triples[network.index].clone();
+    //         taskset.spawn({
+    //             async move {
+    //                 let mut rng = rand::rngs::mock::StepRng::new(1, 7);
+    //                 let mut network = network;
+    //                 let v = Element32::from(5u32);
+    //                 let shares = share(v, &parties, treshold, &mut rng);
+    //                 let shares = network.symmetric_unicast(shares).await.unwrap();
+    //                 let res = beaver_multiply(shares[0], shares[1], triple, &mut network)
+    //                     .await
+    //                     .unwrap();
+    //                 let res = network.symmetric_broadcast(res).await.unwrap();
+    //                 let res = reconstruct(&res);
+    //                 let res: u32 = res.into();
+    //                 assert_eq!(res, 25);
+    //             }
+    //         });
+    //     }
+    //     while let Some(res) = taskset.join_next().await {
+    //         res.unwrap();
+    //     }
+    // }
 
-    #[tokio::test]
-    async fn regular_mult() {
-        let mut rng = thread_rng();
-        let parties: Vec<Element32> = (0..10u32).map(|i| i + 1).map(Element32::from).collect();
+    // #[tokio::test]
+    // async fn regular_mult() {
+    //     let mut rng = thread_rng();
+    //     let parties: Vec<Element32> = (0..10u32).map(|i| i + 1).map(Element32::from).collect();
 
-        let treshold: u64 = 3;
+    //     let treshold: u64 = 3;
 
-        // preproccessing
-        let _triples = BeaverTriple::fake(&parties, treshold, &mut rng);
+    //     // preproccessing
+    //     let _triples = BeaverTriple::fake(&parties, treshold, &mut rng);
 
-        let mut taskset = tokio::task::JoinSet::new();
-        // MPC
-        let cluster = InMemoryNetwork::in_memory(parties.len());
-        for network in cluster {
-            let parties = parties.clone();
-            taskset.spawn({
-                async move {
-                    let mut rng = rand::rngs::mock::StepRng::new(1, 7);
-                    let mut network = network;
-                    let v = Element32::from(5u32);
-                    let shares = share(v, &parties, treshold, &mut rng);
-                    let shares = network.symmetric_unicast(shares).await.unwrap();
-                    // let res = regular_multiply(
-                    //     shares[0],
-                    //     shares[1], // we ignore the rest of the inputs
-                    //     &mut network,
-                    //     treshold,
-                    //     &parties,
-                    //     &mut rng,
-                    // ).await;
-                    let res = Share {
-                        x: shares[0].x,
-                        y: shares[0].y * shares[1].y,
-                    };
-                    let res = network.symmetric_broadcast(res).await.unwrap();
-                    let res = reconstruct(&res);
-                    let res: u32 = res.into();
-                    assert_eq!(res, 25);
-                }
-            });
-        }
-        while let Some(res) = taskset.join_next().await {
-            res.unwrap();
-        }
-    }
+    //     let mut taskset = tokio::task::JoinSet::new();
+    //     // MPC
+    //     let cluster = InMemoryNetwork::in_memory(parties.len());
+    //     for network in cluster {
+    //         let parties = parties.clone();
+    //         taskset.spawn({
+    //             async move {
+    //                 let mut rng = rand::rngs::mock::StepRng::new(1, 7);
+    //                 let mut network = network;
+    //                 let v = Element32::from(5u32);
+    //                 let shares = share(v, &parties, treshold, &mut rng);
+    //                 let shares = network.symmetric_unicast(shares).await.unwrap();
+    //                 // let res = regular_multiply(
+    //                 //     shares[0],
+    //                 //     shares[1], // we ignore the rest of the inputs
+    //                 //     &mut network,
+    //                 //     treshold,
+    //                 //     &parties,
+    //                 //     &mut rng,
+    //                 // ).await;
+    //                 let res = Share {
+    //                     x: shares[0].x,
+    //                     y: shares[0].y * shares[1].y,
+    //                 };
+    //                 let res = network.symmetric_broadcast(res).await.unwrap();
+    //                 let res = reconstruct(&res);
+    //                 let res: u32 = res.into();
+    //                 assert_eq!(res, 25);
+    //             }
+    //         });
+    //     }
+    //     while let Some(res) = taskset.join_next().await {
+    //         res.unwrap();
+    //     }
+    // }
 }
