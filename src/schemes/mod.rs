@@ -30,6 +30,7 @@ pub trait Shared<F>:
 pub struct ShamirParams<F> {
     threshold: u64,
     ids: Vec<F>,
+    // Really considering cutting RngCore out here, since it is mutable state.
     rng: Box<dyn RngCore>,
 }
 
