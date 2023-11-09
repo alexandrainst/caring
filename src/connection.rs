@@ -16,7 +16,7 @@
 //! This could be background verification and 'anti-cheat' detection, error-reporting,
 //! background beaver share generation, or other preproccessing actions.
 
-use std::error::Error;
+use std::{error::Error, time::Duration};
 
 use futures::{SinkExt, StreamExt};
 use thiserror::Error;
@@ -26,7 +26,7 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
-    sync::mpsc::Sender,
+    sync::mpsc::Sender, time::error::Elapsed,
 };
 
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -87,8 +87,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
 pub enum ConnectionError {
     #[error("Deserialization failed")]
     BadSerialization(#[from] bincode::Error),
-    #[error("Connection timed out")]
-    TimeOut,
+    #[error("Connection timed out after {0}")]
+    TimeOut(Elapsed),
     #[error("No message to receive")]
     Closed,
     #[error("Unknown error")]
