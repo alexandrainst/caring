@@ -1,63 +1,11 @@
-use std::{
-    marker::PhantomData,
-    ops::{self, Add, Mul}, error::Error, convert::Infallible,
-};
+use std::marker::PhantomData;
 
 use ff::Field;
-use group::Group;
 use rand::RngCore;
 
 use crate::{
-    agency::Broadcast,
-    schemes::{feldman, shamir},
+    agency::Broadcast, schemes::Shared,
 };
-
-pub trait Shared<F>:
-    Sized + Add<Output = Self> + serde::Serialize + serde::de::DeserializeOwned
-    // TODO: Add multiply-by-constant
-{
-    type Context;
-
-    fn share(ctx: &mut Self::Context, secret: F) -> Vec<Self>;
-    fn recombine(ctx: &mut Self::Context, shares: &[Self]) -> Option<F>;
-    // TODO: Should be Result<F, impl Error>
-}
-
-pub struct ShamirParams<F> {
-    threshold: u64,
-    ids: Vec<F>,
-    rng: Box<dyn RngCore>,
-}
-
-impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> Shared<F> for shamir::Share<F> 
-{
-    type Context = ShamirParams<F>;
-
-    fn share(ctx: &mut Self::Context, secret: F) -> Vec<Self> {
-        shamir::share(secret, &ctx.ids, ctx.threshold, &mut ctx.rng)
-    }
-
-    fn recombine(_ctx: &mut Self::Context, shares: &[Self]) -> Option<F> {
-        Some(shamir::reconstruct(shares))
-    }
-}
-
-impl<
-        F: ff::Field + serde::Serialize + serde::de::DeserializeOwned,
-        G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>
-    > Shared<F> for feldman::VerifiableShare<F, G>
-{
-    type Context = ShamirParams<F>;
-
-    fn share(ctx: &mut Self::Context, secret: F) -> Vec<Self> {
-        feldman::share::<F,G>(secret, &ctx.ids, ctx.threshold, &mut ctx.rng)
-    }
-
-    fn recombine(_ctx: &mut Self::Context, shares: &[Self]) -> Option<F> {
-        feldman::reconstruct::<F,G>(shares)
-    }
-
-}
 
 #[derive(Clone)]
 pub struct BeaverTriple<F, S: Shared<F>> {
