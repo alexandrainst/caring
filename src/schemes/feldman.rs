@@ -67,18 +67,18 @@ impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
     }
 }
 
-impl<'a, 'b, F: Field, G: Group> ops::Mul<F> for VerifiableShare<F, G> where &'a mut G: ops::MulAssign<&'b F> {
-    type Output = Self;
+// impl<'a, 'b, F: Field, G: Group> ops::Mul<F> for VerifiableShare<F, G> where &'a mut G: ops::MulAssign<&'b F> {
+//     type Output = Self;
 
-    fn mul(mut self, rhs: F) -> Self::Output {
-        let mut poly = Arc::make_mut(&mut self.poly);
-        poly *= &rhs;
-        Self {
-            share: self.share * rhs,
-            poly: self.poly,
-        }
-    }
-}
+//     fn mul(mut self, rhs: F) -> Self::Output {
+//         let mut poly = Arc::make_mut(&mut self.poly);
+//         poly *= &rhs;
+//         Self {
+//             share: self.share * rhs,
+//             poly: self.poly,
+//         }
+//     }
+// }
 
 impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {

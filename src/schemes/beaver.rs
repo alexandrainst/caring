@@ -18,8 +18,8 @@ pub trait Shared<F>:
 {
     type Context;
 
-    fn share(ctx: &Self::Context, secret: F) -> Vec<Self>;
-    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F>;
+    fn share(ctx: &mut Self::Context, secret: F) -> Vec<Self>;
+    fn recombine(ctx: &mut Self::Context, shares: &[Self]) -> Option<F>;
     // TODO: Should be Result<F, impl Error>
 }
 
@@ -33,11 +33,11 @@ impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> Shared<F> for sh
 {
     type Context = ShamirParams<F>;
 
-    fn share(ctx: &Self::Context, secret: F) -> Vec<Self> {
+    fn share(ctx: &mut Self::Context, secret: F) -> Vec<Self> {
         shamir::share(secret, &ctx.ids, ctx.threshold, &mut ctx.rng)
     }
 
-    fn recombine(_ctx: &Self::Context, shares: &[Self]) -> Option<F> {
+    fn recombine(_ctx: &mut Self::Context, shares: &[Self]) -> Option<F> {
         Some(shamir::reconstruct(shares))
     }
 }
@@ -49,11 +49,11 @@ impl<
 {
     type Context = ShamirParams<F>;
 
-    fn share(ctx: &Self::Context, secret: F) -> Vec<Self> {
+    fn share(ctx: &mut Self::Context, secret: F) -> Vec<Self> {
         feldman::share::<F,G>(secret, &ctx.ids, ctx.threshold, &mut ctx.rng)
     }
 
-    fn recombine(_ctx: &Self::Context, shares: &[Self]) -> Option<F> {
+    fn recombine(_ctx: &mut Self::Context, shares: &[Self]) -> Option<F> {
         feldman::reconstruct::<F,G>(shares)
     }
 
@@ -74,7 +74,7 @@ impl<F: Field, C, S: Shared<F, Context = C>> BeaverTriple<F, S> {
     /// * `ids`: ids to produce for
     /// * `threshold`: threshold to reconstruct
     /// * `rng`: rng to sample from
-    pub fn fake(ctx: &C, mut rng: &mut impl RngCore) -> Vec<Self> {
+    pub fn fake(ctx: &mut C, mut rng: &mut impl RngCore) -> Vec<Self> {
         let a = F::random(&mut rng);
         let b = F::random(&mut rng);
         let c: F = a * b;
@@ -103,7 +103,7 @@ pub async fn beaver_multiply<
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
     E,
 >(
-    ctx: &C,
+    ctx: &mut C,
     x: S,
     y: S,
     triple: BeaverTriple<F, S>,

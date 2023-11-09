@@ -131,7 +131,7 @@ pub async fn regular_multiply<
     threshold: u64,
     ids: &[F],
     rng: &mut impl RngCore,
-) -> Result<Share<F>, impl std::error::Error> {
+) -> Result<Share<F>, Box<dyn std::error::Error>> {
     let i = x.x;
     // We need 2t < n, otherwise we cannot reconstruct,
     // however 't' is hidden from before, so we jyst have to assume it is.
@@ -365,7 +365,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
 
 #[cfg(test)]
 mod test {
-    use crate::{element::Element32, network::InMemoryNetwork};
+    use crate::element::Element32;
 
     use super::*;
 
@@ -431,7 +431,7 @@ mod test {
     }
 
     use fixed::FixedU32;
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
 
     #[test]
     fn addition_fixpoint() {
