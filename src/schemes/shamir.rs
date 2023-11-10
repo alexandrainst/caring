@@ -1,5 +1,5 @@
 //! This is vanilla Shamir Secret Sharing using an arbitrary field F.
-//! See https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing
+//! See <https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing>
 use std::borrow::Borrow;
 
 use ff::{derive::rand_core::RngCore, Field};
@@ -114,32 +114,105 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     }
 }
 
-// TODO: Move beaver stuff out, and generify over any kind of share.
-// This might require a common 'Share' trait, or maybe just something that
-// implements multiplication, who knows.
+/// A share with a degree larger than the one.
+///
+/// This share have been constructed by multiplying two shares togehter,
+/// each corresponding to a polynomial `p1`, `p2`, producing a share corresponding
+/// to a polynomial `p3` with the degree `|p3| = |p1| + |p2|`.
+///
+/// You can recover the internal share and act if nothing happened.
+/// However, this will encur the penalty of having a larger degree.
+///
+/// ```ignore
+/// # use caring::schemes::shamir::Share;
+/// # use caring::element::Element32;
+/// # use caring::schemes::shamir::ExplodedShare;
+/// # let a = Share{x: Element32::from(2u32), y: Element32::from(2u32)};
+/// # let b = a.clone();
+/// let a : Share<_> = a; // degree t
+/// let b : Share<_> = b; // degree t
+/// let c : ExplodedShare<_> = a * b; // degree 2t
+/// let c : Share<_> = c.recover(); // degree 2t
+/// ```
+///
+#[repr(transparent)]
+#[derive(Debug, Clone)]
+pub struct ExplodedShare<F: Field>(Share<F>);
 
-// TODO: Maybe cut the regular multiplication protocol out and allow multiplying shares directly,
-// at the conseqeunce of increasing their degree? (Sidenote: maybe introduce degree tracking?)
-// Instead provide a protocol for the degree reduction.
-pub async fn regular_multiply<
-    // FIX: Doesn't work
-    F: Field + serde::Serialize + serde::de::DeserializeOwned,
+impl<F: Field> ExplodedShare<F> {
+
+    /// Recover the internal share from an exploded share.
+    ///
+    /// This accepts the higher degree WITHOUT a reduction,
+    /// thus the new share have a higher degree than the initial two.
+    pub fn giveup(self) -> Share<F> {
+        self.0
+    }
+}
+
+impl<F: Field> std::ops::Mul for Share<F> {
+    type Output = ExplodedShare<F>;
+
+    /// Multiply a share with itself, producing an "exploded" share.
+    ///
+    /// * `rhs`: share to multiply with
+    ///
+    /// The `ExplodedShare` corresponds to a polynomial with double the degree
+    /// (if the two inital shares have the same degree)
+    ///
+    /// This "works" if the amount of shares is greater than the new degree,
+    /// however this creates a limit on the amount of multiplications possible.
+    ///
+    /// To mitigate this you can use the `reduction` protocol.
+    /// TODO: Construct that
+    ///
+    fn mul(self, rhs: Self) -> Self::Output {
+        assert_eq!(self.x, rhs.x);
+        ExplodedShare(Self {
+            x: self.x,
+            y: self.y * self.y,
+        })
+    }
+}
+
+
+/// Reduction of the associated polynomial on share.
+///
+/// * `z`: ExplodedShare to recover
+/// * `unicast`: Unicasting functionality
+/// * `threshold`: the given threshold to use (???)
+/// * `ids`: Party IDs to share to
+/// * `rng`: Random number generator
+/// ```ignore
+/// # use caring::schemes::shamir::Share;
+/// # use caring::element::Element32;
+/// # use caring::schemes::shamir::ExplodedShare;
+/// # let a = Share{x: Element32::from(2u32), y: Element32::from(2u32)};
+/// # let b = a.clone();
+/// let a : Share<_> = a; // degree t
+/// let b : Share<_> = b; // degree t
+/// let c : ExplodedShare<_> = a * b; // degree 2t
+/// let c : Share<_> = reduction(c, network, threshold, ids, rng);
+/// //  ^-- degree t
+/// ```
+pub async fn reducto<
+    F: Field + serde::Serialize + serde::de::DeserializeOwned, E
 >(
-    x: Share<F>,
-    y: Share<F>,
-    network: &mut impl Unicast,
+    z: ExplodedShare<F>,
+    unicast: &mut impl Unicast<E>,
     threshold: u64,
     ids: &[F],
     rng: &mut impl RngCore,
-) -> Result<Share<F>, Box<dyn std::error::Error>> {
-    let i = x.x;
+) -> Result<Share<F>, E> {
+    // FIX: Doesn't work
+    // TODO: Maybe use the `Shared` functionality?
+    let z = z.0;
+    let i = z.x;
     // We need 2t < n, otherwise we cannot reconstruct,
-    // however 't' is hidden from before, so we jyst have to assume it is.
-    // x, y: degree t
-    let z = x.y * y.y; // z: degree 2t
-                       // Now we need to reduce the polynomial back to t
-    let z = share(z, ids, threshold, rng); // share -> subshares
-    let z = network.symmetric_unicast::<_>(z).await?;
+    // however 't' is hidden from before, so we just have to assume it is.
+    // Now we need to reduce the polynomial back to t
+    let z = share(z.y, ids, threshold, rng); // share -> subshares
+    let z = unicast.symmetric_unicast::<_>(z).await?;
     // Something about a recombination vector and randomization.
     let z = reconstruct(&z); // reconstruct the subshare
     Ok(Share { x: i, y: z })
@@ -158,10 +231,10 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
         n >= threshold as usize,
         "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
     );
-    assert!(
-        ids.iter().all(|x| !x.is_zero_vartime()),
-        "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
-    );
+    // assert!(
+    //     ids.iter().all(|x| !x.is_zero_vartime()),
+    //     "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
+    // );
 
     // Sample random t-degree polynomial
     let mut polynomial = Polynomial::random(threshold as usize, rng);
@@ -278,6 +351,16 @@ impl<F: Field> std::iter::Sum for VecShare<F> {
     }
 }
 
+/// Share/shard `m` secret values `vs` into `n * m` shares
+/// where `n` is the number of the `ids`
+///
+/// The result is a vector of vectorized shares `VecShare`,
+/// with each `VecShare` being `m` shares corresponding to a party.
+///
+/// * `vs`: secret values to share
+/// * `ids`: ids to share to
+/// * `threshold`: threshold to reconstruct it
+/// * `rng`: rng to generate shares from
 pub fn share_many<F: Field>(
     vs: &[F],
     ids: &[F],
@@ -324,6 +407,9 @@ pub fn share_many<F: Field>(
 
 use rayon::prelude::*;
 
+/// Reconstruct or open shares
+///
+/// * `shares`: shares to be combined into open values
 pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F> {
     // FIX: Code duplication with 'reconstruction'
     //
@@ -463,4 +549,41 @@ mod test {
         assert_eq!(v, a + b);
     }
 
+
+    #[tokio::test]
+    async fn multiplication() {
+        let cluster = crate::testing::Cluster::new(3);
+        let cluster = Box::new(cluster);
+        let cluster = Box::leak(cluster);
+        cluster
+            .run(|network| async move {
+                // setup
+                let input : u32 = 5;
+                let mut rng = rand::rngs::mock::StepRng::new(0, 7);
+                let ids : Vec<_> = network.participants().map(|i| i+1).map(Element32::from).collect();
+                let threshold = 2;
+
+                // secret-sharing
+                let shares = share(input.into(), &ids, threshold, &mut rng);
+                let shares = network.symmetric_unicast(shares).await.unwrap();
+                let [a,b,_] = shares[..] else {todo!()};
+
+                dbg!(&a);
+                dbg!(&b);
+
+                // mpc
+                let c = a * b;
+                dbg!(&c);
+                // let c = reducto(c, network, 3, &ids, &mut rng).await.unwrap();
+                let c = c.giveup();
+
+                // opening
+                let shares = network.symmetric_broadcast(c).await.unwrap();
+                let c : u32 = reconstruct(&shares).into();
+
+                assert_eq!(c, 25);
+            })
+            .await
+            .unwrap();
+    }
 }

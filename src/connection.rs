@@ -6,7 +6,7 @@
 //! perform multiple protocols in parallel. Thus to ensure we receive the right packets
 //! back and forth, we need to open a connection for each 'protocol'.
 //! One method for this is to use something like:
-//! https://github.com/black-binary/async-smux
+//! <https://github.com/black-binary/async-smux>
 //!
 //! In relation to the above, we might want to restrict 'send' with mut.
 //! although, maybe 'recv' is enough. We just need to prevent threads or other

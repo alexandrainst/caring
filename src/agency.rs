@@ -25,30 +25,30 @@
 use itertools::Itertools;
 use thiserror::Error;
 
-pub trait Broadcast<Err=Box<dyn std::error::Error>> {
+pub trait Broadcast<E> {
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
-    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Err>
+    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, E>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Err>;
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, E>;
 }
 
-pub trait Unicast<Err=Box<dyn std::error::Error>> {
+pub trait Unicast<E> {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]);
 
     // TODO: Reconsider this
     #[allow(async_fn_in_trait)]
-    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, Err>
+    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, E>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Err>;
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, E>;
 }
 
 use digest::Digest;

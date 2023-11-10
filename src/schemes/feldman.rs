@@ -1,5 +1,5 @@
 //! This is an implementation of verifiable secret sharing using Feldman's scheme
-//! see https://en.wikipedia.org/wiki/Verifiable_secret_sharing#Feldman's_scheme
+//! see <https://en.wikipedia.org/wiki/Verifiable_secret_sharing#Feldman's_scheme>
 //! The scheme can be instansiated with any field F and a corresponding group G
 //! for which there exists a mapping F -> G using a generator `g`.
 //! It should also be noted that the discrete log problem in G should be *hard*.
