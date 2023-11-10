@@ -7,7 +7,7 @@ use ff::{derive::rand_core::RngCore, Field};
 // TODO: Important! Switch RngCore to CryptoRngCore
 
 use crate::{
-    agency::{Unicast},
+    agency::Unicast,
     poly::Polynomial,
 };
 

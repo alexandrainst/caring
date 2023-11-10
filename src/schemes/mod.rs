@@ -38,6 +38,7 @@ use group::Group;
 use rand::RngCore;
 
 
+trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output=Self> + std::ops::MulAssign<A> {}
 
 /// For a value of type `F` the value is secret-shared
 ///
@@ -79,6 +80,7 @@ pub struct ShamirParams<F> {
     ids: Vec<F>,
 }
 
+// TODO: Collapse Field with Ser-De since we always require that combo?
 impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> Shared<F> for shamir::Share<F> 
 {
     type Context = ShamirParams<F>;
