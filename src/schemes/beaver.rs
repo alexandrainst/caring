@@ -77,7 +77,7 @@ pub async fn beaver_multiply<
 #[cfg(test)]
 mod test {
 
-    use crate::{element::Element32, schemes::{beaver::{BeaverTriple, beaver_multiply}, shamir::{self}, ShamirParams}, network::InMemoryNetwork};
+    use crate::{algebra::element::Element32, schemes::{beaver::{BeaverTriple, beaver_multiply}, shamir::{self}, ShamirParams}, network::InMemoryNetwork};
 
 
     #[tokio::test]

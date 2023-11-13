@@ -214,7 +214,7 @@ pub async fn reducto<
     let z = share(z.y, ids, threshold, rng); // share -> subshares
     let z = unicast.symmetric_unicast::<_>(z).await?;
     // Something about a recombination vector and randomization.
-    let z = reconstruct(&z); // reconstruct the subshare
+    let z = todo!("combine shares using recombinitation vector");
     Ok(Share { x: i, y: z })
 }
 
@@ -231,10 +231,10 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
         n >= threshold as usize,
         "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
     );
-    // assert!(
-    //     ids.iter().all(|x| !x.is_zero_vartime()),
-    //     "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
-    // );
+    assert!(
+        ids.iter().all(|x| !x.is_zero_vartime()),
+        "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
+    );
 
     // Sample random t-degree polynomial
     let mut polynomial = Polynomial::random(threshold as usize, rng);
@@ -446,7 +446,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
 
 #[cfg(test)]
 mod test {
-    use crate::element::Element32;
+    use crate::algebra::element::Element32;
 
     use super::*;
 
@@ -552,7 +552,7 @@ mod test {
 
     #[tokio::test]
     async fn multiplication() {
-        let cluster = crate::testing::Cluster::new(3);
+        let cluster = crate::testing::Cluster::new(5);
         let cluster = Box::new(cluster);
         let cluster = Box::leak(cluster);
         cluster
@@ -566,7 +566,7 @@ mod test {
                 // secret-sharing
                 let shares = share(input.into(), &ids, threshold, &mut rng);
                 let shares = network.symmetric_unicast(shares).await.unwrap();
-                let [a,b,_] = shares[..] else {todo!()};
+                let [a,b,..] = shares[..] else {todo!()};
 
                 dbg!(&a);
                 dbg!(&b);
@@ -574,8 +574,8 @@ mod test {
                 // mpc
                 let c = a * b;
                 dbg!(&c);
-                // let c = reducto(c, network, 3, &ids, &mut rng).await.unwrap();
-                let c = c.giveup();
+                let c = reducto(c, network, threshold, &ids, &mut rng).await.unwrap();
+                // let c = c.giveup();
 
                 // opening
                 let shares = network.symmetric_broadcast(c).await.unwrap();

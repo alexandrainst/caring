@@ -3,7 +3,7 @@
 
 pub mod agency;
 pub mod connection;
-mod element;
+mod algebra;
 pub mod network;
 pub mod poly;
 pub mod schemes;
