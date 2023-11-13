@@ -7,7 +7,6 @@ pub struct Share {
     mac: u128,
 }
 
-
 impl std::ops::Mul<u128> for Share {
     type Output = Share;
 

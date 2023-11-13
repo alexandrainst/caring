@@ -6,10 +6,7 @@ use ff::{derive::rand_core::RngCore, Field};
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
-use crate::{
-    agency::Unicast,
-    poly::Polynomial,
-};
+use crate::{agency::Unicast, poly::Polynomial};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -140,7 +137,6 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
 pub struct ExplodedShare<F: Field>(Share<F>);
 
 impl<F: Field> ExplodedShare<F> {
-
     /// Recover the internal share from an exploded share.
     ///
     /// This accepts the higher degree WITHOUT a reduction,
@@ -175,7 +171,6 @@ impl<F: Field> std::ops::Mul for Share<F> {
     }
 }
 
-
 /// Reduction of the associated polynomial on share.
 ///
 /// * `z`: ExplodedShare to recover
@@ -195,9 +190,7 @@ impl<F: Field> std::ops::Mul for Share<F> {
 /// let c : Share<_> = reduction(c, network, threshold, ids, rng);
 /// //  ^-- degree t
 /// ```
-pub async fn reducto<
-    F: Field + serde::Serialize + serde::de::DeserializeOwned, E
->(
+pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, E>(
     z: ExplodedShare<F>,
     unicast: &mut impl Unicast<E>,
     threshold: u64,
@@ -286,7 +279,6 @@ pub struct VecShare<F: Field> {
     pub(crate) x: F,
     pub(crate) ys: Box<[F]>,
 }
-
 
 impl<F: Field> std::ops::Add for &VecShare<F> {
     type Output = VecShare<F>;
@@ -549,7 +541,6 @@ mod test {
         assert_eq!(v, a + b);
     }
 
-
     #[tokio::test]
     async fn multiplication() {
         let cluster = crate::testing::Cluster::new(5);
@@ -558,15 +549,19 @@ mod test {
         cluster
             .run(|network| async move {
                 // setup
-                let input : u32 = 5;
+                let input: u32 = 5;
                 let mut rng = rand::rngs::mock::StepRng::new(0, 7);
-                let ids : Vec<_> = network.participants().map(|i| i+1).map(Element32::from).collect();
+                let ids: Vec<_> = network
+                    .participants()
+                    .map(|i| i + 1)
+                    .map(Element32::from)
+                    .collect();
                 let threshold = 2;
 
                 // secret-sharing
                 let shares = share(input.into(), &ids, threshold, &mut rng);
                 let shares = network.symmetric_unicast(shares).await.unwrap();
-                let [a,b,..] = shares[..] else {todo!()};
+                let [a, b, ..] = shares[..] else { todo!() };
 
                 dbg!(&a);
                 dbg!(&b);
@@ -574,12 +569,14 @@ mod test {
                 // mpc
                 let c = a * b;
                 dbg!(&c);
-                let c = reducto(c, network, threshold, &ids, &mut rng).await.unwrap();
+                let c = reducto(c, network, threshold, &ids, &mut rng)
+                    .await
+                    .unwrap();
                 // let c = c.giveup();
 
                 // opening
                 let shares = network.symmetric_broadcast(c).await.unwrap();
-                let c : u32 = reconstruct(&shares).into();
+                let c: u32 = reconstruct(&shares).into();
 
                 assert_eq!(c, 25);
             })

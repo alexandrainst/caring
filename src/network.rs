@@ -29,7 +29,6 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
     pub index: usize,
 }
 
-
 #[derive(Error, Debug)]
 #[error("Error communicating with {id}: {source}")]
 pub struct NetworkError {
@@ -75,21 +74,25 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv();
             let msg = tokio::time::timeout(Duration::from_secs(5), msg);
-            async move {
-                (i, msg.await)
-            }
+            async move { (i, msg.await) }
         });
         let mut messages = future::join_all(messages).await;
         // Maybe we should pass the id with it?
         // Idk, it doesn't seem like there is a single good way for this.
         messages.sort_unstable_by_key(|(i, _)| *i);
-        messages.into_iter().map(|(i, m)| {
-            let id = i as u32;
-            match m {
-                Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
-                Err(duration) => Err(NetworkError{id, source: ConnectionError::TimeOut(duration)}),
-            }
-        }).collect()
+        messages
+            .into_iter()
+            .map(|(i, m)| {
+                let id = i as u32;
+                match m {
+                    Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
+                    Err(duration) => Err(NetworkError {
+                        id,
+                        source: ConnectionError::TimeOut(duration),
+                    }),
+                }
+            })
+            .collect()
     }
 
     /// Broadcast a message to all parties and await their messages
@@ -111,10 +114,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// will be send to party `i`.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_unicast<T>(
-        &mut self,
-        mut msgs: Vec<T>,
-    ) -> Result<Vec<T>, NetworkError>
+    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Result<Vec<T>, NetworkError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {

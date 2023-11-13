@@ -3,7 +3,10 @@
 
 use std::{env, net::SocketAddr};
 
-use caring::{network::{TcpNetwork, NetworkError}, schemes::feldman};
+use caring::{
+    network::{NetworkError, TcpNetwork},
+    schemes::feldman,
+};
 use rand::Rng;
 
 #[tokio::main]

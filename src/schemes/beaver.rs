@@ -3,9 +3,7 @@ use std::marker::PhantomData;
 use ff::Field;
 use rand::RngCore;
 
-use crate::{
-    agency::Broadcast, schemes::Shared,
-};
+use crate::{agency::Broadcast, schemes::Shared};
 
 #[derive(Clone)]
 pub struct BeaverTriple<F, S: Shared<F>> {
@@ -47,9 +45,9 @@ impl<F: Field, C, S: Shared<F, Context = C>> BeaverTriple<F, S> {
 /// * `network`: unicasting network
 pub async fn beaver_multiply<
     C,
-    S: Shared<F, Context=C> + Copy + std::ops::Mul<F, Output=S>,
+    S: Shared<F, Context = C> + Copy + std::ops::Mul<F, Output = S>,
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
-    E : std::fmt::Debug,
+    E: std::fmt::Debug,
 >(
     ctx: &C,
     x: S,
@@ -77,8 +75,15 @@ pub async fn beaver_multiply<
 #[cfg(test)]
 mod test {
 
-    use crate::{algebra::element::Element32, schemes::{beaver::{BeaverTriple, beaver_multiply}, shamir::{self}, ShamirParams}, network::InMemoryNetwork};
-
+    use crate::{
+        algebra::element::Element32,
+        network::InMemoryNetwork,
+        schemes::{
+            beaver::{beaver_multiply, BeaverTriple},
+            shamir::{self},
+            ShamirParams,
+        },
+    };
 
     #[tokio::test]
     async fn beaver_mult() {
@@ -87,14 +92,17 @@ mod test {
 
         let threshold: u64 = 2;
 
-
         // preproccessing
-        let ctx = ShamirParams {threshold, ids};
+        let ctx = ShamirParams { threshold, ids };
         let triples = BeaverTriple::fake(&ctx, &mut rng);
 
         let mut taskset = tokio::task::JoinSet::new();
         // MPC
-        async fn do_mpc(triple: BeaverTriple<Element32, shamir::Share<Element32>>, network: InMemoryNetwork, ctx: ShamirParams<Element32>) {
+        async fn do_mpc(
+            triple: BeaverTriple<Element32, shamir::Share<Element32>>,
+            network: InMemoryNetwork,
+            ctx: ShamirParams<Element32>,
+        ) {
             let mut rng = rand::rngs::mock::StepRng::new(1, 7);
             let mut network = network;
             let v = Element32::from(5u32);
@@ -107,7 +115,6 @@ mod test {
             let res = shamir::reconstruct(&res);
             let res: u32 = res.into();
             assert_eq!(res, 25);
-
         }
         let cluster = InMemoryNetwork::in_memory(ctx.ids.len());
         for network in cluster {
@@ -119,5 +126,4 @@ mod test {
             res.unwrap();
         }
     }
-
 }

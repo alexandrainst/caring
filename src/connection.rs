@@ -26,7 +26,8 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
-    sync::mpsc::Sender, time::error::Elapsed,
+    sync::mpsc::Sender,
+    time::error::Elapsed,
 };
 
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};

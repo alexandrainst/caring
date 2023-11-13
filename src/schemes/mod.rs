@@ -27,10 +27,10 @@
 
 pub mod beaver;
 pub mod feldman;
+pub mod pedersen;
 pub mod shamir;
 pub mod spdz;
 pub mod spdz2k;
-pub mod pedersen;
 
 use std::ops::Add;
 
@@ -38,8 +38,7 @@ use ff::Field;
 use group::Group;
 use rand::RngCore;
 
-
-trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output=Self> + std::ops::MulAssign<A> {}
+trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output = Self> + std::ops::MulAssign<A> {}
 
 /// For a value of type `F` the value is secret-shared
 ///
@@ -48,14 +47,10 @@ trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output=Self> + std::ops::MulAs
 /// such as beaver triple multiplication.
 pub trait Shared<F>:
     Sized + Add<Output = Self> + serde::Serialize + serde::de::DeserializeOwned
-    // TODO: Add multiply-by-constant
-    // NOTE: Maybe remove addition since we could have secret-sharing schemes that don't support
-    // it, but just support sharing and reconstruction.
 {
     /// The context needed to use the scheme.
     /// This can be a struct containing the threshold, ids and other things.
-    type Context : Send + Clone;
-
+    type Context: Send + Clone;
 
     /// Perform secret sharing splitting `secret` into a number of shares.
     ///
@@ -64,7 +59,6 @@ pub trait Shared<F>:
     /// * `rng`: cryptographic secure random number generator
     ///
     fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self>;
-
 
     /// Recombine the shares back into a secret,
     /// returning an value if successfull.
@@ -82,8 +76,7 @@ pub struct ShamirParams<F> {
 }
 
 // TODO: Collapse Field with Ser-De since we always require that combo?
-impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> Shared<F> for shamir::Share<F> 
-{
+impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> Shared<F> for shamir::Share<F> {
     type Context = ShamirParams<F>;
 
     fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
@@ -97,18 +90,16 @@ impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> Shared<F> for sh
 
 impl<
         F: ff::Field + serde::Serialize + serde::de::DeserializeOwned,
-        G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>
+        G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>,
     > Shared<F> for feldman::VerifiableShare<F, G>
 {
     type Context = ShamirParams<F>;
 
     fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
-        feldman::share::<F,G>(secret, &ctx.ids, ctx.threshold, rng)
+        feldman::share::<F, G>(secret, &ctx.ids, ctx.threshold, rng)
     }
 
     fn recombine(_ctx: &Self::Context, shares: &[Self]) -> Option<F> {
-        feldman::reconstruct::<F,G>(shares)
+        feldman::reconstruct::<F, G>(shares)
     }
-
 }
-

@@ -1,6 +1,9 @@
 //! Concrete mathematical field example.
 //! Here we have a prime field that is very close to 2^32.
-use ff::{PrimeField, derive::subtle::{Choice, ConstantTimeEq, ConditionallySelectable}};
+use ff::{
+    derive::subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
+    PrimeField,
+};
 use rand::Rng;
 
 #[derive(PrimeField, serde::Serialize, serde::Deserialize)]
@@ -40,14 +43,26 @@ impl From<Element32> for u64 {
     }
 }
 
-
-use derive_more::{Sum, Product};
+use derive_more::{Product, Sum};
 
 /// Modulo 11 Arithmetic
 ///
 /// Not constant-time add-all.
 /// Possibly inefficient with the amount of modulus operations used.
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Sum, Product)]
+#[derive(
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Clone,
+    Copy,
+    serde::Serialize,
+    serde::Deserialize,
+    Sum,
+    Product,
+)]
 pub struct Mod11(pub(crate) u8);
 
 use overload::overload;
@@ -79,23 +94,24 @@ impl ConstantTimeEq for Mod11 {
 
 impl<'a> std::iter::Sum<&'a Mod11> for Mod11 {
     fn sum<I: Iterator<Item = &'a Mod11>>(iter: I) -> Self {
-        iter.into_iter().fold(<Mod11 as ff::Field>::ZERO, |acc,x| acc + x)
+        iter.into_iter()
+            .fold(<Mod11 as ff::Field>::ZERO, |acc, x| acc + x)
     }
 }
 
 impl<'a> std::iter::Product<&'a Mod11> for Mod11 {
     fn product<I: Iterator<Item = &'a Mod11>>(iter: I) -> Self {
-        iter.into_iter().fold(<Mod11 as ff::Field>::ONE, |acc,x| acc * x)
+        iter.into_iter()
+            .fold(<Mod11 as ff::Field>::ONE, |acc, x| acc * x)
     }
 }
 
 impl ConditionallySelectable for Mod11 {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
         let c = choice.unwrap_u8();
-        Self(c * a.0 + (1-c) * b.0)
+        Self(c * a.0 + (1 - c) * b.0)
     }
 }
-
 
 impl ff::Field for Mod11 {
     const ZERO: Self = Self(0);
@@ -103,7 +119,7 @@ impl ff::Field for Mod11 {
     const ONE: Self = Self(1);
 
     fn random(mut rng: impl rand::RngCore) -> Self {
-        let x : u8 = rng.gen();
+        let x: u8 = rng.gen();
         Self(x % 11)
     }
 
@@ -116,7 +132,7 @@ impl ff::Field for Mod11 {
     }
 
     fn invert(&self) -> ff::derive::subtle::CtOption<Self> {
-        let lookup : [u8; 11] = [0, 1, 6, 4, 3, 9, 2, 8, 7, 5, 10];
+        let lookup: [u8; 11] = [0, 1, 6, 4, 3, 9, 2, 8, 7, 5, 10];
         ff::derive::subtle::CtOption::new(Self(lookup[self.0 as usize]), 1.into())
     }
 

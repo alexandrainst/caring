@@ -2,14 +2,21 @@
 use rand::RngCore;
 use std::ops::*;
 
-trait Field: Clone + Copy + Sized + Add<Output=Self> + Sub<Output=Self> + Neg<Output=Self> + Mul<Output=Self> {
+trait Field:
+    Clone
+    + Copy
+    + Sized
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Neg<Output = Self>
+    + Mul<Output = Self>
+{
     const ONE: Self;
     const ZERO: Self;
 
     fn random(rng: impl RngCore) -> Self;
     fn pow(&self, exp: u64) -> Self;
 }
-
 
 impl<T: ff::Field> Field for T {
     const ONE: Self = Self::ONE;

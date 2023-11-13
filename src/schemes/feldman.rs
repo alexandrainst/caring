@@ -131,7 +131,7 @@ where
 // TODO: Distribution protocol.
 // Currently we lack a good abstraction for sharing the shares (dealing).
 // With passive-secure Shamir we just abstract it away with a unicast operation.
-// - 
+// -
 // However here we need a broadcast operation for the commitments, to see they are all equal.
 // Now, we also need to implement the 'complaint-system', such that under the given threshold,
 // a number of parties can issue complaints with the dealer.
