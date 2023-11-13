@@ -245,7 +245,7 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
     let mut shares: Vec<Share<F>> = Vec::with_capacity(n);
     for x in ids {
         let x = *x;
-        let y = polynomial.eval(x);
+        let y = polynomial.eval(&x);
         shares.push(Share::<F> { x, y });
     }
 
@@ -391,12 +391,12 @@ pub fn share_many<F: Field>(
         let vecshare: Box<[_]> = if cfg!(feature = "rayon") {
             vs.par_iter()
                 .enumerate()
-                .map(|(i, _)| polynomials[i].eval(x))
+                .map(|(i, _)| polynomials[i].eval(&x))
                 .collect()
         } else {
             vs.iter()
                 .enumerate()
-                .map(|(i, _)| polynomials[i].eval(x))
+                .map(|(i, _)| polynomials[i].eval(&x))
                 .collect()
         };
         shares.push(VecShare { x, ys: vecshare })

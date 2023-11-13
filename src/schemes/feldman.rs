@@ -67,19 +67,6 @@ impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
     }
 }
 
-// impl<'a, 'b, F: Field, G: Group> ops::Mul<F> for VerifiableShare<F, G> where &'a mut G: ops::MulAssign<&'b F> {
-//     type Output = Self;
-
-//     fn mul(mut self, rhs: F) -> Self::Output {
-//         let mut poly = Arc::make_mut(&mut self.poly);
-//         poly *= &rhs;
-//         Self {
-//             share: self.share * rhs,
-//             poly: self.poly,
-//         }
-//     }
-// }
-
 impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         let mut fst = iter.next().unwrap();
@@ -140,6 +127,18 @@ where
     }
     shares
 }
+
+// TODO: Distribution protocol.
+// Currently we lack a good abstraction for sharing the shares (dealing).
+// With passive-secure Shamir we just abstract it away with a unicast operation.
+// - 
+// However here we need a broadcast operation for the commitments, to see they are all equal.
+// Now, we also need to implement the 'complaint-system', such that under the given threshold,
+// a number of parties can issue complaints with the dealer.
+// -
+// This is of course an interactive protocol and thus needs a bit of modelling work.
+// We can rely on the verified broadcast operation to some extent, however it might
+// need some rework, such that is threshold-safe.
 
 pub fn reconstruct<F: Field, G: Group>(shares: &[VerifiableShare<F, G>]) -> Option<F>
 where
@@ -257,7 +256,7 @@ where
         let x = *x;
         let mut vecshare = Vec::with_capacity(vals.len());
         for (i, _) in vals.iter().enumerate() {
-            let y = polys[i].eval(x);
+            let y = polys[i].eval(&x);
             vecshare.push(y);
         }
         let shares = shamir::VecShare {

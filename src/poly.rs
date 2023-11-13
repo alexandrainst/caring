@@ -37,7 +37,7 @@ impl<G: Field> Polynomial<G> {
     /// Evaluate `x` in the polynomial `f`, such you obtain `f(x)`
     ///
     /// * `x`: value to map from
-    pub fn eval<F: Field>(&self, x: F) -> G
+    pub fn eval<F: Field>(&self, x: &F) -> G
     where
         G: ops::Mul<F, Output = G>,
     {
