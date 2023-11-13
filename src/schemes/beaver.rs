@@ -1,3 +1,4 @@
+// TODO: Move to a 'common' protocol lib?
 use std::marker::PhantomData;
 
 use ff::Field;
