@@ -40,134 +40,35 @@ impl From<Element32> for u64 {
     }
 }
 
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+
+use derive_more::{Sum, Product};
+
+/// Modulo 11 Arithmetic
+///
+/// Not constant-time add-all.
+/// Possibly inefficient with the amount of modulus operations used.
+#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Sum, Product)]
 pub struct Mod11(pub(crate) u8);
 
-// Here be lot's of trait implementations
-// I would like either specialization or macros please.
-impl std::ops::Add for Mod11 {
-    type Output = Self;
+use overload::overload;
+use std::ops;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        Self((self.0 + rhs.0) % 11)
-    }
-}
-
-impl<'a> std::ops::Add for &'a Mod11 {
-    type Output = Mod11;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Mod11((self.0 + rhs.0) % 11)
-    }
-}
-
-impl<'a> std::ops::Add<&'a Mod11> for Mod11 {
-    type Output = Mod11;
-
-    fn add(self, rhs: &'a Self) -> Self::Output {
-        Self((self.0 + rhs.0) % 11)
-    }
-}
-
-impl std::ops::Sub for Mod11 {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        self + (-rhs)
-    }
-}
-
-impl<'a> std::ops::Sub for &'a Mod11 {
-    type Output = Mod11;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        self + &(-*rhs)
-    }
-}
-
-impl<'a> std::ops::Sub<&'a Mod11> for Mod11 {
-    type Output = Self;
-
-    fn sub(self, rhs: &'a Self) -> Self::Output {
-        self + (-*rhs)
-    }
-}
-
-impl std::ops::Neg for Mod11 {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Self(11 - self.0)
-    }
-}
-
-
-impl std::ops::Mul for Mod11 {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        self + (-rhs)
-    }
-}
-
-impl<'a> std::ops::Mul for &'a Mod11 {
-    type Output = Mod11;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        Mod11((self.0 * rhs.0) % 11)
-    }
-}
-
-impl<'a> std::ops::Mul<&'a Mod11> for Mod11 {
-    type Output = Self;
-
-    fn mul(self, rhs: &'a Self) -> Self::Output {
-        Self((self.0 * rhs.0) % 11)
-    }
-}
-
-
-impl std::ops::MulAssign<&Mod11> for Mod11 {
-    fn mul_assign(&mut self, rhs: &Mod11) {
-        self.0 *= rhs.0;
-        self.0 %= 11;
-    }
-}
-
-impl std::ops::MulAssign<Mod11> for Mod11 {
-    fn mul_assign(&mut self, rhs: Mod11) {
-        self.0 *= rhs.0;
-        self.0 %= 11;
-    }
-}
-
-impl std::ops::SubAssign<&Mod11> for Mod11 {
-    fn sub_assign(&mut self, rhs: &Mod11) {
-        self.0 += (-*rhs).0;
-        self.0 %= 11;
-    }
-}
-
-impl std::ops::SubAssign<Mod11> for Mod11 {
-    fn sub_assign(&mut self, rhs: Mod11) {
-        self.0 += (-rhs).0;
-        self.0 %= 11;
-    }
-}
-
-impl std::ops::AddAssign<&Mod11> for Mod11 {
-    fn add_assign(&mut self, rhs: &Mod11) {
-        self.0 += rhs.0;
-        self.0 %= 11;
-    }
-}
-
-impl std::ops::AddAssign<Mod11> for Mod11 {
-    fn add_assign(&mut self, rhs: Mod11) {
-        self.0 += rhs.0;
-        self.0 %= 11;
-    }
-}
+overload!((a: ?Mod11) + (b: ?Mod11) -> Mod11 {Mod11((a.0 + b.0) % 11)});
+overload!((a: ?Mod11) - (b: ?Mod11) -> Mod11 {Mod11((a.0 + 11 - b.0) % 11)});
+overload!((a: ?Mod11) * (b: ?Mod11) -> Mod11 {Mod11((a.0 * b.0) % 11)});
+overload!(- (a: ?Mod11) -> Mod11 { Mod11(11 - a.0) });
+overload!((a: &mut Mod11) += (b: ?Mod11) {
+    a.0 += b.0;
+    a.0 %= 11;
+});
+overload!((a: &mut Mod11) -= (b: ?Mod11) {
+    a.0 += 11 - b.0;
+    a.0 %= 11;
+});
+overload!((a: &mut Mod11) *= (b: ?Mod11) {
+    a.0 *= b.0;
+    a.0 %= 11;
+});
 
 impl ConstantTimeEq for Mod11 {
     fn ct_eq(&self, other: &Self) -> Choice {
@@ -175,43 +76,18 @@ impl ConstantTimeEq for Mod11 {
     }
 }
 
-impl std::iter::Sum for Mod11 {
-    fn sum<I: Iterator<Item = Mod11>>(iter: I) -> Self {
-        todo!()
-    }
-}
-
-impl std::iter::Product for Mod11 {
-    fn product<I: Iterator<Item = Mod11>>(iter: I) -> Self {
-        todo!()
-    }
-}
-
-
-impl<'a> std::iter::Sum<&'a Mod11> for &'a Mod11 {
-    fn sum<I: Iterator<Item = &'a Mod11>>(iter: I) -> Self {
-        todo!()
-    }
-}
-
-
 impl<'a> std::iter::Sum<&'a Mod11> for Mod11 {
     fn sum<I: Iterator<Item = &'a Mod11>>(iter: I) -> Self {
-        todo!()
-    }
-}
-
-impl<'a> std::iter::Product<&'a Mod11> for &'a Mod11 {
-    fn product<I: Iterator<Item = &'a Mod11>>(iter: I) -> Self {
-        todo!()
+        iter.into_iter().fold(<Mod11 as ff::Field>::ZERO, |acc,x| acc + x)
     }
 }
 
 impl<'a> std::iter::Product<&'a Mod11> for Mod11 {
     fn product<I: Iterator<Item = &'a Mod11>>(iter: I) -> Self {
-        todo!()
+        iter.into_iter().fold(<Mod11 as ff::Field>::ONE, |acc,x| acc * x)
     }
 }
+
 impl ConditionallySelectable for Mod11 {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
         let c = choice.unwrap_u8();
@@ -239,7 +115,6 @@ impl ff::Field for Mod11 {
     }
 
     fn invert(&self) -> ff::derive::subtle::CtOption<Self> {
-        // let lookup : [u8; 11] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         let lookup : [u8; 11] = [0, 1, 6, 4, 3, 9, 2, 8, 7, 5, 10];
         ff::derive::subtle::CtOption::new(Self(lookup[self.0 as usize]), 1.into())
     }

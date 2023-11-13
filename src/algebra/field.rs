@@ -1,3 +1,4 @@
+//! Replacement trait for ff::Field, since it might be abit overkill.
 use rand::RngCore;
 use std::ops::*;
 

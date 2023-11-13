@@ -178,6 +178,7 @@ dependencies = [
  "group",
  "itertools 0.11.0",
  "num-traits",
+ "overload",
  "rand",
  "rayon",
  "serde",
