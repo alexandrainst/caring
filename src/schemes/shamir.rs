@@ -6,7 +6,7 @@ use ff::{derive::rand_core::RngCore, Field};
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
-use crate::{agency::Unicast, poly::Polynomial};
+use crate::{agency::Unicast, poly::Polynomial, algebra::math::Vector};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -270,53 +270,38 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
     sum
 }
 
+use derive_more::{Add, AddAssign};
 /// A secret shared vector
 ///
 /// * `x`: the id
 /// * `ys`: share values
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, AddAssign)]
 pub struct VecShare<F: Field> {
     pub(crate) x: F,
-    pub(crate) ys: Box<[F]>,
+    pub(crate) ys: Vector<F>,
+}
+
+impl<F: Field> std::ops::Add for VecShare<F> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {x: self.x, ys: self.ys + rhs.ys}
+    }
 }
 
 impl<F: Field> std::ops::Add for &VecShare<F> {
     type Output = VecShare<F>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let x = self.x;
-        let ys = if cfg!(feature = "rayon") {
-            self.ys
-                .par_iter()
-                .zip(rhs.ys.par_iter())
-                .map(|(&a, &b)| a + b)
-                .collect()
-        } else {
-            self.ys
-                .iter()
-                .zip(rhs.ys.iter())
-                .map(|(&a, &b)| a + b)
-                .collect()
-        };
-        VecShare { x, ys }
-    }
-}
-
-impl<F: Field> std::ops::AddAssign for VecShare<F> {
-    fn add_assign(&mut self, rhs: Self) {
-        if cfg!(feature = "rayon") {
-            self.ys
-                .par_iter_mut()
-                .zip(rhs.ys.par_iter())
-                .for_each(|(a, b)| *a += b)
-        } else {
-            self.ys
-                .iter_mut()
-                .zip(rhs.ys.iter())
-                .for_each(|(a, b)| *a += b)
+        let a = &self.ys;
+        let b = &rhs.ys;
+        let ys : Vector<_> = a + b;
+        VecShare {
+            x: self.x, ys
         }
     }
 }
+
 
 impl<F: Field> From<Vec<Share<F>>> for VecShare<F> {
     fn from(value: Vec<Share<F>>) -> Self {
@@ -329,7 +314,7 @@ impl<F: Field> From<Vec<Share<F>>> for VecShare<F> {
 impl<F: Field> From<VecShare<F>> for Vec<Share<F>> {
     fn from(value: VecShare<F>) -> Self {
         let VecShare { x, ys } = value;
-        ys.iter().map(|&y| Share { x, y }).collect()
+        ys.into_iter().map(|y| Share { x, y }).collect()
     }
 }
 
@@ -380,7 +365,7 @@ pub fn share_many<F: Field>(
     let mut shares: Vec<VecShare<F>> = Vec::with_capacity(n);
     for x in ids {
         let x = *x;
-        let vecshare: Box<[_]> = if cfg!(feature = "rayon") {
+        let vecshare = if cfg!(feature = "rayon") {
             vs.par_iter()
                 .enumerate()
                 .map(|(i, _)| polynomials[i].eval(&x))
@@ -413,7 +398,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
     let mut sum = vec![F::ZERO; m];
     for share in shares.iter() {
         let xi = share.borrow().x;
-        let yi = &share.borrow().ys;
+        let yi : &Vector<_> = &share.borrow().ys;
 
         let mut prod = F::ONE;
         for VecShare { x: xk, ys: _ } in shares.iter().map(|s| s.borrow()) {
@@ -429,7 +414,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
                 .for_each(|(sum, &yi)| *sum += yi * prod);
         } else {
             sum.iter_mut()
-                .zip(yi.iter())
+                .zip(yi.into_iter())
                 .for_each(|(sum, &yi)| *sum += yi * prod);
         }
     }

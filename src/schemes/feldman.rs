@@ -14,7 +14,7 @@ use std::{borrow::Borrow, iter, ops, sync::Arc};
 
 use crate::{
     poly::Polynomial,
-    schemes::shamir::{self},
+    schemes::shamir::{self}, algebra::math::Vector,
 };
 
 use ff::Field;
@@ -207,7 +207,8 @@ where
     pub fn verify(&self) -> bool {
         let VecVerifiableShare { shares, polys } = self;
         let x = shares.x;
-        for (&y, poly) in shares.ys.iter().zip(polys.iter()) {
+        let ys = &shares.ys;
+        for (&y, poly) in ys.into_iter().zip(polys.iter()) {
             let mut check = G::identity();
             for (i, &a) in poly.0.iter().enumerate() {
                 check += a * x.pow([i as u64]);
@@ -261,7 +262,7 @@ where
         }
         let shares = shamir::VecShare {
             x,
-            ys: vecshare.into_boxed_slice(),
+            ys: Vector::from_vec(vecshare),
         };
         let polys = macs.clone();
         vshares.push(VecVerifiableShare { shares, polys })

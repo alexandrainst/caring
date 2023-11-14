@@ -21,8 +21,8 @@ use derive_more::*;
 /// as in ordinary linear algebra fashion.
 ///
 /// If the rayon feature is enabled the operations will be parallelized.
-#[derive(Clone, Debug, Index, PartialEq, Eq)]
-struct Vector<F: Send + Sync> (
+#[derive(Clone, Debug, Index, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Vector<F: Send + Sync> (
     Box<[F]>
 );
 
@@ -33,6 +33,10 @@ impl<F: Send + Sync> Vector<F> {
     }
     pub fn from_array<const N: usize>(v: [F; N]) -> Self {
         Self(Box::new(v))
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -46,6 +50,32 @@ impl<'a, F: Send + Sync> IntoIterator for &'a Vector<F> {
     }
 }
 
+impl<F: Send + Sync> FromIterator<F> for Vector<F> {
+    fn from_iter<T: IntoIterator<Item = F>>(iter: T) -> Self {
+        let boxed = iter.into_iter().collect();
+        Self(boxed)
+    }
+}
+
+
+impl<'a, F: Send + Sync> IntoParallelIterator for &'a Vector<F> {
+    type Item = &'a F;
+    type Iter = rayon::slice::Iter<'a, F>;
+
+    fn into_par_iter(self) -> Self::Iter {
+        self.0.par_iter()
+    }
+}
+
+impl<F: Send + Sync> FromParallelIterator<F> for Vector<F> {
+
+    fn from_par_iter<I>(par_iter: I) -> Self
+    where
+        I: IntoParallelIterator<Item = F> {
+        let boxed = par_iter.into_par_iter().collect();
+        Self(boxed)
+    }
+}
 
 
 impl<F: Send + Sync> IntoIterator for Vector<F> {
@@ -67,27 +97,26 @@ impl<T: Send + Sync> AsMut<[T]> for Vector<T> {
     fn as_mut(&mut self) -> &mut [T] { &mut self.0 }
 }
 
-impl<A: Send + Sync, B: Send + Sync> std::ops::Add for &Vector<A> where for<'a> &'a A: std::ops::Add<Output=B> {
-    type Output = Vector<B>;
+impl<A: Send + Sync + Copy> std::ops::Add for &Vector<A> where A: std::ops::Add<Output=A> {
+    type Output = Vector<A>;
 
     fn add(self, rhs: Self) -> Self::Output {
         let internal = if cfg!(feature = "rayon") {
             self.0
                 .par_iter()
                 .zip(rhs.0.par_iter())
-                .map(|(a, b)| a + b)
+                .map(|(&a, &b)| a + b)
                 .collect()
         } else {
             self.0
                 .iter()
                 .zip(rhs.0.iter())
-                .map(|(a, b)| a + b)
+                .map(|(&a, &b)| a + b)
                 .collect()
         };
         Vector(internal)
     }
 }
-
 
 impl<A: Send + Sync> std::ops::AddAssign<&Vector<A>> for Vector<A> where A: for<'a> std::ops::AddAssign<&'a A> {
     fn add_assign(&mut self, rhs: &Vector<A>) {
@@ -104,6 +133,8 @@ impl<A: Send + Sync> std::ops::AddAssign<&Vector<A>> for Vector<A> where A: for<
         }
     }
 }
+
+
 
 impl<A: Send + Sync> std::ops::AddAssign for Vector<A> where for<'a> A: std::ops::AddAssign<&'a A> {
     fn add_assign(&mut self, rhs: Self) {
