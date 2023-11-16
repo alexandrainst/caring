@@ -30,11 +30,11 @@ fn from_offset(num: u128) -> f64 {
 #[test]
 fn offset_binary() {
     use curve25519_dalek::Scalar;
-    let a : Scalar  =  to_offset(1.1).into();
+    let a : Scalar = to_offset(1.1).into();
     let b : Scalar = to_offset(2.2).into();
-    let c : Scalar  = to_offset(3.3).into();
+    let c : Scalar = to_offset(3.3).into();
     let sum = a + b + c;
-    let sum: [u8; 16] = sum.as_bytes()[0..16].try_into().unwrap();
+    let sum : [u8; 16] = sum.as_bytes()[0..16].try_into().unwrap();
     let sum = u128::from_le_bytes(sum);
     let sum = from_offset(sum);
     assert!(sum - 6.6 < 0.01);
