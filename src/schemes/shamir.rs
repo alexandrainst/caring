@@ -68,7 +68,7 @@ impl<F: Field> std::ops::Sub for Share<F> {
         assert_eq!(self.x, rhs.x);
         Self {
             x: self.x,
-            y: self.y + rhs.y,
+            y: self.y - rhs.y,
         }
     }
 }
