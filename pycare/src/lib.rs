@@ -45,9 +45,8 @@ fn mpc_sum(nums: &[f64]) -> Vec<f64> {
     let mut engine = ENGINE.lock().unwrap();
     let engine = engine.as_mut().unwrap().as_mut();
     let AdderEngine { network, runtime, threshold } = engine;
-    let nums : Vec<_> = nums.into_iter().map(|&num| {
+    let nums : Vec<_> = nums.iter().map(|&num| {
         let num = to_offset(num);
-        
         curve25519_dalek::Scalar::from(num)
     }).collect();
 
