@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 
-use futures::future;
+use futures::{future, Future};
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use thiserror::Error;
@@ -28,6 +28,8 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
     pub connections: Vec<Connection<R, W>>,
     pub index: usize,
 }
+
+
 
 #[derive(Error, Debug)]
 #[error("Error communicating with {id}: {source}")]
@@ -169,7 +171,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     }
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast<NetworkError> for Network<R, W> {
+impl<R: AsyncRead + Unpin + std::marker::Send, W: AsyncWrite + Unpin + std::marker::Send> Unicast<NetworkError> for Network<R, W> {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
         self.unicast(msgs)
     }
@@ -181,9 +183,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast<NetworkError> for Netw
         self.symmetric_unicast(msgs).await
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(
-        &mut self,
-    ) -> Result<Vec<T>, NetworkError> {
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, NetworkError> {
         self.receive_all().await
     }
 }
