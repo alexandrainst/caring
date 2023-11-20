@@ -43,7 +43,6 @@ impl<F: Field> std::ops::Add for Share<F> {
 impl<F: Field> std::ops::AddAssign for Share<F> {
     fn add_assign(&mut self, rhs: Self) {
         assert_eq!(self.x, rhs.x);
-        self.x += rhs.x;
         self.y += rhs.y;
     }
 }
@@ -440,7 +439,7 @@ mod test {
 
     #[test]
     fn addition() {
-        // We test that we can secret-share a two numbers and add them.
+        // We test that we can secret-share two numbers and add them.
         let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let a = 3;
@@ -465,7 +464,7 @@ mod test {
 
     #[test]
     fn addition_many() {
-        // We test that we can secret-share a two numbers and add them.
+        // We test that we can secret-share two vectors of numbers and add them pairwise.
         let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let a: Vec<u32> = (0..256).map(|_| rng.gen_range(1..100)).collect();
