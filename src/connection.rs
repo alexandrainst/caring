@@ -6,7 +6,7 @@
 //! perform multiple protocols in parallel. Thus to ensure we receive the right packets
 //! back and forth, we need to open a connection for each 'protocol'.
 //! One method for this is to use something like:
-//! https://github.com/black-binary/async-smux
+//! <https://github.com/black-binary/async-smux>
 //!
 //! In relation to the above, we might want to restrict 'send' with mut.
 //! although, maybe 'recv' is enough. We just need to prevent threads or other
@@ -27,6 +27,7 @@ use tokio::{
         TcpStream,
     },
     sync::mpsc::Sender,
+    time::error::Elapsed,
 };
 
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -36,6 +37,11 @@ pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     reader: FramedRead<R, LengthDelimitedCodec>,
     task: tokio::task::JoinHandle<FramedWrite<W, LengthDelimitedCodec>>,
 }
+
+
+fn is_sendable(t: impl Send) {
+}
+
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R, W> {
     /// Construct a new connection from a reader and writer
@@ -87,8 +93,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
 pub enum ConnectionError {
     #[error("Deserialization failed")]
     BadSerialization(#[from] bincode::Error),
-    #[error("Connection timed out")]
-    TimeOut,
+    #[error("Connection timed out after {0}")]
+    TimeOut(Elapsed),
     #[error("No message to receive")]
     Closed,
     #[error("Unknown error")]

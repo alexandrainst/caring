@@ -7,8 +7,6 @@ pub struct Share {
     mac: u128,
 }
 
-struct GlobalKey<T>(T);
-
 impl std::ops::Mul<u128> for Share {
     type Output = Share;
 

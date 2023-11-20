@@ -1,16 +1,12 @@
 //! This is vanilla Shamir Secret Sharing using an arbitrary field F.
-//! See https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing
+//! See <https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing>
 use std::borrow::Borrow;
 
 use ff::{derive::rand_core::RngCore, Field};
-use itertools::multiunzip;
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
-use crate::{
-    agency::{Broadcast, Unicast},
-    poly::Polynomial,
-};
+use crate::{agency::Unicast, poly::Polynomial, algebra::math::Vector};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -27,11 +23,6 @@ pub struct Share<F: Field> {
     pub(crate) x: F,
     pub(crate) y: F,
 }
-
-// TODO: We could use a construct representing a group of shares,
-// this could probably allow for the removal of the `x` in the Share.
-// This should allow for an easier 'sharing' phase, where each party
-// gets their correct version.
 
 impl<F: Field> std::ops::Add for Share<F> {
     type Output = Self;
@@ -120,86 +111,103 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     }
 }
 
-// TODO: Move beaver stuff out, and generify over any kind of share.
-// This might require a common 'Share' trait, or maybe just something that
-// implements multiplication, who knows.
-#[derive(Clone)]
-pub struct BeaverTriple<F: Field>(Share<F>, Share<F>, Share<F>);
+/// A share with a degree larger than the one.
+///
+/// This share have been constructed by multiplying two shares togehter,
+/// each corresponding to a polynomial `p1`, `p2`, producing a share corresponding
+/// to a polynomial `p3` with the degree `|p3| = |p1| + |p2|`.
+///
+/// You can recover the internal share and act if nothing happened.
+/// However, this will encur the penalty of having a larger degree.
+///
+/// ```ignore
+/// # use caring::schemes::shamir::Share;
+/// # use caring::element::Element32;
+/// # use caring::schemes::shamir::ExplodedShare;
+/// # let a = Share{x: Element32::from(2u32), y: Element32::from(2u32)};
+/// # let b = a.clone();
+/// let a : Share<_> = a; // degree t
+/// let b : Share<_> = b; // degree t
+/// let c : ExplodedShare<_> = a * b; // degree 2t
+/// let c : Share<_> = c.recover(); // degree 2t
+/// ```
+///
+#[repr(transparent)]
+#[derive(Debug, Clone)]
+pub struct ExplodedShare<F: Field>(Share<F>);
 
-impl<F: Field> BeaverTriple<F> {
-    /// Fake a set of beaver triples.
+impl<F: Field> ExplodedShare<F> {
+    /// Recover the internal share from an exploded share.
     ///
-    /// This produces `n` shares corresponding to a shared beaver triple,
-    /// however locally with the values known.
-    ///
-    /// * `ids`: ids to produce for
-    /// * `threshold`: threshold to reconstruct
-    /// * `rng`: rng to sample from
-    pub fn fake(ids: &[F], threshold: u64, mut rng: &mut impl RngCore) -> Vec<Self> {
-        let a = F::random(&mut rng);
-        let b = F::random(&mut rng);
-        let c = a * b;
-        // Share (preproccess)
-        let a = share(a, ids, threshold, &mut rng);
-        let b = share(b, ids, threshold, &mut rng);
-        let c = share(c, ids, threshold, &mut rng);
-        itertools::izip!(a, b, c)
-            .map(|(a, b, c)| Self(a, b, c))
-            .collect()
+    /// This accepts the higher degree WITHOUT a reduction,
+    /// thus the new share have a higher degree than the initial two.
+    pub fn giveup(self) -> Share<F> {
+        self.0
     }
 }
 
-/// Perform multiplication using beaver triples
-///
-/// * `x`: first share to multiply
-/// * `y`: second share to multiply
-/// * `triple`: beaver triple
-/// * `network`: unicasting network
-pub async fn beaver_multiply<F: Field + serde::Serialize + serde::de::DeserializeOwned, E>(
-    x: Share<F>,
-    y: Share<F>,
-    triple: BeaverTriple<F>,
-    network: &mut impl Broadcast<E>,
-) -> Result<Share<F>, E> {
-    let BeaverTriple(a, b, c) = triple;
-    let ax = a + x;
-    let by = b + y;
+impl<F: Field> std::ops::Mul for Share<F> {
+    type Output = ExplodedShare<F>;
 
-    // Sending both at once it more efficient.
-    let resp = network.symmetric_broadcast::<_>((ax, by)).await?;
-    let (ax, by): (Vec<_>, Vec<_>) = multiunzip(resp);
-
-    let ax = reconstruct(&ax);
-    let by = reconstruct(&by);
-
-    Ok(y * ax + a * (-by) + c)
+    /// Multiply a share with itself, producing an "exploded" share.
+    ///
+    /// * `rhs`: share to multiply with
+    ///
+    /// The `ExplodedShare` corresponds to a polynomial with double the degree
+    /// (if the two inital shares have the same degree)
+    ///
+    /// This "works" if the amount of shares is greater than the new degree,
+    /// however this creates a limit on the amount of multiplications possible.
+    ///
+    /// To mitigate this you can use the `reduction` protocol.
+    /// TODO: Construct that
+    ///
+    fn mul(self, rhs: Self) -> Self::Output {
+        assert_eq!(self.x, rhs.x);
+        ExplodedShare(Self {
+            x: self.x,
+            y: self.y * self.y,
+        })
+    }
 }
 
-// TODO: Maybe cut the regular multiplication protocol out and allow multiplying shares directly,
-// at the conseqeunce of increasing their degree? (Sidenote: maybe introduce degree tracking?)
-// Instead provide a protocol for the degree reduction.
-pub async fn regular_multiply<
-    // FIX: Doesn't work
-    F: Field + serde::Serialize + serde::de::DeserializeOwned,
-    E,
->(
-    x: Share<F>,
-    y: Share<F>,
-    network: &mut impl Unicast<E>,
+/// Reduction of the associated polynomial on share.
+///
+/// * `z`: ExplodedShare to recover
+/// * `unicast`: Unicasting functionality
+/// * `threshold`: the given threshold to use (???)
+/// * `ids`: Party IDs to share to
+/// * `rng`: Random number generator
+/// ```ignore
+/// # use caring::schemes::shamir::Share;
+/// # use caring::element::Element32;
+/// # use caring::schemes::shamir::ExplodedShare;
+/// # let a = Share{x: Element32::from(2u32), y: Element32::from(2u32)};
+/// # let b = a.clone();
+/// let a : Share<_> = a; // degree t
+/// let b : Share<_> = b; // degree t
+/// let c : ExplodedShare<_> = a * b; // degree 2t
+/// let c : Share<_> = reduction(c, network, threshold, ids, rng);
+/// //  ^-- degree t
+/// ```
+pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, E>(
+    z: ExplodedShare<F>,
+    unicast: &mut impl Unicast<E>,
     threshold: u64,
     ids: &[F],
     rng: &mut impl RngCore,
 ) -> Result<Share<F>, E> {
-    let i = x.x;
+    // FIX: Doesn't work
+    // TODO: Maybe use the `Shared` functionality?
+    let z = z.0;
+    let i = z.x;
     // We need 2t < n, otherwise we cannot reconstruct,
-    // however 't' is hidden from before, so we jyst have to assume it is.
-    // x, y: degree t
-    let z = x.y * y.y; // z: degree 2t
-                       // Now we need to reduce the polynomial back to t
-    let z = share(z, ids, threshold, rng); // share -> subshares
-    let z = network.symmetric_unicast::<_>(z).await?;
+    // however 't' is hidden from before, so we just have to assume it is.
+    // Now we need to reduce the polynomial back to t
+    let z = share(z.y, ids, threshold, rng); // share -> subshares
+    let z = unicast.symmetric_unicast::<_>(z).await?;
     // Something about a recombination vector and randomization.
-    let z = reconstruct(&z); // reconstruct the subshare
+    let z = todo!("combine shares using recombinitation vector");
     Ok(Share { x: i, y: z })
 }
 
@@ -230,7 +238,7 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
     let mut shares: Vec<Share<F>> = Vec::with_capacity(n);
     for x in ids {
         let x = *x;
-        let y = polynomial.eval(x);
+        let y = polynomial.eval(&x);
         shares.push(Share::<F> { x, y });
     }
 
@@ -262,59 +270,38 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
     sum
 }
 
+use derive_more::{Add, AddAssign};
 /// A secret shared vector
 ///
 /// * `x`: the id
 /// * `ys`: share values
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, AddAssign)]
 pub struct VecShare<F: Field> {
     pub(crate) x: F,
-    pub(crate) ys: Box<[F]>,
+    pub(crate) ys: Vector<F>,
 }
 
-// impl<F: Field> AsRef<Self> for VecShare<F> {
-//     fn as_ref(&self) -> &Self {
-//         self
-//     }
-// }
+impl<F: Field> std::ops::Add for VecShare<F> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {x: self.x, ys: self.ys + rhs.ys}
+    }
+}
 
 impl<F: Field> std::ops::Add for &VecShare<F> {
     type Output = VecShare<F>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let x = self.x;
-        let ys = if cfg!(feature = "rayon") {
-            self.ys
-                .par_iter()
-                .zip(rhs.ys.par_iter())
-                .map(|(&a, &b)| a + b)
-                .collect()
-        } else {
-            self.ys
-                .iter()
-                .zip(rhs.ys.iter())
-                .map(|(&a, &b)| a + b)
-                .collect()
-        };
-        VecShare { x, ys }
-    }
-}
-
-impl<F: Field> std::ops::AddAssign for VecShare<F> {
-    fn add_assign(&mut self, rhs: Self) {
-        if cfg!(feature = "rayon") {
-            self.ys
-                .par_iter_mut()
-                .zip(rhs.ys.par_iter())
-                .for_each(|(a, b)| *a += b)
-        } else {
-            self.ys
-                .iter_mut()
-                .zip(rhs.ys.iter())
-                .for_each(|(a, b)| *a += b)
+        let a = &self.ys;
+        let b = &rhs.ys;
+        let ys : Vector<_> = a + b;
+        VecShare {
+            x: self.x, ys
         }
     }
 }
+
 
 impl<F: Field> From<Vec<Share<F>>> for VecShare<F> {
     fn from(value: Vec<Share<F>>) -> Self {
@@ -327,7 +314,7 @@ impl<F: Field> From<Vec<Share<F>>> for VecShare<F> {
 impl<F: Field> From<VecShare<F>> for Vec<Share<F>> {
     fn from(value: VecShare<F>) -> Self {
         let VecShare { x, ys } = value;
-        ys.iter().map(|&y| Share { x, y }).collect()
+        ys.into_iter().map(|y| Share { x, y }).collect()
     }
 }
 
@@ -341,6 +328,16 @@ impl<F: Field> std::iter::Sum for VecShare<F> {
     }
 }
 
+/// Share/shard `m` secret values `vs` into `n * m` shares
+/// where `n` is the number of the `ids`
+///
+/// The result is a vector of vectorized shares `VecShare`,
+/// with each `VecShare` being `m` shares corresponding to a party.
+///
+/// * `vs`: secret values to share
+/// * `ids`: ids to share to
+/// * `threshold`: threshold to reconstruct it
+/// * `rng`: rng to generate shares from
 pub fn share_many<F: Field>(
     vs: &[F],
     ids: &[F],
@@ -368,15 +365,15 @@ pub fn share_many<F: Field>(
     let mut shares: Vec<VecShare<F>> = Vec::with_capacity(n);
     for x in ids {
         let x = *x;
-        let vecshare: Box<[_]> = if cfg!(feature = "rayon") {
+        let vecshare = if cfg!(feature = "rayon") {
             vs.par_iter()
                 .enumerate()
-                .map(|(i, _)| polynomials[i].eval(x))
+                .map(|(i, _)| polynomials[i].eval(&x))
                 .collect()
         } else {
             vs.iter()
                 .enumerate()
-                .map(|(i, _)| polynomials[i].eval(x))
+                .map(|(i, _)| polynomials[i].eval(&x))
                 .collect()
         };
         shares.push(VecShare { x, ys: vecshare })
@@ -387,6 +384,9 @@ pub fn share_many<F: Field>(
 
 use rayon::prelude::*;
 
+/// Reconstruct or open shares
+///
+/// * `shares`: shares to be combined into open values
 pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F> {
     // FIX: Code duplication with 'reconstruction'
     //
@@ -398,7 +398,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
     let mut sum = vec![F::ZERO; m];
     for share in shares.iter() {
         let xi = share.borrow().x;
-        let yi = &share.borrow().ys;
+        let yi : &Vector<_> = &share.borrow().ys;
 
         let mut prod = F::ONE;
         for VecShare { x: xk, ys: _ } in shares.iter().map(|s| s.borrow()) {
@@ -414,7 +414,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
                 .for_each(|(sum, &yi)| *sum += yi * prod);
         } else {
             sum.iter_mut()
-                .zip(yi.iter())
+                .zip(yi.into_iter())
                 .for_each(|(sum, &yi)| *sum += yi * prod);
         }
     }
@@ -423,7 +423,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
 
 #[cfg(test)]
 mod test {
-    use crate::{element::Element32, network::InMemoryNetwork};
+    use crate::algebra::element::Element32;
 
     use super::*;
 
@@ -489,7 +489,7 @@ mod test {
     }
 
     use fixed::FixedU32;
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
 
     #[test]
     fn addition_fixpoint() {
@@ -527,86 +527,47 @@ mod test {
     }
 
     #[tokio::test]
-    async fn beaver_mult() {
-        let mut rng = rand::rngs::mock::StepRng::new(0, 7);
-        let parties: Vec<Element32> = (0..2u32).map(|i| i + 1).map(Element32::from).collect();
+    async fn multiplication() {
+        let cluster = crate::testing::Cluster::new(5);
+        let cluster = Box::new(cluster);
+        let cluster = Box::leak(cluster);
+        cluster
+            .run(|network| async move {
+                // setup
+                let input: u32 = 5;
+                let mut rng = rand::rngs::mock::StepRng::new(0, 7);
+                let ids: Vec<_> = network
+                    .participants()
+                    .map(|i| i + 1)
+                    .map(Element32::from)
+                    .collect();
+                let threshold = 2;
 
-        let treshold: u64 = 2;
+                // secret-sharing
+                let shares = share(input.into(), &ids, threshold, &mut rng);
+                let shares = network.symmetric_unicast(shares).await.unwrap();
+                let [a, b, ..] = shares[..] else { todo!() };
 
-        // preproccessing
-        let triples = BeaverTriple::fake(&parties, treshold, &mut rng);
+                dbg!(&a);
+                dbg!(&b);
 
-        let mut taskset = tokio::task::JoinSet::new();
-        // MPC
-        let cluster = InMemoryNetwork::in_memory(parties.len());
-        for network in cluster {
-            let parties = parties.clone();
-            let triple = triples[network.index].clone();
-            taskset.spawn({
-                async move {
-                    let mut rng = rand::rngs::mock::StepRng::new(1, 7);
-                    let mut network = network;
-                    let v = Element32::from(5u32);
-                    let shares = share(v, &parties, treshold, &mut rng);
-                    let shares = network.symmetric_unicast(shares).await.unwrap();
-                    let res = beaver_multiply(shares[0], shares[1], triple, &mut network)
-                        .await
-                        .unwrap();
-                    let res = network.symmetric_broadcast(res).await.unwrap();
-                    let res = reconstruct(&res);
-                    let res: u32 = res.into();
-                    assert_eq!(res, 25);
-                }
-            });
-        }
-        while let Some(res) = taskset.join_next().await {
-            res.unwrap();
-        }
-    }
+                // mpc
+                let c = a * b;
+                dbg!(&c);
+                // HACK: It doesn't work yet.
+                //
+                // let c = reducto(c, network, threshold, &ids, &mut rng)
+                //     .await
+                //     .unwrap();
+                let c = c.giveup();
 
-    #[tokio::test]
-    async fn regular_mult() {
-        let mut rng = thread_rng();
-        let parties: Vec<Element32> = (0..10u32).map(|i| i + 1).map(Element32::from).collect();
+                // opening
+                let shares = network.symmetric_broadcast(c).await.unwrap();
+                let c: u32 = reconstruct(&shares).into();
 
-        let treshold: u64 = 3;
-
-        // preproccessing
-        let _triples = BeaverTriple::fake(&parties, treshold, &mut rng);
-
-        let mut taskset = tokio::task::JoinSet::new();
-        // MPC
-        let cluster = InMemoryNetwork::in_memory(parties.len());
-        for network in cluster {
-            let parties = parties.clone();
-            taskset.spawn({
-                async move {
-                    let mut rng = rand::rngs::mock::StepRng::new(1, 7);
-                    let mut network = network;
-                    let v = Element32::from(5u32);
-                    let shares = share(v, &parties, treshold, &mut rng);
-                    let shares = network.symmetric_unicast(shares).await.unwrap();
-                    // let res = regular_multiply(
-                    //     shares[0],
-                    //     shares[1], // we ignore the rest of the inputs
-                    //     &mut network,
-                    //     treshold,
-                    //     &parties,
-                    //     &mut rng,
-                    // ).await;
-                    let res = Share {
-                        x: shares[0].x,
-                        y: shares[0].y * shares[1].y,
-                    };
-                    let res = network.symmetric_broadcast(res).await.unwrap();
-                    let res = reconstruct(&res);
-                    let res: u32 = res.into();
-                    assert_eq!(res, 25);
-                }
-            });
-        }
-        while let Some(res) = taskset.join_next().await {
-            res.unwrap();
-        }
+                assert_eq!(c, 25);
+            })
+            .await
+            .unwrap();
     }
 }

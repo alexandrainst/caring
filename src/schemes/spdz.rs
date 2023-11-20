@@ -80,7 +80,7 @@ mod test {
 
     #[test]
     fn sharing() {
-        use crate::element::Element32;
+        use crate::algebra::element::Element32;
         let mut rng = rand::rngs::mock::StepRng::new(42, 7);
         // Key should probablu be derived from a random somewhere
         let key = 7u32.into();

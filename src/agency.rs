@@ -22,6 +22,7 @@
 //! from subprotocols in a very elegant manner IMO.
 //!
 
+use futures::Future;
 use itertools::Itertools;
 use thiserror::Error;
 
@@ -29,26 +30,22 @@ pub trait Broadcast<E> {
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
     // TODO: Reconsider this
-    #[allow(async_fn_in_trait)]
-    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, E>
+    fn symmetric_broadcast<T>(&mut self, msg: T) -> impl Future<Output=Result<Vec<T>, E>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
-    #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, E>;
+    fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> impl Future<Output=Result<Vec<T>, E>>;
 }
 
 pub trait Unicast<E> {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]);
 
     // TODO: Reconsider this
-    #[allow(async_fn_in_trait)]
-    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, E>
+    fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> impl Future<Output=Result<Vec<T>, E>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
-    #[allow(async_fn_in_trait)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, E>;
+    fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> impl Future<Output=Result<Vec<T>, E>>;
 }
 
 use digest::Digest;
@@ -64,14 +61,7 @@ trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> 
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        // TODO: Major clean-up here
         // TODO: Testing
-        // PERF: We don't need to check ourselves.
-        // We can also do some of the checks concurrently
-        // TODO: Return a Result instead of panicking
-        // TODO: Split this up into asymmetric functions
-        // NOTE: Maybe send `msg` after the hash check?
-        // I.e. do 3, then 1, 2.
 
         // 1. Send hash of the message
         let mut digest = D::new();
@@ -108,7 +98,7 @@ trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> 
     }
 
     fn broadcast(&mut self, _msg: &impl serde::Serialize) {
-        todo!("Need to apply verification layer")
+        todo!("Need to copy/translate/move implementation from symmetric")
     }
 
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
@@ -116,7 +106,7 @@ trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> 
     }
 }
 
-#[derive(Error)]
+#[derive(Error, Debug)]
 pub enum BroadcastVerificationError<E> {
     #[error("Could not verify broadcast")]
     VerificationFailure,

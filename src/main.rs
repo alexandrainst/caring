@@ -3,11 +3,14 @@
 
 use std::{env, net::SocketAddr};
 
-use caring::{connection::ConnectionError, network::TcpNetwork, schemes::feldman};
+use caring::{
+    network::{NetworkError, TcpNetwork},
+    schemes::feldman,
+};
 use rand::Rng;
 
 #[tokio::main]
-async fn main() -> Result<(), ConnectionError> {
+async fn main() -> Result<(), NetworkError> {
     // Argument parsing
     let mut args = env::args();
     args.next();
