@@ -8,9 +8,15 @@ edition = "2021"
 name = "caring"
 crate-type = ["cdylib"]
 
+[profile.release]
+debug = true
+
 [dependencies]
 caring = { path = ".." }
 tokio = { version = "1.33.0", features = ["full"] }
 curve25519-dalek = { version = "4.1.1", features = ["group", "serde"] }
 rand = "0.8.5"
 fixed = "2.0.0-alpha.11"
+
+[build-dependencies]
+cbindgen = "0.26.0"

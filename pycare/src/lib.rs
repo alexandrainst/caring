@@ -41,7 +41,7 @@ fn offset_binary() {
 }
 
 static ENGINE : Mutex<Option<Box<AdderEngine>>> = Mutex::new(None);
-fn mpc_sum(nums: &[f64]) -> Vec<f64> {
+fn mpc_sum(nums: &[f64]) -> Option<Vec<f64>> {
     let mut engine = ENGINE.lock().unwrap();
     let engine = engine.as_mut().unwrap().as_mut();
     let AdderEngine { network, runtime, threshold } = engine;
@@ -50,7 +50,7 @@ fn mpc_sum(nums: &[f64]) -> Vec<f64> {
         curve25519_dalek::Scalar::from(num)
     }).collect();
 
-    let res = runtime.block_on(async {
+    let res : Option<_> = runtime.block_on(async {
 
         // construct
         let parties: Vec<_> = network
@@ -70,15 +70,15 @@ fn mpc_sum(nums: &[f64]) -> Vec<f64> {
         let open_shares : Vec<feldman::VecVerifiableShare<_,_>> = network.symmetric_broadcast(my_result).await.unwrap();
 
         // reconstruct
-        let res = feldman::reconstruct_many(&open_shares).unwrap()
+        let res = feldman::reconstruct_many(&open_shares)?
             .into_iter()
-            .map(|x| x.as_bytes()[0..8].try_into().unwrap())
+            .map(|x| x.as_bytes()[0..128/8].try_into().expect("Should be infalliable"))
             .map(u128::from_le_bytes)
             .map(from_offset)
             .collect();
         // NOTE: Since we are only using half of this space, we have
         // a possibility of 'checking' for computation failures.
-        res
+        Some(res)
     });
     res
 }
@@ -106,13 +106,13 @@ fn setup(my_addr: &str, others: &PyTuple) -> PyResult<()> {
 /// Run a sum procedure in which each party supplies a double floating point
 #[pyfunction]
 fn sum(a: f64) -> f64 {
-    mpc_sum(&[a])[0]
+    mpc_sum(&[a]).unwrap()[0]
 }
 
 
 #[pyfunction]
 fn sum_many(a: Vec<f64>) -> Vec<f64> {
-    mpc_sum(&a)
+    mpc_sum(&a).unwrap()
 }
 
 /// Takedown the MPC engine, freeing the memory and dropping the connections

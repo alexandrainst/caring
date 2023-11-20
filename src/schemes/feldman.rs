@@ -279,7 +279,9 @@ where
     T: Borrow<VecVerifiableShare<F, G>>,
 {
     for shares in vec_shares {
-        assert!(shares.borrow().verify());
+        if!(shares.borrow().verify()){
+            return None
+        };
     }
 
     let shares: Vec<_> = vec_shares.iter().map(|x| &x.borrow().shares).collect();

@@ -1,8 +1,8 @@
 use core::slice::{self};
 use std::{
-    ffi::{CStr},
+    ffi::{CStr, c_char},
     net::SocketAddr,
-    sync::Mutex,
+    sync::Mutex, panic,
 };
 
 use caring::{network::TcpNetwork, schemes::feldman};
@@ -43,7 +43,7 @@ fn offset_binary() {
 }
 
 static ENGINE: Mutex<Option<Box<AdderEngine>>> = Mutex::new(None);
-fn mpc_sum(nums: &[f64]) -> Vec<f64> {
+fn mpc_sum(nums: &[f64]) -> Option<Vec<f64>> {
     let mut engine = ENGINE.lock().unwrap();
     let engine = engine.as_mut().unwrap().as_mut();
     let AdderEngine {
@@ -52,7 +52,7 @@ fn mpc_sum(nums: &[f64]) -> Vec<f64> {
         threshold,
     } = engine;
     let nums: Vec<_> = nums
-        .into_iter()
+        .iter()
         .map(|&num| {
             let num = to_offset(num);
 
@@ -60,7 +60,7 @@ fn mpc_sum(nums: &[f64]) -> Vec<f64> {
         })
         .collect();
 
-    let res = runtime.block_on(async {
+    let res : Option<_> = runtime.block_on(async {
         // construct
         let parties: Vec<_> = network
             .participants()
@@ -75,24 +75,23 @@ fn mpc_sum(nums: &[f64]) -> Vec<f64> {
         >(&nums, &parties, *threshold, &mut rng);
 
         // share my shares.
-        let shares = network.symmetric_unicast(shares).await.unwrap();
+        let shares = network.symmetric_unicast(shares).await.expect("Sharing shares");
 
         // compute
         let my_result = shares.into_iter().sum();
         let open_shares: Vec<feldman::VecVerifiableShare<_, _>> =
-            network.symmetric_broadcast(my_result).await.unwrap();
+            network.symmetric_broadcast(my_result).await.expect("Publishing shares");
 
         // reconstruct
-        let res = feldman::reconstruct_many(&open_shares)
-            .unwrap()
+        let res = feldman::reconstruct_many(&open_shares)?
             .into_iter()
-            .map(|x| x.as_bytes()[0..8].try_into().unwrap())
+            .map(|x| x.as_bytes()[0..128/8].try_into().expect("Should be infalliable"))
             .map(u128::from_le_bytes)
             .map(from_offset)
             .collect();
         // NOTE: Since we are only using half of this space, we have
         // a possibility of 'checking' for computation failures.
-        res
+        Some(res)
     });
     res
 }
@@ -121,7 +120,7 @@ fn setup_engine(my_addr: &str, others: &[&str]) -> Result<(), ()> {
 /// # Safety
 /// Strings must null terminated and the array have length `len`
 #[no_mangle]
-pub unsafe extern "C" fn setup(my_addr: *const i8, others: *const *const i8, len: usize) -> u32 {
+pub unsafe extern "C" fn care_setup(my_addr: *const c_char, others: *const *const c_char, len: usize) -> i32 {
     let my_addr = unsafe { CStr::from_ptr(my_addr) };
     let Ok(my_addr) = my_addr.to_str() else {
         return 1;
@@ -145,21 +144,49 @@ pub unsafe extern "C" fn setup(my_addr: *const i8, others: *const *const i8, len
 }
 
 /// Run a sum procedure in which each party supplies a double floating point
+///
+/// Returns `NaN` on unknown panics.
+///
 #[no_mangle]
-pub extern "C" fn sum(a: f64) -> f64 {
-    mpc_sum(&[a])[0]
+pub extern "C" fn care_sum(a: f64) -> f64 {
+    let result = panic::catch_unwind(|| {
+        mpc_sum(&[a])
+    });
+    let Ok(result) = result else {
+        return f64::NAN;
+    };
+    let Some(result) = result else {
+        return -1.0;
+    };
+    result[0]
 }
 
+/// Compute many sums (vectorized)
+///
+/// # Safety
+/// The `buf` pointer must have length `len`.
+///
+/// Returns `-1` on unknown panics.
+///
 #[no_mangle]
-pub extern "C" fn sum_many(buf: *mut f64, len: usize) {
+pub unsafe extern "C" fn care_sum_many(buf: *mut f64, len: usize) -> i32 {
     let input: &[_] = unsafe { slice::from_raw_parts(buf, len) };
-    let res = mpc_sum(input);
+    let result = panic::catch_unwind(|| {
+        mpc_sum(input)
+    });
+    let Ok(res) = result else {
+        return -1;
+    };
+    let Some(res) = res else {
+        return 1;
+    };
     let res = res.as_slice().as_ptr();
     unsafe { std::ptr::copy(res, buf, len) };
+    0
 }
 
 /// Takedown the MPC engine, freeing the memory and dropping the connections
 #[no_mangle]
-pub extern "C" fn takedown() {
+pub extern "C" fn care_takedown() {
     ENGINE.lock().unwrap().as_mut().take();
 }
