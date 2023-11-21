@@ -6,7 +6,7 @@ use ff::{derive::rand_core::RngCore, Field};
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
-use crate::{agency::Unicast, poly::Polynomial, algebra::math::Vector};
+use crate::{net::agency::Unicast, poly::Polynomial, algebra::math::Vector};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.

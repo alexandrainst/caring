@@ -10,8 +10,8 @@ use tokio::{
 };
 
 use crate::{
-    agency::{Broadcast, Unicast},
-    connection::{Connection, ConnectionError},
+    net::agency::{Broadcast, Unicast},
+    net::connection::{Connection, ConnectionError},
 };
 
 /// Peer-2-peer network

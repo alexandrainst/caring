@@ -1,10 +1,12 @@
 // #![allow(unused)]
 //pub mod theater;
 
+pub mod net;
+
 use std::{env, net::SocketAddr};
 
 use caring::{
-    network::{NetworkError, TcpNetwork},
+    net::network::{NetworkError, TcpNetwork},
     schemes::feldman,
 };
 use rand::Rng;

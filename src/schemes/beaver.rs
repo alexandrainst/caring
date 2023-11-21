@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use ff::Field;
 use rand::RngCore;
 
-use crate::{agency::Broadcast, schemes::Shared};
+use crate::{net::agency::Broadcast, schemes::Shared};
 
 #[derive(Clone)]
 pub struct BeaverTriple<F, S: Shared<F>> {
@@ -78,7 +78,7 @@ mod test {
 
     use crate::{
         algebra::element::Element32,
-        network::InMemoryNetwork,
+        net::network::InMemoryNetwork,
         schemes::{
             beaver::{beaver_multiply, BeaverTriple},
             shamir::{self},
