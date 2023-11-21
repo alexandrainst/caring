@@ -9,7 +9,7 @@ use crate::poly::Polynomial;
 use derive_more::*;
 #[derive(Add, Sub, Neg)]
 pub struct VerifiableShare<F: Field>(F, F);
-pub struct Commitment<G>(Box<[G]>);
+pub struct Commitment<G: Send + Sync>(Polynomial<G>);
 
 /// Generators for Pedersen Secret Sharing (and Pedersen Commitments)
 ///
@@ -44,7 +44,7 @@ where
         })
         .collect();
 
-    let commitments: Box<[G]> =
+    let commitments: Polynomial<G> =
         p1.0.iter()
             .zip(p2.0.iter())
             .map(|(&a, &b)| *g * a + *h * b)
@@ -66,7 +66,7 @@ where
 {
     // C0^(i^0) * C1^(i^1) * C1^(i^2) + ...
     let mut check = G::identity();
-    for (i, &a) in commit.0.iter().enumerate() {
+    for (i, &a) in commit.0.0.iter().enumerate() {
         check += a * id.pow([i as u64]);
     }
 

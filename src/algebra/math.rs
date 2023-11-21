@@ -8,10 +8,9 @@
 //! Addition and subtraction function elementwise, while multiplication is only allowed with scalar
 //! values.
 //!
-use std::ops::AddAssign;
+
 
 use rayon::prelude::*;
-use derive_more::*;
 
 // TODO: Consider smallvec or tinyvec
 
@@ -21,7 +20,7 @@ use derive_more::*;
 /// as in ordinary linear algebra fashion.
 ///
 /// If the rayon feature is enabled the operations will be parallelized.
-#[derive(Clone, Debug, Index, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Vector<F: Send + Sync> (
     Box<[F]>
 );
@@ -37,6 +36,24 @@ impl<F: Send + Sync> Vector<F> {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, F> {
+        self.0.iter()
+    }
+}
+
+impl<F: Send + Sync> std::ops::Index<usize> for Vector<F> {
+    type Output = F;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl<F: Send + Sync> std::ops::IndexMut<usize> for Vector<F> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
     }
 }
 
@@ -87,6 +104,7 @@ impl<F: Send + Sync> IntoIterator for Vector<F> {
         self.0.into_vec().into_iter()
     }
 }
+
 
 
 impl<T: Send + Sync> AsRef<[T]> for Vector<T> {
@@ -236,8 +254,8 @@ impl<A: Send + Sync, B: Send + Sync> std::ops::MulAssign<&B> for Vector<A> where
 }
 
 
-impl<A: Send + Sync, B: Send + Sync> std::ops::Mul<B> for &Vector<A> where for<'b, 'a> &'a A: std::ops::Mul<&'b B, Output=A>{
-    type Output = Vector<A>;
+impl<A: Send + Sync, B: Send + Sync> std::ops::Mul<B> for &Vector<A> where for<'a, 'b> &'a A: std::ops::Mul<&'b B, Output=B>{
+    type Output = Vector<B>;
 
     fn mul(self, rhs: B) -> Self::Output {
         let b = rhs;

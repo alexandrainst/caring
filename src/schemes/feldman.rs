@@ -45,8 +45,8 @@ impl<F: Field, G: Group> ops::Add for VerifiableShare<F, G> {
     type Output = Self;
 
     fn add(mut self, rhs: Self) -> Self::Output {
-        let mut poly = Arc::make_mut(&mut self.poly);
-        poly += &rhs.poly;
+        let poly = Arc::make_mut(&mut self.poly);
+        poly.0 += &rhs.poly.0;
         Self {
             share: self.share + rhs.share,
             poly: self.poly,
@@ -58,8 +58,8 @@ impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
     type Output = Self;
 
     fn sub(mut self, rhs: Self) -> Self::Output {
-        let mut poly = Arc::make_mut(&mut self.poly);
-        poly -= &rhs.poly;
+        let poly = Arc::make_mut(&mut self.poly);
+        poly.0 -= &rhs.poly.0;
         Self {
             share: self.share - rhs.share,
             poly: self.poly,
@@ -71,10 +71,10 @@ impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         let mut fst = iter.next().unwrap();
         let mut share = fst.share;
-        let mut poly_ref = Arc::make_mut(&mut fst.poly);
+        let poly_ref = Arc::make_mut(&mut fst.poly);
         for vs in iter {
             share += vs.share;
-            poly_ref += &vs.poly;
+            poly_ref.0 += &vs.poly.0;
         }
         VerifiableShare {
             share,
@@ -105,7 +105,7 @@ where
     let poly = (1..threshold).map(|_| F::random(&mut *rng));
     // I want to avoid this allocation :(
     let poly: Box<[F]> = iter::once(val).chain(poly).collect();
-    let mac_poly: Box<[G]> = poly.iter().map(|a| G::generator() * *a).collect();
+    let mac_poly: Vector<_> = poly.iter().map(|a| G::generator() * *a).collect();
 
     // Sample n points from 1..=n in the polynomial
     let mut shares: Vec<_> = Vec::with_capacity(n);
@@ -172,9 +172,8 @@ impl<F: Field, G: Group> std::ops::Add for &VecVerifiableShare<F, G> {
             .iter()
             .cloned()
             .zip(rhs.polys.iter())
-            .map(|(mut a, b)| {
-                a += b;
-                a
+            .map(|(a, b)| {
+                Polynomial(a.0 + &b.0)
             })
             .collect();
         VecVerifiableShare { shares, polys }
@@ -193,7 +192,7 @@ impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F, G> {
             polys
                 .iter_mut()
                 .zip(vs.polys.iter())
-                .for_each(|(mut acc, p)| acc += p);
+                .for_each(|(Polynomial(acc), Polynomial(p))| *acc += p);
         }
         let polys: Arc<[_]> = polys.into();
         VecVerifiableShare { shares, polys }
@@ -318,7 +317,7 @@ mod test {
         let vs1 = {
             let v: Vec<_> = a.clone().into_iter().map(to_scalar).collect();
             let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
-            share_many::<_, RistrettoPoint>(&v, &ids, 4, &mut rng)
+            share_many::<Scalar, RistrettoPoint>(&v, &ids, 4, &mut rng)
         };
         for share in &vs1 {
             assert!(share.verify());
@@ -374,12 +373,12 @@ mod test {
         let vs1 = {
             let v: Vec<_> = a.clone().into_iter().map(to_scalar).collect();
             let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
-            share_many::<_, RistrettoPoint>(&v, &ids, 4, &mut rng)
+            share_many::<Scalar, RistrettoPoint>(&v, &ids, 4, &mut rng)
         };
         let vs2 = {
             let v: Vec<_> = b.clone().into_iter().map(to_scalar).collect();
             let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
-            share_many::<_, RistrettoPoint>(&v, &ids, 4, &mut rng)
+            share_many::<Scalar, RistrettoPoint>(&v, &ids, 4, &mut rng)
         };
         for share in &vs1 {
             assert!(share.verify());

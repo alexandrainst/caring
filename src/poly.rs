@@ -1,37 +1,32 @@
 use ff::Field;
-use std::ops::{self, AddAssign};
+use group::Group;
+use std::ops::{self, AddAssign, Deref, DerefMut};
 
 use itertools::{self, Itertools};
 use rand::RngCore;
-// NOTE: Consider basing a lot of these generic vectorized data structeres on a common
-// one as to limit the mental and code overhead of duplicated implementations of
-// addition, multiplication, etc.
-// Maybe this task should be delegated out to a crate itself?
-// --
-// Currently, the common functionaly is a dynamically allocated but constant sized vector,
-// which supports addition with itself and multiplication with another type in which it maps over
-// to. There is also the randomness, and iterating over values.
+
+use crate::algebra::math::Vector;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct Polynomial<G>(pub Box<[G]>);
+pub struct Polynomial<G: Send + Sync>(pub Vector<G>);
 
-impl<G: ops::AddAssign + Clone> Polynomial<G> {
-    fn add_self(&mut self, other: &Self) {
-        self.0
-            .iter_mut()
-            .zip(other.0.iter())
-            .for_each(|(a, b)| *a += b.clone())
-    }
-}
 
-impl<G: ops::SubAssign + Clone> Polynomial<G> {
-    fn sub_self(&mut self, other: &Self) {
-        self.0
-            .iter_mut()
-            .zip(other.0.iter())
-            .for_each(|(a, b)| *a -= b.clone())
-    }
-}
+// // HACK: We really should not implement Deref/DerefMut, but operator-overloading is annoying.
+// // If we can derive Add/Sub/Mul instead that would make me happy.
+// impl<G: Send + Sync> Deref for Polynomial<G> {
+//     type Target = Vector<G>;
+
+//     fn deref(&self) -> &Self::Target {
+//         &self.0
+//     }
+// }
+
+
+// impl<G: Send + Sync> DerefMut for Polynomial<G> {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         &mut self.0
+//     }
+// }
 
 impl<G: Field> Polynomial<G> {
     /// Evaluate `x` in the polynomial `f`, such you obtain `f(x)`
@@ -52,10 +47,9 @@ impl<G: Field> Polynomial<G> {
     }
 }
 
-impl<G> FromIterator<G> for Polynomial<G> {
+impl<G: Send + Sync> FromIterator<G> for Polynomial<G> {
     fn from_iter<T: IntoIterator<Item = G>>(iter: T) -> Self {
-        let poly: Box<[_]> = iter.into_iter().collect();
-        Polynomial(poly)
+        Self(iter.into_iter().collect())
     }
 }
 
@@ -78,15 +72,13 @@ impl<F: Field> Polynomial<F> {
 //     }
 // }
 
-impl<F: Copy, G: Clone> ops::Mul<G> for &Polynomial<F>
-where
-    F: ops::Mul<G, Output = G>,
-    Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>,
-{
+impl<F: Send + Sync, G: Send + Sync> std::ops::Mul<G> for &Polynomial<F> where for<'a, 'b> &'a F: std::ops::Mul<&'b G, Output=G>{
     type Output = Polynomial<G>;
 
     fn mul(self, rhs: G) -> Self::Output {
-        Polynomial(self.0.iter().map(|&a| -> G { a * rhs.clone() }).collect())
+        let me = &self.0;
+        let res : Vector<G> = me * rhs;
+        Polynomial(res)
     }
 }
 
@@ -101,27 +93,7 @@ where
 //     }
 // }
 
-impl<F: AddAssign + Clone> std::iter::Sum for Polynomial<F> {
-    fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
-        // This is sort of a hack, sum() should work on empty iterators.
-        // This requires some sort of default/'zero polynomial'
-        // While we could construct a 'zero' polynomial instead, where each
-        // coefficient is zero, this still leaves the question of the degree.
-        // This begs to differ if we want an empty polynomial (degree -1) or a constant polynomial
-        // (degree 0) with the single element zero.
-        //
-        // However neither these are particular usefull, so in most cases
-        // the sum would be an mistake, since you would not be able to perform very
-        // meaning operations between these and other polynomials.
-        let mut acc = iter.next().expect("Can't sum zero polynomials");
-        for poly in iter {
-            acc += poly;
-        }
-        acc
-    }
-}
-
-impl<F: ops::AddAssign + num_traits::Zero + Clone, G: ops::Mul<Output = F> + Copy> Polynomial<G> {
+impl<F: Send + Sync + ops::AddAssign + num_traits::Zero + Clone, G: Send + Sync + ops::Mul<Output = F> + Copy> Polynomial<G> {
     pub fn mult(&self, other: &Self) -> Polynomial<F> {
         // degree is length - 1.
         let n = self.0.len() + other.0.len();
@@ -137,102 +109,6 @@ impl<F: ops::AddAssign + num_traits::Zero + Clone, G: ops::Mul<Output = F> + Cop
             vec[i] += a;
         }
 
-        Polynomial(vec.into())
-    }
-}
-
-impl<G: ops::AddAssign + Clone> ops::AddAssign for Polynomial<G> {
-    fn add_assign(&mut self, rhs: Self) {
-        self.add_self(&rhs)
-    }
-}
-
-impl<G: ops::AddAssign + Clone> ops::AddAssign<&Polynomial<G>> for Polynomial<G> {
-    fn add_assign(&mut self, rhs: &Polynomial<G>) {
-        self.add_self(rhs)
-    }
-}
-
-impl<G: ops::AddAssign + Clone> ops::AddAssign<&Polynomial<G>> for &mut Polynomial<G> {
-    fn add_assign(&mut self, rhs: &Polynomial<G>) {
-        self.add_self(rhs)
-    }
-}
-
-impl<G: ops::AddAssign + Clone> ops::Add for Polynomial<G> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        let mut new = self;
-        new += rhs;
-        new
-    }
-}
-
-impl<'a, 'b, G: ops::AddAssign + Clone> ops::Add<&'a Polynomial<G>> for &'b Polynomial<G> {
-    type Output = Polynomial<G>;
-
-    fn add(self, rhs: &Polynomial<G>) -> Self::Output {
-        let mut new = self.clone();
-        new += rhs;
-        new
-    }
-}
-
-impl<G: ops::AddAssign + Clone> ops::Add<Polynomial<G>> for &Polynomial<G> {
-    type Output = Polynomial<G>;
-
-    fn add(self, rhs: Polynomial<G>) -> Self::Output {
-        let mut new = self.clone();
-        new += rhs;
-        new
-    }
-}
-
-impl<G: ops::SubAssign + Clone> ops::SubAssign for Polynomial<G> {
-    fn sub_assign(&mut self, rhs: Self) {
-        self.sub_self(&rhs)
-    }
-}
-
-impl<G: ops::SubAssign + Clone> ops::SubAssign<&Polynomial<G>> for Polynomial<G> {
-    fn sub_assign(&mut self, rhs: &Polynomial<G>) {
-        self.sub_self(rhs)
-    }
-}
-
-impl<G: ops::SubAssign + Clone> ops::SubAssign<&Polynomial<G>> for &mut Polynomial<G> {
-    fn sub_assign(&mut self, rhs: &Polynomial<G>) {
-        self.sub_self(rhs)
-    }
-}
-
-impl<G: ops::SubAssign + Clone> ops::Sub for Polynomial<G> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        let mut new = self.clone();
-        new -= rhs;
-        new
-    }
-}
-
-impl<G: ops::SubAssign + Clone> ops::Sub<&Polynomial<G>> for Polynomial<G> {
-    type Output = Self;
-
-    fn sub(self, rhs: &Polynomial<G>) -> Self::Output {
-        let mut new = self.clone();
-        new -= rhs;
-        new
-    }
-}
-
-impl<'a, 'b, G: ops::SubAssign + Clone> ops::Sub<&'a Polynomial<G>> for &'b Polynomial<G> {
-    type Output = Polynomial<G>;
-
-    fn sub(self, rhs: &Polynomial<G>) -> Self::Output {
-        let mut new = self.clone();
-        new -= rhs;
-        new
+        Polynomial(Vector::from_vec(vec))
     }
 }
