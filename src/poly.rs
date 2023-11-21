@@ -10,7 +10,6 @@ use crate::algebra::math::Vector;
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Polynomial<G: Send + Sync>(pub Vector<G>);
 
-
 // // HACK: We really should not implement Deref/DerefMut, but operator-overloading is annoying.
 // // If we can derive Add/Sub/Mul instead that would make me happy.
 // impl<G: Send + Sync> Deref for Polynomial<G> {
@@ -20,7 +19,6 @@ pub struct Polynomial<G: Send + Sync>(pub Vector<G>);
 //         &self.0
 //     }
 // }
-
 
 // impl<G: Send + Sync> DerefMut for Polynomial<G> {
 //     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -72,12 +70,15 @@ impl<F: Field> Polynomial<F> {
 //     }
 // }
 
-impl<F: Send + Sync, G: Send + Sync> std::ops::Mul<G> for &Polynomial<F> where for<'a, 'b> &'a F: std::ops::Mul<&'b G, Output=G>{
+impl<F: Send + Sync, G: Send + Sync> std::ops::Mul<G> for &Polynomial<F>
+where
+    for<'a, 'b> &'a F: std::ops::Mul<&'b G, Output = G>,
+{
     type Output = Polynomial<G>;
 
     fn mul(self, rhs: G) -> Self::Output {
         let me = &self.0;
-        let res : Vector<G> = me * rhs;
+        let res: Vector<G> = me * rhs;
         Polynomial(res)
     }
 }
@@ -93,7 +94,11 @@ impl<F: Send + Sync, G: Send + Sync> std::ops::Mul<G> for &Polynomial<F> where f
 //     }
 // }
 
-impl<F: Send + Sync + ops::AddAssign + num_traits::Zero + Clone, G: Send + Sync + ops::Mul<Output = F> + Copy> Polynomial<G> {
+impl<
+        F: Send + Sync + ops::AddAssign + num_traits::Zero + Clone,
+        G: Send + Sync + ops::Mul<Output = F> + Copy,
+    > Polynomial<G>
+{
     pub fn mult(&self, other: &Self) -> Polynomial<F> {
         // degree is length - 1.
         let n = self.0.len() + other.0.len();

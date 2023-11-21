@@ -38,10 +38,7 @@ pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     task: tokio::task::JoinHandle<FramedWrite<W, LengthDelimitedCodec>>,
 }
 
-
-fn is_sendable(t: impl Send) {
-}
-
+fn is_sendable(t: impl Send) {}
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R, W> {
     /// Construct a new connection from a reader and writer

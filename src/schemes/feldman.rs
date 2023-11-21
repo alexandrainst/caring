@@ -13,8 +13,9 @@
 use std::{borrow::Borrow, iter, ops, sync::Arc};
 
 use crate::{
+    algebra::math::Vector,
     poly::Polynomial,
-    schemes::shamir::{self}, algebra::math::Vector,
+    schemes::shamir::{self},
 };
 
 use ff::Field;
@@ -172,9 +173,7 @@ impl<F: Field, G: Group> std::ops::Add for &VecVerifiableShare<F, G> {
             .iter()
             .cloned()
             .zip(rhs.polys.iter())
-            .map(|(a, b)| {
-                Polynomial(a.0 + &b.0)
-            })
+            .map(|(a, b)| Polynomial(a.0 + &b.0))
             .collect();
         VecVerifiableShare { shares, polys }
     }
@@ -278,8 +277,8 @@ where
     T: Borrow<VecVerifiableShare<F, G>>,
 {
     for shares in vec_shares {
-        if!(shares.borrow().verify()){
-            return None
+        if !(shares.borrow().verify()) {
+            return None;
         };
     }
 

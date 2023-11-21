@@ -66,7 +66,7 @@ where
 {
     // C0^(i^0) * C1^(i^1) * C1^(i^2) + ...
     let mut check = G::identity();
-    for (i, &a) in commit.0.0.iter().enumerate() {
+    for (i, &a) in commit.0 .0.iter().enumerate() {
         check += a * id.pow([i as u64]);
     }
 

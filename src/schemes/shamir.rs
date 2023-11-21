@@ -6,7 +6,7 @@ use ff::{derive::rand_core::RngCore, Field};
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
-use crate::{net::agency::Unicast, poly::Polynomial, algebra::math::Vector};
+use crate::{algebra::math::Vector, net::agency::Unicast, poly::Polynomial};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -284,7 +284,10 @@ impl<F: Field> std::ops::Add for VecShare<F> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self {x: self.x, ys: self.ys + rhs.ys}
+        Self {
+            x: self.x,
+            ys: self.ys + rhs.ys,
+        }
     }
 }
 
@@ -294,13 +297,10 @@ impl<F: Field> std::ops::Add for &VecShare<F> {
     fn add(self, rhs: Self) -> Self::Output {
         let a = &self.ys;
         let b = &rhs.ys;
-        let ys : Vector<_> = a + b;
-        VecShare {
-            x: self.x, ys
-        }
+        let ys: Vector<_> = a + b;
+        VecShare { x: self.x, ys }
     }
 }
-
 
 impl<F: Field> From<Vec<Share<F>>> for VecShare<F> {
     fn from(value: Vec<Share<F>>) -> Self {
@@ -397,7 +397,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
     let mut sum = vec![F::ZERO; m];
     for share in shares.iter() {
         let xi = share.borrow().x;
-        let yi : &Vector<_> = &share.borrow().ys;
+        let yi: &Vector<_> = &share.borrow().ys;
 
         let mut prod = F::ONE;
         for VecShare { x: xk, ys: _ } in shares.iter().map(|s| s.borrow()) {

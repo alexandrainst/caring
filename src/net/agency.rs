@@ -30,22 +30,26 @@ pub trait Broadcast<E> {
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
     // TODO: Reconsider this
-    fn symmetric_broadcast<T>(&mut self, msg: T) -> impl Future<Output=Result<Vec<T>, E>>
+    fn symmetric_broadcast<T>(&mut self, msg: T) -> impl Future<Output = Result<Vec<T>, E>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
-    fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> impl Future<Output=Result<Vec<T>, E>>;
+    fn receive_all<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> impl Future<Output = Result<Vec<T>, E>>;
 }
 
 pub trait Unicast<E> {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]);
 
     // TODO: Reconsider this
-    fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> impl Future<Output=Result<Vec<T>, E>>
+    fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> impl Future<Output = Result<Vec<T>, E>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
-    fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> impl Future<Output=Result<Vec<T>, E>>;
+    fn receive_all<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> impl Future<Output = Result<Vec<T>, E>>;
 }
 
 use digest::Digest;

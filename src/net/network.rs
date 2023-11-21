@@ -29,8 +29,6 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
     pub index: usize,
 }
 
-
-
 #[derive(Error, Debug)]
 #[error("Error communicating with {id}: {source}")]
 pub struct NetworkError {
@@ -171,7 +169,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     }
 }
 
-impl<R: AsyncRead + Unpin + std::marker::Send, W: AsyncWrite + Unpin + std::marker::Send> Unicast<NetworkError> for Network<R, W> {
+impl<R: AsyncRead + Unpin + std::marker::Send, W: AsyncWrite + Unpin + std::marker::Send>
+    Unicast<NetworkError> for Network<R, W>
+{
     fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
         self.unicast(msgs)
     }
@@ -183,7 +183,9 @@ impl<R: AsyncRead + Unpin + std::marker::Send, W: AsyncWrite + Unpin + std::mark
         self.symmetric_unicast(msgs).await
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, NetworkError> {
+    async fn receive_all<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> Result<Vec<T>, NetworkError> {
         self.receive_all().await
     }
 }
