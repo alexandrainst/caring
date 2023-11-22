@@ -9,25 +9,44 @@
 //! The spdz(2k) scheme is actually not that difficult in the online phase,
 //! however it requres some heavy machinery in the offline phase.
 //!
-use ff::Field;
+use ff::{Field, PrimeField};
 
-use derive_more::{Add, AddAssign};
+use derive_more::{Add, AddAssign, Sub, SubAssign};
 use rand::RngCore;
 
-#[derive(Clone, Copy, Add, AddAssign)]
-pub struct Share<F: Field> {
+// Should we allow Field or use PrimeField?
+#[derive(Clone, Copy, Add, Sub, AddAssign, SubAssign)]
+pub struct Share<F: PrimeField> {
+    // This field is nice and I like it
     val: F,
+    // This field is scary and I don't know how it should be handled
     mac: F,
 }
 
-impl<F: Field> Share<F> {
+impl<F: PrimeField> Share<F> {
+    pub fn add_public(self, val: F, chosen_one: bool) -> Self {
+        let val = if chosen_one { val } else { F::ZERO };
+        Share { val: self.val + val, ..self }
+    }
+
+    pub fn sub_public(self, val: F, chosen_one: bool) -> Self {
+        let val = if chosen_one { val } else { F::ZERO };
+        Share { val: self.val - val, ..self }
+    }
+}
+
+impl<F: PrimeField> Share<F> {
     pub fn validate(&self, key: F) -> bool {
         let Share { val, mac } = *self;
         val * key == mac
     }
 }
 
-impl<F: Field> std::ops::Mul<F> for Share<F> {
+
+/// Mutliplication between a share and a public value
+///
+/// This operation is symmetric
+impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
     type Output = Share<F>;
 
     fn mul(self, rhs: F) -> Self::Output {
@@ -38,9 +57,29 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     }
 }
 
+
+/// Mutliplication between a share and a public value
+///
+/// This operation is asymmetric
+impl<F: PrimeField> std::ops::Add<F> for Share<F> {
+    type Output = Share<F>;
+
+    fn add(self, rhs: F) -> Self::Output {
+        Share {
+            val: self.val + rhs,
+            mac: self.mac + rhs,
+        }
+    }
+}
+
+
+struct SpdzParams<F: PrimeField> {
+    key: F,
+}
+
 // TODO: Implement multiplication between shares.
 
-pub fn share<F: Field>(val: F, n: usize, key: F, mut rng: &mut impl RngCore) -> Vec<Share<F>> {
+pub fn share<F: PrimeField>(val: F, n: usize, key: F, mut rng: &mut impl RngCore) -> Vec<Share<F>> {
     // HACK: This is really not secure at all.
     let mut shares: Vec<_> = (0..n).map(|_| F::random(&mut rng)).collect();
 
@@ -57,7 +96,7 @@ pub fn share<F: Field>(val: F, n: usize, key: F, mut rng: &mut impl RngCore) -> 
         .collect()
 }
 
-pub fn input<F: Field>(_val: F, _n: usize) -> Vec<Share<F>> {
+pub fn input<F: PrimeField>(_val: F, _n: usize) -> Vec<Share<F>> {
     // 1. Everyone sends party `i` their share (partial opening)
     // 2. Party `i` then broadcasts `x^i - r`.
     //    Party 1 sets their share to `x^i_1 = r1 + x^i - r`.
@@ -67,7 +106,7 @@ pub fn input<F: Field>(_val: F, _n: usize) -> Vec<Share<F>> {
     todo!("Implement the function")
 }
 
-pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
+pub fn reconstruct<F: PrimeField>(shares: &[Share<F>]) -> F {
     shares.iter().map(|x| x.val).sum()
 }
 

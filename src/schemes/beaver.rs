@@ -1,4 +1,4 @@
-// TODO: Move to a 'common' protocol lib?
+// TODO: Move to a 'common' protocol lib since this isn't a secret sharing scheme?
 use std::marker::PhantomData;
 
 use ff::Field;
@@ -6,10 +6,26 @@ use rand::RngCore;
 
 use crate::{net::agency::Broadcast, schemes::Shared};
 
+/// Beaver (Multiplication) Triple
 #[derive(Clone)]
 pub struct BeaverTriple<F, S: Shared<F>> {
     phantom: PhantomData<F>,
     shares: (S, S, S),
+}
+
+#[derive(Clone)]
+pub struct BeaverSquare<F, S: Shared<F>> {
+    phantom: PhantomData<F>,
+    val: S,
+    val_squared: S,
+}
+
+
+#[derive(Clone)]
+pub struct BeaverPower<F, S: Shared<F>> {
+    phantom: PhantomData<F>,
+    val: S,
+    powers: Vec<S>,
 }
 
 impl<F: Field, C, S: Shared<F, Context = C>> BeaverTriple<F, S> {
@@ -54,7 +70,7 @@ pub async fn beaver_multiply<
     x: S,
     y: S,
     triple: BeaverTriple<F, S>,
-    network: &mut impl Broadcast<E>,
+    agent: &mut impl Broadcast<E>,
 ) -> Option<S> {
     let BeaverTriple {
         shares: (a, b, c),
@@ -64,7 +80,7 @@ pub async fn beaver_multiply<
     let by: S = b + y;
 
     // Sending both at once it more efficient.
-    let resp = network.symmetric_broadcast::<_>((ax, by)).await.unwrap();
+    let resp = agent.symmetric_broadcast::<_>((ax, by)).await.unwrap();
     let (ax, by): (Vec<_>, Vec<_>) = itertools::multiunzip(resp);
 
     let ax = S::recombine(ctx, &ax)?;
