@@ -9,8 +9,8 @@ use crate::{net::agency::Broadcast, schemes::Shared};
 /// Beaver (Multiplication) Triple
 #[derive(Clone)]
 pub struct BeaverTriple<F, S: Shared<F>> {
-    phantom: PhantomData<F>,
-    shares: (S, S, S),
+    pub phantom: PhantomData<F>,
+    pub shares: (S, S, S),
 }
 
 #[derive(Clone)]
@@ -54,6 +54,9 @@ impl<F: Field, C, S: Shared<F, Context = C>> BeaverTriple<F, S> {
     }
 }
 
+// BUG: For some reason beaver_multiply won't accept that the agent implements Broadcast.
+// So we for some weird 'compiler bug' reason need this twice.
+//
 /// Perform multiplication using beaver triples
 ///
 /// * `x`: first share to multiply
