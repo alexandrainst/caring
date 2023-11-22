@@ -206,7 +206,7 @@ where
         let VecVerifiableShare { shares, polys } = self;
         let x = shares.x;
         let ys = &shares.ys;
-        for (&y, poly) in ys.into_iter().zip(polys.iter()) {
+        for (&y, poly) in ys.iter().zip(polys.iter()) {
             let mut check = G::identity();
             for (i, &a) in poly.0.iter().enumerate() {
                 check += a * x.pow([i as u64]);

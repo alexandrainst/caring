@@ -37,7 +37,7 @@ impl<F: Send + Sync> Vector<F> {
         self.0.len()
     }
 
-    pub fn iter<'a>(&'a self) -> std::slice::Iter<'a, F> {
+    pub fn iter(&self) -> std::slice::Iter<F> {
         self.0.iter()
     }
 }
@@ -56,13 +56,13 @@ impl<F: Send + Sync> std::ops::IndexMut<usize> for Vector<F> {
     }
 }
 
-impl<'a, F: Send + Sync> IntoIterator for &'a Vector<F> {
-    type Item = &'a F;
+impl<F: Send + Sync> IntoIterator for Vector<F> {
+    type Item = F;
 
-    type IntoIter = std::slice::Iter<'a, F>;
+    type IntoIter = std::vec::IntoIter<F>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
+        self.0.into_vec().into_iter()
     }
 }
 
@@ -92,15 +92,6 @@ impl<F: Send + Sync> FromParallelIterator<F> for Vector<F> {
     }
 }
 
-impl<F: Send + Sync> IntoIterator for Vector<F> {
-    type Item = F;
-
-    type IntoIter = std::vec::IntoIter<F>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_vec().into_iter()
-    }
-}
 
 impl<T: Send + Sync> AsRef<[T]> for Vector<T> {
     fn as_ref(&self) -> &[T] {
@@ -257,6 +248,11 @@ where
     }
 }
 
+/// Generic implementation of row-wise mult-assign
+///
+/// Vector<A> =* B
+/// if A *= B exists
+///
 impl<A: Send + Sync, B: Send + Sync> std::ops::MulAssign<&B> for Vector<A>
 where
     for<'b> A: std::ops::MulAssign<&'b B>,
@@ -274,6 +270,16 @@ where
     }
 }
 
+
+/// Generic implementation of row-wise multiplication
+///
+/// Vector<A> * B -> Vector<B>
+/// if A * B -> B
+///
+/// See `Polynomial` for usage scenario
+///
+/// This is actually super-useful
+///
 impl<A: Send + Sync, B: Send + Sync> std::ops::Mul<B> for &Vector<A>
 where
     for<'a, 'b> &'a A: std::ops::Mul<&'b B, Output = B>,
@@ -291,6 +297,11 @@ where
     }
 }
 
+/// Generic implemtentation of row-wise multiplication
+///
+/// Vector<A> * B -> Vector<A>
+/// if A *= B exists
+/// 
 impl<A: Send + Sync, B: Send + Sync> std::ops::Mul<B> for Vector<A>
 where
     for<'b> A: std::ops::MulAssign<&'b B>,
@@ -303,6 +314,12 @@ where
     }
 }
 
+
+/// Generic implemetantion of sum
+///
+/// Sum(...Vector<A>) -> Vector<A>
+/// if A += A exists
+///
 impl<F: Send + Sync> std::iter::Sum for Vector<F>
 where
     F: for<'a> std::ops::AddAssign<&'a F>,

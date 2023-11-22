@@ -413,7 +413,7 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
                 .for_each(|(sum, &yi)| *sum += yi * prod);
         } else {
             sum.iter_mut()
-                .zip(yi.into_iter())
+                .zip(yi.iter())
                 .for_each(|(sum, &yi)| *sum += yi * prod);
         }
     }

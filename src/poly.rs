@@ -83,17 +83,12 @@ where
     }
 }
 
-// impl<'a, 'b, F: Copy, G: Clone> ops::MulAssign<&'a G> for &'b mut Polynomial<F>
-// where
-//     &'a mut F: ops::MulAssign<&'b G>,
-// {
-//     fn mul_assign(&'a mut self, rhs: &'b G) {
-//         for mut a in self.0.iter_mut() {
-//             a *= rhs;
-//         }
-//     }
-// }
 
+/// Implementation of cartesian product for polyminials
+///
+/// f * g -> h
+///
+/// where degree(h) = degree(f) + degree(g)
 impl<
         F: Send + Sync + ops::AddAssign + num_traits::Zero + Clone,
         G: Send + Sync + ops::Mul<Output = F> + Copy,
