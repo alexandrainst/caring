@@ -168,7 +168,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     }
 }
 
-impl<R: AsyncRead + Unpin + std::marker::Send, W: AsyncWrite + Unpin + std::marker::Send>
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>
     Unicast for Network<R, W>
 {
     type Error = NetworkError;
@@ -177,17 +177,17 @@ impl<R: AsyncRead + Unpin + std::marker::Send, W: AsyncWrite + Unpin + std::mark
         self.unicast(msgs)
     }
 
-    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, NetworkError>
+    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, Box<dyn std::error::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        self.symmetric_unicast(msgs).await
+        Ok(self.symmetric_unicast(msgs).await.map_err(Box::new)?)
     }
 
     async fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
-    ) -> Result<Vec<T>, NetworkError> {
-        self.receive_all().await
+    ) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+        Ok(self.receive_all().await.map_err(Box::new)?)
     }
 }
 
@@ -198,17 +198,17 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
         self.broadcast(msg)
     }
 
-    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, NetworkError>
+    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Box<dyn std::error::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        self.symmetric_broadcast(msg).await
+        Ok(self.symmetric_broadcast(msg).await.map_err(Box::new)?)
     }
 
     async fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
-    ) -> Result<Vec<T>, NetworkError> {
-        self.receive_all().await
+    ) -> Result<Vec<T>, Box<dyn std::error::Error>> {
+        Ok(self.receive_all().await.map_err(Box::new)?)
     }
 }
 

@@ -1,6 +1,6 @@
 //! This is vanilla Shamir Secret Sharing using an arbitrary field F.
 //! See <https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing>
-use std::borrow::Borrow;
+use std::{borrow::Borrow, error::Error};
 
 use ff::{derive::rand_core::RngCore, Field};
 
