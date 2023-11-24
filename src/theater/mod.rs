@@ -31,11 +31,13 @@ pub mod ot;
 ///
 /// *But* the current design is made to allow for interopability with existing generic numeric
 /// code, thus leveraging a possible huge library.
-///
+/// 
+/// ... Regarding the async/blocking we could also just do both, and have the one wrap to other?
 use std::{marker::PhantomData, sync::{Arc, Mutex}};
 
-use crate::schemes::{Shared, beaver::{BeaverTriple, beaver_multiply}};
+use crate::{schemes::{Shared, beaver::{BeaverTriple, beaver_multiply}}, net::agency::Unicast};
 use ff::Field;
+use rand::{RngCore, thread_rng};
 
 use crate::net::network::InMemoryNetwork;
 
@@ -44,9 +46,46 @@ use crate::net::network::InMemoryNetwork;
 // It would be more efficient
 pub struct Engine<F, S: Shared<F>> {
     context: S::Context,
-    resources: Mutex<Vec<BeaverTriple<F, S>>>,
-    network: Mutex<InMemoryNetwork>,
-    runtime: Mutex<tokio::runtime::Runtime>,
+    resources: Vec<BeaverTriple<F, S>>,
+    network: InMemoryNetwork, // TODO: Be generic over network type
+    runtime: tokio::runtime::Runtime,
+}
+
+
+impl<F, S: Shared<F>> Engine<F,S> {
+    // TODO: Proper error handling
+    // INFO: Consider if we should block on all these or actually use async?
+    // It is kind of weird since we have a tokio runtime in the engine, but we could just
+    // schedule things on that, and put it in an Arc or something?
+
+    pub fn input(&mut self, value: F) -> S {
+        let mut rng = thread_rng();
+        
+        let mut shares = S::share(&self.context, value, &mut rng);
+        let index = self.network.index;
+        let my_share = shares.remove(index);
+        self.network.unicast(&shares);
+        my_share
+    }
+
+    pub fn recv_input(&mut self, id: usize) -> S {
+        let fut = async { self.network.connections[id].recv().await.unwrap() };
+        self.runtime.block_on(fut)
+    }
+
+    pub fn symmetric_input(&mut self, value: F) -> Vec<S> {
+        let mut rng = thread_rng();
+        let shares = S::share(&self.context, value, &mut rng);
+        let fut = async {self.network.symmetric_unicast(shares).await.unwrap()};
+        self.runtime.block_on(fut)
+    }
+
+
+    pub fn open(&mut self, to_open: S) -> F {
+        let fut = async {self.network.symmetric_broadcast(to_open).await.unwrap()};
+        let shares = self.runtime.block_on(fut);
+        S::recombine(&self.context, &shares).unwrap()
+    }
 }
 
 pub struct Secret<F, S: Shared<F>> {
@@ -54,7 +93,7 @@ pub struct Secret<F, S: Shared<F>> {
     phantom: PhantomData<F>,
     // HACK: Summarize these different Arcs/refs into one single 'context',
     // since they all should be the same object.
-    engine: Arc<Engine<F,S>>,
+    engine: Arc<Mutex<Engine<F,S>>>,
 }
 
 impl<F, S: Shared<F>> std::ops::Add for Secret<F,S> {
@@ -91,10 +130,8 @@ impl<Ctx, F, S: Shared<F, Context=Ctx> + Copy> std::ops::Mul for Secret<F,S> whe
             "Secret shares are not run on the same engine!"
         );
         let share = {
-            let Engine {context, resources, network, runtime} = &*self.engine;
-            let triple = resources.lock().unwrap().pop().unwrap();
-            let network = &mut *network.lock().unwrap();
-            let runtime = runtime.lock().unwrap();
+            let Engine {context, resources, network, runtime, ..} = &mut *self.engine.lock().unwrap();
+            let triple = resources.pop().unwrap();
 
             let res = beaver_multiply::<Ctx, S, F>(context, self.share, rhs.share, triple, network);
             runtime.block_on(res).unwrap()
