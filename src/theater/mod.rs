@@ -1,3 +1,6 @@
+pub mod ot;
+
+/// # Design
 /// The purposes of this module is providing a shared interface abstraction over the notion of
 /// shared into the notion of 'Secret' and 'Public' variables in a computation.
 ///
@@ -12,6 +15,23 @@
 /// reason about schemes. However dynamic-dispatch can be a bit difficult since some of the underlying
 /// traits are not object-safe.
 ///
+///
+/// Anyway, the big purpose here is the possible to use ordinary programming constructs to write
+/// the MPC program. There might be suttleties where this could fall apart, such as round
+/// syncronization, but using a seperate thread/process behind the scenes could work.
+///
+/// Other difficulties involve the use of blocking, but as we can't really use Num traits with
+/// async.
+///
+/// The same goes for the idea of using `const` to build the program at compile-time and optimize
+/// for it. We 'almost' do that here, but could deviate from it a bit if we introduce too much
+/// abstraction. Anyway, the biggest problem is probably the async stuff not running concurrently.
+///
+/// Lastly another approach could be to use a DSL or macros to write out the program statically.
+///
+/// *But* the current design is made to allow for interopability with existing generic numeric
+/// code, thus leveraging a possible huge library.
+///
 use std::{marker::PhantomData, sync::{Arc, Mutex}};
 
 use crate::schemes::{Shared, beaver::{BeaverTriple, beaver_multiply}};
@@ -20,10 +40,8 @@ use ff::Field;
 use crate::net::network::InMemoryNetwork;
 
 
-// INFO: Maybe drop this and use generics in Secret instead?
-// This could make sense if we have a big context object anyway,
-// since we can just implement the required traits anyway.
-
+// Maybe we just need a single Mutex to this struct instead?
+// It would be more efficient
 pub struct Engine<F, S: Shared<F>> {
     context: S::Context,
     resources: Mutex<Vec<BeaverTriple<F, S>>>,
@@ -68,11 +86,15 @@ impl<Ctx, F, S: Shared<F, Context=Ctx> + Copy> std::ops::Mul for Secret<F,S> whe
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
+        assert!(
+            Arc::ptr_eq(&self.engine, &rhs.engine),
+            "Secret shares are not run on the same engine!"
+        );
         let share = {
             let Engine {context, resources, network, runtime} = &*self.engine;
             let triple = resources.lock().unwrap().pop().unwrap();
             let network = &mut *network.lock().unwrap();
-            let runtime = &*runtime.lock().unwrap();
+            let runtime = runtime.lock().unwrap();
 
             let res = beaver_multiply::<Ctx, S, F>(context, self.share, rhs.share, triple, network);
             runtime.block_on(res).unwrap()
@@ -84,3 +106,8 @@ impl<Ctx, F, S: Shared<F, Context=Ctx> + Copy> std::ops::Mul for Secret<F,S> whe
         }
     }
 }
+
+// TODO: Implement division (some how)
+
+
+// TODO: Implement Num + NumRef + NumOps traits where possible.
