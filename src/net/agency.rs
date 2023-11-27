@@ -93,7 +93,7 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
         let check = sum_all.iter().all_equal();
         if !check {
             // If some of the hashes are different, someone has gotten different results.
-            return Err(Box::new(BroadcastVerificationError::VerificationFailure));
+            return Err(BroadcastVerificationError::VerificationFailure);
         }
 
         // 2. Send the message and check that the hashes match
@@ -106,7 +106,7 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
             digest.update(msg);
             let res = digest.finalize().to_vec().into_boxed_slice();
             if res != hash {
-                return Err(Box::new(BroadcastVerificationError::VerificationFailure));
+                return Err(BroadcastVerificationError::VerificationFailure);
             }
         }
         // Finally, return the packets
@@ -126,4 +126,6 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
 pub enum BroadcastVerificationError<E> {
     #[error("Could not verify broadcast")]
     VerificationFailure,
+    #[error(transparent)]
+    Other(E)
 }
