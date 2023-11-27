@@ -64,14 +64,14 @@ pub async fn beaver_multiply<
     C,
     S: Shared<F, Context = C> + Copy + std::ops::Mul<F, Output = S>,
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
-    E: std::fmt::Debug,
 >(
     ctx: &C,
     x: S,
     y: S,
     triple: BeaverTriple<F, S>,
-    agent: &mut impl Broadcast<E>,
+    agent: &mut impl Broadcast,
 ) -> Option<S> {
+    // TODO: Better error handling.
     let BeaverTriple {
         shares: (a, b, c),
         phantom: _,
@@ -80,7 +80,7 @@ pub async fn beaver_multiply<
     let by: S = b + y;
 
     // Sending both at once it more efficient.
-    let resp = agent.symmetric_broadcast::<_>((ax, by)).await.unwrap();
+    let resp = agent.symmetric_broadcast::<_>((ax, by)).await.ok()?;
     let (ax, by): (Vec<_>, Vec<_>) = itertools::multiunzip(resp);
 
     let ax = S::recombine(ctx, &ax)?;

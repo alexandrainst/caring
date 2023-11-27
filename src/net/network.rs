@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 use futures::{future, Future};
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
-use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, DuplexStream, ReadHalf, WriteHalf},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -29,7 +28,7 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
     pub index: usize,
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[error("Error communicating with {id}: {source}")]
 pub struct NetworkError {
     id: u32,
@@ -170,8 +169,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
 }
 
 impl<R: AsyncRead + Unpin + std::marker::Send, W: AsyncWrite + Unpin + std::marker::Send>
-    Unicast<NetworkError> for Network<R, W>
+    Unicast for Network<R, W>
 {
+    type Error = NetworkError;
+
     fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
         self.unicast(msgs)
     }
@@ -190,7 +191,9 @@ impl<R: AsyncRead + Unpin + std::marker::Send, W: AsyncWrite + Unpin + std::mark
     }
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast<NetworkError> for Network<R, W> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
+    type Error = NetworkError;
+
     fn broadcast(&mut self, msg: &impl serde::Serialize) {
         self.broadcast(msg)
     }

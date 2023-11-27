@@ -24,44 +24,50 @@
 
 use futures::Future;
 use itertools::Itertools;
-use thiserror::Error;
 
-pub trait Broadcast<E> {
+pub trait Broadcast {
+    type Error;
+
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
     // TODO: Reconsider this
-    fn symmetric_broadcast<T>(&mut self, msg: T) -> impl Future<Output = Result<Vec<T>, E>>
+    fn symmetric_broadcast<T>(&mut self, msg: T) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
-    ) -> impl Future<Output = Result<Vec<T>, E>>;
+    ) -> impl Future<Output = Result<Vec<T>, Self::Error>>;
 }
 
-pub trait Unicast<E> {
+pub trait Unicast {
+    type Error;
+
     fn unicast(&mut self, msgs: &[impl serde::Serialize]);
 
     // TODO: Reconsider this
-    fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> impl Future<Output = Result<Vec<T>, E>>
+    fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
     fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
-    ) -> impl Future<Output = Result<Vec<T>, E>>;
+    ) -> impl Future<Output = Result<Vec<T>, Self::Error>>;
 }
 
 use digest::Digest;
 // INFO: Reconsider if Broadcast should be a supertrait or just a type parameter
 // There is also the question if we should overload the existing methods or provide
 // new methods prefixed with 'verified' or something.
-trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> {
+
+
+trait VerifiedBroadcast<D: Digest>: Broadcast {
+
     /// Ensure that a received broadcast is the same across all parties.
     async fn symmetric_broadcast<T: AsRef<[u8]>>(
         &mut self,
         msg: T,
-    ) -> Result<Vec<T>, BroadcastVerificationError<E>>
+    ) -> Result<Vec<T>, BroadcastVerificationError<Self::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -71,7 +77,8 @@ trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> 
         let mut digest = D::new();
         digest.update(&msg);
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let msg_hashes = Broadcast::symmetric_broadcast(self, hash).await?;
+        let msg_hashes = Broadcast::symmetric_broadcast(self, hash).await
+            .map_err(BroadcastVerificationError::Other)?;
 
         // 3. Hash the hashes together and broadcast that
         let mut digest = D::new();
@@ -79,7 +86,9 @@ trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> 
             digest.update(hash);
         }
         let sum: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let sum_all: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, sum).await?;
+        let sum_all: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, sum).await
+            .map_err(BroadcastVerificationError::Other)?;
+
         let check = sum_all.iter().all_equal();
         if !check {
             // If some of the hashes are different, someone has gotten different results.
@@ -87,7 +96,9 @@ trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> 
         }
 
         // 2. Send the message and check that the hashes match
-        let messages = Broadcast::symmetric_broadcast(self, msg).await?;
+        let messages = Broadcast::symmetric_broadcast(self, msg).await
+            .map_err(BroadcastVerificationError::Other)?;
+
         for (msg, hash) in messages.iter().zip(msg_hashes) {
             // PERF: Maybe just reset the digest?
             let mut digest = D::new();
@@ -110,7 +121,7 @@ trait VerifiedBroadcast<D: Digest, E>: Broadcast<BroadcastVerificationError<E>> 
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum BroadcastVerificationError<E> {
     #[error("Could not verify broadcast")]
     VerificationFailure,

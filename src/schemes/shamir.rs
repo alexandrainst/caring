@@ -189,13 +189,13 @@ impl<F: Field> std::ops::Mul for Share<F> {
 /// let c : Share<_> = reduction(c, network, threshold, ids, rng);
 /// //  ^-- degree t
 /// ```
-pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, E>(
+pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, U: Unicast>(
     z: ExplodedShare<F>,
-    unicast: &mut impl Unicast<E>,
+    unicast: &mut U,
     threshold: u64,
     ids: &[F],
     rng: &mut impl RngCore,
-) -> Result<Share<F>, E> {
+) -> Result<Share<F>, U::Error> {
     // FIX: Doesn't work
     // TODO: Maybe use the `Shared` functionality?
     let z = z.0;
