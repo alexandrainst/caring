@@ -37,15 +37,15 @@ impl Cluster {
     //     Self {players}
     // }
 
-    pub async fn run<'a, T, P, F>(&'a mut self, prg: P) -> Result<Vec<T>, JoinError>
+    pub async fn run<T, P, F>(self, prg: P) -> Result<Vec<T>, JoinError>
     where
         T: Send + 'static,
-        P: Fn(&'a mut InMemoryNetwork) -> F,
+        P: Fn(InMemoryNetwork) -> F,
         F: Future<Output = T> + Send + 'static,
     {
         let futures: Vec<_> = self
             .players
-            .iter_mut()
+            .into_iter()
             .map(|p| {
                 let fut = prg(p);
                 tokio::spawn(fut)
@@ -58,6 +58,7 @@ impl Cluster {
     }
 }
 
+
 #[cfg(test)]
 mod test {
     use crate::testing::Cluster;
@@ -66,12 +67,9 @@ mod test {
     async fn hello() {
         // Yes this is a problem.
         // We really need scoped async tasks, but those don't really exist.
-        let cluster = Cluster::new(32);
-        let cluster = Box::new(cluster);
-        let cluster = Box::leak(cluster);
 
-        cluster
-            .run(|network| async move {
+        Cluster::new(32)
+            .run(|mut network| async move {
                 let msg = "Joy to the world!".to_owned();
                 network.broadcast(&msg);
                 let post: Vec<String> = network.receive_all().await.unwrap();

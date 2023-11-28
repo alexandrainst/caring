@@ -528,10 +528,8 @@ mod test {
     #[tokio::test]
     async fn multiplication() {
         let cluster = crate::testing::Cluster::new(5);
-        let cluster = Box::new(cluster);
-        let cluster = Box::leak(cluster);
         cluster
-            .run(|network| async move {
+            .run(|mut network| async move {
                 // setup
                 let input: u32 = 5;
                 let mut rng = rand::rngs::mock::StepRng::new(0, 7);

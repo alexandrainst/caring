@@ -24,8 +24,26 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
     // NOTE:
     // We could also insert a 'fake' Connection into the set for the representation of ourselves.
     // However that is probably a less efficient, if nicer, abstraction.
-    pub connections: Vec<Connection<R, W>>,
+    connections: Vec<Connection<R, W>>,
     pub index: usize,
+}
+
+impl<R: tokio::io::AsyncRead + std::marker::Unpin,W: tokio::io::AsyncWrite + std::marker::Unpin> std::ops::Index<usize> for Network<R,W> {
+    type Output = Connection<R,W>;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        let i = self.id_to_index(index);
+        &self.connections[i]
+    }
+}
+
+
+impl<R: tokio::io::AsyncRead + std::marker::Unpin,W: tokio::io::AsyncWrite + std::marker::Unpin> std::ops::IndexMut<usize> for Network<R,W> {
+
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        let i = self.id_to_index(index);
+        &mut self.connections[i]
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -37,6 +55,19 @@ pub struct NetworkError {
 
 // TODO: Do timeouts?
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
+    fn id_to_index(&self, index: usize) -> usize {
+        let n = self.connections.len() + 1;
+        if index < self.index { 
+            index
+        } else if index == self.index {
+            panic!("Trying to reference self connection, id = {index}")
+        } else if index < n {
+            index - 1
+        } else {
+            panic!("Only {n} in network, but referenced id = {index}")
+        }
+    }
+
     /// Broadcast a message to all other parties.
     ///
     /// Asymmetric, non-waiting
