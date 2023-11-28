@@ -54,9 +54,6 @@ impl<F: Field, C, S: Shared<F, Context = C>> BeaverTriple<F, S> {
     }
 }
 
-// BUG: For some reason beaver_multiply won't accept that the agent implements Broadcast.
-// So we for some weird 'compiler bug' reason need this twice.
-//
 /// Perform multiplication using beaver triples
 ///
 /// * `x`: first share to multiply

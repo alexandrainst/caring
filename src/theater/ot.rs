@@ -1,14 +1,30 @@
-use std::convert::Infallible;
+use futures::Future;
+
+use crate::net::connection::{Connection, ConnectionError};
 
 // TODO: Serde trait bounds on `T`
 // TODO: Properly use this trait for other things (Connection/Agency etc.)
 pub trait Channel {
     type Error;
 
-    async fn send<T>(&self, msg: T) -> Result<(), Self::Error>;
+    fn send<T: serde::Serialize>(&self, msg: &T) -> impl Future<Output = Result<(), Self::Error>>;
 
-    async fn recv<T>(&self) -> Result<T, Self::Error>;
+    fn recv<T: serde::de::DeserializeOwned>(&mut self) -> impl Future<Output = Result<T, Self::Error>>;
 }
+
+
+impl<R: tokio::io::AsyncRead + std::marker::Unpin, W: tokio::io::AsyncWrite + std::marker::Unpin> Channel for Connection<R,W> {
+    type Error = ConnectionError;
+
+    fn send<T: serde::Serialize>(&self, msg: &T) -> impl Future<Output = Result<(), Self::Error>> {
+        Connection::send_async(&self, msg)
+    }
+
+    fn recv<T: serde::de::DeserializeOwned>(&mut self) -> impl Future<Output = Result<T, Self::Error>> {
+        Connection::recv(self)
+    }
+}
+
 
 // TODO: Handle other things than 1-of-2 OT.
 // Just make everything 1-of-n?
@@ -30,13 +46,13 @@ pub trait ObliviousTransfer<C: Channel> {
 pub trait ObliviousSend<C: Channel> {
     type Error;
 
-    async fn send<T>(pkg0: T, pkg1: T, channel: C) -> Result<(), Self::Error>;
+    fn send<T: serde::Serialize>(pkg0: &T, pkg1: &T, channel: &C) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 pub trait ObliviousReceive<C: Channel> {
     type Error;
 
-    async fn choose<T>(choice: bool, channel: C) -> Result<T, Self::Error>;
+    fn choose<T: serde::de::DeserializeOwned>(choice: bool, channel: &mut C) -> impl Future<Output = Result<T, Self::Error>>;
 }
 
 
@@ -55,8 +71,8 @@ struct MockOTSender();
 impl<C: Channel> ObliviousSend<C> for MockOTSender {
     type Error = C::Error;
 
-    async fn send<T>(pkg0: T, pkg1: T, channel: C) -> Result<(), Self::Error> {
-        channel.send((pkg0, pkg1)).await?;
+    async fn send<T: serde::Serialize>(pkg0: &T, pkg1: &T, channel: &C) -> Result<(), Self::Error> {
+        channel.send(&(pkg0, pkg1)).await?;
         Ok(())
     }
 }
@@ -67,7 +83,7 @@ struct MockOTReceiver();
 impl<C: Channel> ObliviousReceive<C> for MockOTReceiver {
     type Error = C::Error;
 
-    async fn choose<T>(choice: bool, channel: C) -> Result<T, Self::Error> {
+    async fn choose<T: serde::de::DeserializeOwned>(choice: bool, channel: &mut C) -> Result<T, Self::Error> {
         let (pkg0, pkg1) = channel.recv().await?;
         Ok(if choice { pkg1 } else { pkg0 })
     }

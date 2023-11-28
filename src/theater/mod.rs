@@ -1,4 +1,5 @@
 pub mod ot;
+pub mod properties;
 
 /// # Design
 /// The purposes of this module is providing a shared interface abstraction over the notion of
@@ -37,7 +38,7 @@ use std::{marker::PhantomData, sync::{Arc, Mutex}};
 
 use crate::{schemes::{Shared, beaver::{BeaverTriple, beaver_multiply}}, net::agency::Unicast};
 use ff::Field;
-use rand::{RngCore, thread_rng};
+use rand::thread_rng;
 
 use crate::net::network::InMemoryNetwork;
 
@@ -144,7 +145,12 @@ impl<Ctx, F, S: Shared<F, Context=Ctx> + Copy> std::ops::Mul for Secret<F,S> whe
     }
 }
 
-// TODO: Implement division (some how)
+impl<Ctx, F, S: Shared<F, Context = Ctx>> std::ops::Div for Secret<F,S> {
+    type Output = Self;
 
+    fn div(self, _rhs: Self) -> Self::Output {
+        todo!("implement divison")
+    }
+}
 
 // TODO: Implement Num + NumRef + NumOps traits where possible.
