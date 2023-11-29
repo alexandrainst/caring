@@ -243,7 +243,7 @@ where
     let polys: Vec<_> = vals
         .iter()
         .map(|v| {
-            let mut p = Polynomial::<F>::random(threshold as usize, rng);
+            let mut p = Polynomial::<F>::random(threshold as usize - 1, rng);
             p.0[0] = *v;
             p
         })

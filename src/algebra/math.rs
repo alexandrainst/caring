@@ -9,6 +9,7 @@
 //! values.
 //!
 
+use ff::{PrimeField, Field};
 use rayon::prelude::*;
 
 // TODO: Consider smallvec or tinyvec
@@ -39,6 +40,14 @@ impl<F: Send + Sync> Vector<F> {
 
     pub fn iter(&self) -> std::slice::Iter<F> {
         self.0.iter()
+    }
+}
+
+impl<F: Send + Sync> std::ops::Deref for Vector<F> {
+    type Target = [F];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -331,6 +340,25 @@ where
         }
         first
     }
+}
+
+
+impl<F: Field> Vector<F> {
+    pub fn inner_product(&self, other: &Self) -> F {
+        self.par_iter().zip(other).map(|(&a, &b)| a*b).sum()
+    }
+}
+
+pub fn lagrange_coefficients<F: Field>(xs: &[F], x: F) -> Vec<F> {
+    xs.iter().map(|&i| {
+        let mut prod = F::ONE;
+        for &m in xs.iter() {
+            if m != i {
+                prod *= x - m * (i - m).invert().unwrap_or(F::ZERO);
+            }
+        }
+        prod
+    }).collect()
 }
 
 #[cfg(test)]

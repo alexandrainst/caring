@@ -1,6 +1,5 @@
 use ff::Field;
-use group::Group;
-use std::ops::{self, AddAssign, Deref, DerefMut};
+use std::ops::{self};
 
 use itertools::{self, Itertools};
 use rand::RngCore;
@@ -45,6 +44,13 @@ impl<G: Field> Polynomial<G> {
     }
 }
 
+impl<G: Send+Sync> Polynomial<G> {
+    pub fn degree(&self) -> usize {
+        // a0 + a1x1 is degree(1)
+        self.0.len() - 1
+    }
+}
+
 impl<G: Send + Sync> FromIterator<G> for Polynomial<G> {
     fn from_iter<T: IntoIterator<Item = G>>(iter: T) -> Self {
         Self(iter.into_iter().collect())
@@ -57,7 +63,7 @@ impl<F: Field> Polynomial<F> {
     /// * `degree`: the degree of the polynomial
     /// * `rng`: random number generator to use
     pub fn random(degree: usize, mut rng: &mut impl RngCore) -> Self {
-        (0..degree).map(|_| F::random(&mut rng)).collect()
+        (0..=degree).map(|_| F::random(&mut rng)).collect()
     }
 }
 

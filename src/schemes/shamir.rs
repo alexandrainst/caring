@@ -6,7 +6,7 @@ use ff::{derive::rand_core::RngCore, Field};
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
-use crate::{algebra::math::Vector, net::agency::Unicast, poly::Polynomial};
+use crate::{algebra::math::{Vector, lagrange_coefficients}, net::agency::Unicast, poly::Polynomial};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -143,6 +143,7 @@ impl<F: Field> ExplodedShare<F> {
     pub fn giveup(self) -> Share<F> {
         self.0
     }
+
 }
 
 impl<F: Field> std::ops::Mul for Share<F> {
@@ -174,7 +175,7 @@ impl<F: Field> std::ops::Mul for Share<F> {
 ///
 /// * `z`: ExplodedShare to recover
 /// * `unicast`: Unicasting functionality
-/// * `threshold`: the given threshold to use (???)
+/// * `threshold`: the original threshold
 /// * `ids`: Party IDs to share to
 /// * `rng`: Random number generator
 /// ```ignore
@@ -200,13 +201,48 @@ pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, 
     // TODO: Maybe use the `Shared` functionality?
     let z = z.0;
     let i = z.x;
+
+    let n  = ids.len();
+    assert!(n >= 2*threshold as usize);
     // We need 2t < n, otherwise we cannot reconstruct,
     // however 't' is hidden from before, so we just have to assume it is.
     // Now we need to reduce the polynomial back to t
-    let z = share(z.y, ids, threshold, rng); // share -> subshares
-    let z = unicast.symmetric_unicast::<_>(z).await?;
+
+    // issued subshares
+    let subshares = share(z.y, ids, threshold, rng); // share -> subshares
+                                                     //
     // Something about a recombination vector and randomization.
-    let z = todo!("combine shares using recombinitation vector");
+
+    // // randominization
+    // let am_i_special = false;
+    // let my_id = 0;
+
+    // let poly_share = if am_i_special {
+    //     // Should one or all parties do this?
+    //     let mut zero_poly : Polynomial<F> = Polynomial::random(2*threshold as usize - 1, rng);
+    //     zero_poly.0[0] = F::ZERO;
+    //     let mut shares = share_many(&zero_poly.0, ids, threshold, rng);
+    //     let mine = shares.remove(my_id);
+    //     unicast.unicast(&shares);
+    //     mine
+    // } else {
+    //     todo!()
+    // };
+    // let poly = poly_share.ys.into_iter().collect::<Polynomial<F>>();
+    // // held subshares
+    // for subshare in subshares.iter_mut() {
+    //     // x can be subbed if we know our id
+    //     subshare.y += poly.eval(&subshare.x);
+    // }
+
+    let subshares = unicast.symmetric_unicast::<_>(subshares).await?;
+
+    // reduction (cache?)
+    let coeffs = lagrange_coefficients(ids, F::ZERO);
+
+    // inner product
+    let z : F = subshares.into_iter().zip(coeffs).map(|(a,b)| a.y*b).sum();
+
     Ok(Share { x: i, y: z })
 }
 
@@ -228,8 +264,9 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
         "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
     );
 
-    // Sample random t-degree polynomial
-    let mut polynomial = Polynomial::random(threshold as usize, rng);
+    // Sample random t-degree polynomial, where t = threshold - 1, since we need
+    // t+1 shares to construct a t-degree polynomial.
+    let mut polynomial = Polynomial::random(threshold as usize - 1, rng);
     polynomial.0[0] = v;
     let polynomial = polynomial;
 
@@ -350,11 +387,12 @@ pub fn share_many<F: Field>(
         "Threshold should be less-than-or-equal to the number of shares: t={threshold}, n={n}"
     );
 
-    // Sample random t-degree polynomial
+    // Sample `m` random `t`-degree polynomials
+    // where t = threshold - 1
     let polynomials: Vec<_> = vs
         .iter()
         .map(|v| {
-            let mut p = Polynomial::random(threshold as usize, rng);
+            let mut p = Polynomial::random(threshold as usize - 1, rng);
             p.0[0] = *v;
             p
         })
@@ -543,7 +581,7 @@ mod test {
                 // secret-sharing
                 let shares = share(input.into(), &ids, threshold, &mut rng);
                 let shares = network.symmetric_unicast(shares).await.unwrap();
-                let [a, b, ..] = shares[..] else { todo!() };
+                let [a, b, ..] = shares[..] else { panic!("Can't multiply with only one share") };
 
                 dbg!(&a);
                 dbg!(&b);
@@ -553,10 +591,11 @@ mod test {
                 dbg!(&c);
                 // HACK: It doesn't work yet.
                 //
-                // let c = reducto(c, network, threshold, &ids, &mut rng)
-                //     .await
-                //     .unwrap();
-                let c = c.giveup();
+                let c = reducto(c, &mut network, threshold, &ids, &mut rng)
+                    .await
+                    .expect("reducto failed");
+                //let c = c.giveup();
+                dbg!(&c);
 
                 // opening
                 let shares = network.symmetric_broadcast(c).await.unwrap();
