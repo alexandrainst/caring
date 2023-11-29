@@ -46,18 +46,30 @@ pub trait ObliviousTransfer<C: Channel> {
 pub trait ObliviousSend<C: Channel> {
     type Error;
 
+    /// Oblivious transfer (send) one of two packages without knowing which will be received.
+    ///
+    /// [TODO:description]
+    ///
+    /// * `pkg0`: First package to transfer
+    /// * `pkg1`: Second package to transfer
+    /// * `channel`: Channel to communicate by
     fn send<T: serde::Serialize>(pkg0: &T, pkg1: &T, channel: &C) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 pub trait ObliviousReceive<C: Channel> {
     type Error;
 
+    /// Oblivious transfer (choosen & receive) a package based on two packages,
+    /// only learning one of them.
+    ///
+    /// * `choice`: Choice between the packages
+    /// * `channel`: Channel used for communication
     fn choose<T: serde::de::DeserializeOwned>(choice: bool, channel: &mut C) -> impl Future<Output = Result<T, Self::Error>>;
 }
 
 
 
-
+/// A Mock OT that provides no security what-so-ever.
 struct MockOT();
 
 impl<C: Channel> ObliviousTransfer<C> for MockOT {
