@@ -1,6 +1,6 @@
 //! This is vanilla Shamir Secret Sharing using an arbitrary field F.
 //! See <https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing>
-use std::{borrow::Borrow, error::Error};
+use std::{borrow::Borrow};
 
 use ff::{derive::rand_core::RngCore, Field};
 
@@ -306,7 +306,7 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
     sum
 }
 
-use derive_more::{Add, AddAssign};
+use derive_more::{AddAssign};
 /// A secret shared vector
 ///
 /// * `x`: the id

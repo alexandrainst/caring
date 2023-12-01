@@ -70,7 +70,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
     }
 
     /// Destroy the connection, returning the internal reader and writer.
-    pub async fn destroy(self) -> (R, W) {
+    pub async fn destroy(self) -> Result<(R, W), ConnectionError> {
         let Self {
             input,
             reader,
@@ -80,9 +80,13 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
         drop(input);
         // Should not wait much here since we drop input
         // it is really only unsent packages holding us back
-        let writer = task.await.unwrap().into_inner();
-        (reader, writer)
+        let writer = task
+            .await
+            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?
+            .into_inner();
+        Ok((reader, writer))
     }
+
 }
 
 #[derive(Error, Debug)]
@@ -137,13 +141,13 @@ impl TcpConnection {
         Self::new(reader, writer)
     }
 
-    pub async fn to_tcp(self) -> TcpStream {
-        let (r, w) = self.destroy().await;
+    pub async fn to_tcp(self) -> Result<TcpStream, ConnectionError> {
+        let (r, w) = self.destroy().await?;
         // UNWRAP: Should never fail, as we build the connection from two
         // streams before. However! One could construct TcpConnection manually
         // suing `Connection::new`, thus it 'can' fail.
         // But just don't do that.
-        r.reunite(w).expect("TCP Streams didn't match")
+        Ok(r.reunite(w).expect("TCP Streams didn't match"))
     }
 }
 

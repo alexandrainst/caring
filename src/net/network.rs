@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 
-use futures::{future, Future};
+use futures::future;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use tokio::{
@@ -60,10 +60,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         if index < self.index { 
             index
         } else if index == self.index {
+            // You probably didn't mean to do that.
             panic!("Trying to reference self connection, id = {index}")
         } else if index < n {
             index - 1
         } else {
+            // Out of bounds
             panic!("Only {n} in network, but referenced id = {index}")
         }
     }

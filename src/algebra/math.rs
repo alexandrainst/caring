@@ -9,7 +9,7 @@
 //! values.
 //!
 
-use ff::{PrimeField, Field};
+use ff::{Field};
 use rayon::prelude::*;
 
 // TODO: Consider smallvec or tinyvec
