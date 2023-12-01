@@ -1,7 +1,6 @@
 // #![allow(unused)]
 //pub mod theater;
 
-pub mod net;
 
 use std::{env, net::SocketAddr};
 

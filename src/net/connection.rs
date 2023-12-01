@@ -38,7 +38,6 @@ pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     task: tokio::task::JoinHandle<FramedWrite<W, LengthDelimitedCodec>>,
 }
 
-fn is_sendable(t: impl Send) {}
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R, W> {
     /// Construct a new connection from a reader and writer
@@ -120,6 +119,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
             .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
         let buf = std::io::Cursor::new(buf);
         bincode::deserialize_from(buf).map_err(ConnectionError::BadSerialization)
+    }
+
+    pub async fn send_async(&self, msg: &impl serde::Serialize) -> Result<(), ConnectionError>{
+        let msg = bincode::serialize(msg).unwrap();
+        self.input.send(msg.into()).await.map_err(|e| ConnectionError::Unknown(Box::new(e)))
     }
 }
 

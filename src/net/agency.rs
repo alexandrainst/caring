@@ -45,7 +45,10 @@ pub trait Broadcast {
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
     // TODO: Reconsider this
-    fn symmetric_broadcast<T>(&mut self, msg: T) -> impl Future<Output = Result<Vec<T>, Self::Error>>
+    fn symmetric_broadcast<T>(
+        &mut self,
+        msg: T,
+    ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
@@ -60,7 +63,10 @@ pub trait Unicast {
     fn unicast(&mut self, msgs: &[impl serde::Serialize]);
 
     // TODO: Reconsider this
-    fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> impl Future<Output = Result<Vec<T>, Self::Error>>
+    fn symmetric_unicast<T>(
+        &mut self,
+        msgs: Vec<T>,
+    ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
@@ -74,9 +80,7 @@ use digest::Digest;
 // There is also the question if we should overload the existing methods or provide
 // new methods prefixed with 'verified' or something.
 
-
 trait VerifiedBroadcast<D: Digest>: Broadcast {
-
     /// Ensure that a received broadcast is the same across all parties.
     async fn symmetric_broadcast<T: AsRef<[u8]>>(
         &mut self,
@@ -91,7 +95,8 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
         let mut digest = D::new();
         digest.update(&msg);
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let msg_hashes = Broadcast::symmetric_broadcast(self, hash).await
+        let msg_hashes = Broadcast::symmetric_broadcast(self, hash)
+            .await
             .map_err(BroadcastVerificationError::Other)?;
 
         // 3. Hash the hashes together and broadcast that
@@ -100,7 +105,8 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
             digest.update(hash);
         }
         let sum: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let sum_all: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, sum).await
+        let sum_all: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, sum)
+            .await
             .map_err(BroadcastVerificationError::Other)?;
 
         let check = sum_all.iter().all_equal();
@@ -110,7 +116,8 @@ trait VerifiedBroadcast<D: Digest>: Broadcast {
         }
 
         // 2. Send the message and check that the hashes match
-        let messages = Broadcast::symmetric_broadcast(self, msg).await
+        let messages = Broadcast::symmetric_broadcast(self, msg)
+            .await
             .map_err(BroadcastVerificationError::Other)?;
 
         for (msg, hash) in messages.iter().zip(msg_hashes) {

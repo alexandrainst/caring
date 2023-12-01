@@ -9,8 +9,8 @@ use crate::{net::agency::Broadcast, schemes::Shared};
 /// Beaver (Multiplication) Triple
 #[derive(Clone)]
 pub struct BeaverTriple<F, S: Shared<F>> {
-    phantom: PhantomData<F>,
-    shares: (S, S, S),
+    pub phantom: PhantomData<F>,
+    pub shares: (S, S, S),
 }
 
 #[derive(Clone)]
