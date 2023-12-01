@@ -1,4 +1,3 @@
-pub mod ot;
 pub mod properties;
 
 /// # Design
@@ -36,11 +35,11 @@ pub mod properties;
 /// ... Regarding the async/blocking we could also just do both, and have the one wrap to other?
 use std::{marker::PhantomData, sync::{Arc, Mutex}};
 
-use crate::{schemes::{Shared, beaver::{BeaverTriple, beaver_multiply}}, net::agency::Unicast};
 use ff::Field;
 use rand::thread_rng;
 
-use crate::net::network::InMemoryNetwork;
+use crate::{net::network::InMemoryNetwork, schemes::{Shared, beaver::{BeaverTriple, beaver_multiply}}};
+
 
 
 // Maybe we just need a single Mutex to this struct instead?
@@ -70,7 +69,7 @@ impl<F, S: Shared<F>> Engine<F,S> {
     }
 
     pub fn recv_input(&mut self, id: usize) -> S {
-        let fut = async { self.network.connections[id].recv().await.unwrap() };
+        let fut = async { self.network[id].recv().await.unwrap() };
         self.runtime.block_on(fut)
     }
 
