@@ -60,7 +60,7 @@ pub extern "C" fn care_sum(a: f64) -> f64 {
 /// Returns `-1` on unknown panics.
 ///
 #[no_mangle]
-pub unsafe extern "C" fn care_sum_many(buf: *mut f64, len: usize) -> i32 {
+pub unsafe extern "C" fn care_sum_many(buf: *const f64, des: *mut f64, len: usize) -> i32 {
     let input: &[_] = unsafe { slice::from_raw_parts(buf, len) };
     let result = panic::catch_unwind(|| {
         mpc_sum(input)
@@ -72,7 +72,7 @@ pub unsafe extern "C" fn care_sum_many(buf: *mut f64, len: usize) -> i32 {
         return 1;
     };
     let res = res.as_slice().as_ptr();
-    unsafe { std::ptr::copy(res, buf, len) };
+    unsafe { std::ptr::copy(res, des, len) };
     0
 }
 

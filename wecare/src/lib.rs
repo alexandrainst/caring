@@ -3,7 +3,7 @@ use std::{
     sync::Mutex,
 };
 
-use caring::{net::network::TcpNetwork, schemes::feldman};
+use caring::{net::network::TcpNetwork, schemes::{feldman, shamir}};
 use rand::thread_rng;
 
 pub struct AdderEngine {
@@ -67,9 +67,9 @@ pub fn mpc_sum(nums: &[f64]) -> Option<Vec<f64>> {
             .collect();
 
         let mut rng = thread_rng();
-        let shares = feldman::share_many::<
+        let shares = shamir::share_many::<
             curve25519_dalek::Scalar,
-            curve25519_dalek::RistrettoPoint,
+            //curve25519_dalek::RistrettoPoint,
         >(&nums, &parties, *threshold, &mut rng);
 
         // share my shares.
@@ -77,11 +77,11 @@ pub fn mpc_sum(nums: &[f64]) -> Option<Vec<f64>> {
 
         // compute
         let my_result = shares.into_iter().sum();
-        let open_shares: Vec<feldman::VecVerifiableShare<_, _>> =
+        let open_shares: Vec<shamir::VecShare<_>> =
             network.symmetric_broadcast(my_result).await.expect("Publishing shares");
 
         // reconstruct
-        let res = feldman::reconstruct_many(&open_shares)?
+        let res = shamir::reconstruct_many(&open_shares)
             .into_iter()
             .map(|x| x.as_bytes()[0..128/8].try_into().expect("Should be infalliable"))
             .map(u128::from_le_bytes)

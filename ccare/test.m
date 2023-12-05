@@ -1,25 +1,21 @@
 addpath("./target/release");
 [err, warn] = loadlibrary("libcaring");
 
-fprintf("Hi, I am Matlab, and today we are going to add numbers\n");
 me = '127.0.0.1:1234';
 others = {'127.0.0.1:1235'};
-%err = care_setup(me, others, length(others) - 1);
+
 [err] = calllib("libcaring", "care_setup", me, others, length(others))
 if (err ~= 0)
     fprintf("Got a nasty error:\n error code %d", err);
     quit(err);
 end
 
-
-%ins = [2.5, 3.5];
-% res = care_sum_many(ins, length(ins));
-%fprintf("Hi am Matlab, and I just did MPC, here is my result [ %f, %f ]\n", res(0), res(1));
-
-% fprintf("Let's try some more\n");
-res = 0.0;
 res = care_sum(2.5);
 fprintf("2.5 - 5 = %f\n", res);
+
+ins = [2.5, 3.5];
+res = care_sum_many(ins);
+fprintf("[2.5, 3.5] + [3.2, 0.5] = [%f, %f]\n", res(1), res(2))
 
 res = care_sum(3.14159265359);
 fprintf("pi + pi = %f\n", res);
@@ -55,4 +51,15 @@ function [res] = care_sum(a)
         quit(-1);
     end
     res = s;
+end
+
+function [res] = care_sum_many(a)
+    len = length(a);
+    [err] = calllib("libcaring", "care_sum_many", a, a, len);
+    if err == 0
+        res = a
+    else
+        fprintf("Quitting with %d\n", err)
+        quit(err);
+    end
 end
