@@ -25,6 +25,8 @@ use rand::RngCore;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VerifiableShare<F: Field, G: Group> {
     share: shamir::Share<F>,
+    // We can't actually both unicast and broadcast this.
+    // We need to verifyable broadcast the last part.
     poly: Arc<Polynomial<G>>,
 }
 
