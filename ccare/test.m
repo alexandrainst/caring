@@ -55,10 +55,11 @@ end
 
 function [res] = care_sum_many(a)
     len = length(a);
-    [err] = calllib("libcaring", "care_sum_many", a, a, len);
-    if err == 0
-        res = a
-    else
+    init = zeros(len, 1);
+    ptr = libpointer('doublePtr', init);
+    [err] = calllib("libcaring", "care_sum_many", a, ptr, len);
+    res = ptr.value;
+    if err ~= 0
         fprintf("Quitting with %d\n", err)
         quit(err);
     end

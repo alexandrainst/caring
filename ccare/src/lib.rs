@@ -72,7 +72,7 @@ pub unsafe extern "C" fn care_sum_many(buf: *const f64, des: *mut f64, len: usiz
         return 1;
     };
     let res = res.as_slice().as_ptr();
-    unsafe { std::ptr::copy(res, des, len) };
+    unsafe { std::ptr::copy_nonoverlapping(res, des, len) };
     0
 }
 
