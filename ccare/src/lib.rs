@@ -1,5 +1,7 @@
 use core::slice;
-use std::{ffi::{CStr, c_char}, panic};
+use std::{ffi::{CStr, c_char}, panic, sync::Mutex};
+
+static ENGINE : Mutex<Option<AdderEngine>> = Mutex::new(None);
 
 use wecare::*;
 /// # Safety
@@ -28,9 +30,10 @@ pub unsafe extern "C" fn care_setup(my_addr: *const c_char, others: *const *cons
     }) else {
         return 2;
     };
-    let Ok(_) = setup_engine(my_addr, &others) else {
+    let Ok(engine) = setup_engine(my_addr, &others) else {
         return 3;
     };
+    *ENGINE.lock().unwrap() = Some(engine);
     0
 }
 
@@ -40,8 +43,11 @@ pub unsafe extern "C" fn care_setup(my_addr: *const c_char, others: *const *cons
 ///
 #[no_mangle]
 pub extern "C" fn care_sum(a: f64) -> f64 {
+
     let result = panic::catch_unwind(|| {
-        mpc_sum(&[a])
+        let engine = &mut ENGINE.lock().unwrap();
+        let engine = engine.as_mut().unwrap();
+        mpc_sum(engine, &[a])
     });
     let Ok(result) = result else {
         return f64::NAN;
@@ -63,7 +69,9 @@ pub extern "C" fn care_sum(a: f64) -> f64 {
 pub unsafe extern "C" fn care_sum_many(buf: *const f64, des: *mut f64, len: usize) -> i32 {
     let input: &[_] = unsafe { slice::from_raw_parts(buf, len) };
     let result = panic::catch_unwind(|| {
-        mpc_sum(input)
+        let engine = &mut ENGINE.lock().unwrap();
+        let engine = engine.as_mut().unwrap();
+        mpc_sum(engine, input)
     });
     let Ok(res) = result else {
         return -1;
