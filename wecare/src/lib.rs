@@ -1,7 +1,4 @@
-use std::{
-    net::SocketAddr,
-    sync::Mutex,
-};
+use std::{net::SocketAddr, time::Duration};
 
 use caring::{net::network::TcpNetwork, schemes::{feldman, shamir}};
 use rand::thread_rng;
@@ -10,6 +7,14 @@ pub struct AdderEngine {
     network: TcpNetwork,
     runtime: tokio::runtime::Runtime,
     threshold: u64,
+}
+
+impl AdderEngine {
+    pub fn shutdown(self) {
+        let AdderEngine { network, runtime, .. } = self;
+        // runtime.spawn(network.shutdown());
+        // runtime.shutdown_timeout(Duration::from_secs(5));
+    }
 }
 
 type SignedFix = fixed::FixedI128<64>;
@@ -27,23 +32,9 @@ fn from_offset(num: u128) -> f64 {
     num.to_num()
 }
 
-#[test]
-fn offset_binary() {
-    use curve25519_dalek::Scalar;
-    let a: Scalar = to_offset(1.1).into();
-    let b: Scalar = to_offset(2.2).into();
-    let c: Scalar = to_offset(3.3).into();
-    let sum = a + b + c;
-    let sum: [u8; 16] = sum.as_bytes()[0..16].try_into().unwrap();
-    let sum = u128::from_le_bytes(sum);
-    let sum = from_offset(sum);
-    assert!(sum - 6.6 < 0.01);
-}
 
-pub static ENGINE: Mutex<Option<Box<AdderEngine>>> = Mutex::new(None);
-pub fn mpc_sum(nums: &[f64]) -> Option<Vec<f64>> {
-    let mut engine = ENGINE.lock().unwrap();
-    let engine = engine.as_mut().unwrap().as_mut();
+
+pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
     let AdderEngine {
         network,
         runtime,
@@ -107,12 +98,12 @@ impl std::fmt::Display for MpcError {
 
 impl std::error::Error for MpcError {}
 
-pub fn setup_engine(my_addr: &str, others: &[&str]) -> Result<(), MpcError> {
+pub fn setup_engine(my_addr: &str, others: &[&str]) -> Result<AdderEngine, MpcError> {
     let my_addr: SocketAddr = my_addr.parse().unwrap();
     let others: Vec<SocketAddr> = others.iter().map(|s| s.parse().unwrap()).collect();
 
     let threshold = ((others.len() + 1) / 2 + 1) as u64;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
@@ -123,7 +114,55 @@ pub fn setup_engine(my_addr: &str, others: &[&str]) -> Result<(), MpcError> {
         runtime,
         threshold,
     };
-    ENGINE.lock().unwrap().replace(Box::new(engine));
-    Ok(())
+    Ok(engine)
 }
 
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn offset_binary() {
+        use curve25519_dalek::Scalar;
+        let a: Scalar = to_offset(1.1).into();
+        let b: Scalar = to_offset(2.2).into();
+        let c: Scalar = to_offset(3.3).into();
+        let sum = a + b + c;
+        let sum: [u8; 16] = sum.as_bytes()[0..16].try_into().unwrap();
+        let sum = u128::from_le_bytes(sum);
+        let sum = from_offset(sum);
+        assert!(sum - 6.6 < 0.01);
+    }
+
+    #[test]
+    fn sunshine() {
+        use std::thread;
+        let t1 = thread::spawn(|| {
+            println!("[1] Setting up...");
+            let mut engine = setup_engine("127.0.0.1:1234", &["127.0.0.1:1235"]).unwrap();
+            println!("[1] Ready");
+            let res = mpc_sum(&mut engine, &[32.0]).unwrap();
+            println!("[1] Done");
+            drop(engine);
+            res
+
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        let t2 = thread::spawn(|| {
+            println!("[2] Setting up...");
+            let mut engine = setup_engine("127.0.0.1:1235", &["127.0.0.1:1234"]).unwrap();
+            println!("[2] Ready");
+            let res = mpc_sum(&mut engine, &[32.0]).unwrap();
+            println!("[2] Done");
+            drop(engine);
+            res
+        });
+        let a = t1.join().unwrap()[0];
+        let b = t2.join().unwrap()[0];
+        assert_eq!(a, 64.0);
+        assert_eq!(b, 64.0);
+    }
+}

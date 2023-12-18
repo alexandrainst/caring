@@ -1,35 +1,37 @@
 import pycare
+import time
 
-pycare.setup("127.0.0.1:1235", "127.0.0.1:1234")
+engine = pycare.setup("127.0.0.1:1235", "127.0.0.1:1234")
 
-res = pycare.sum(-5)
+res = engine.sum(-5)
 print(f"2.5 - 5 = {res}")
 
-res = pycare.sum_many([3.2, 0.5])
+res = engine.sum_many([3.2, 0.5])
 print(f"[2.5, 3.5] + [3.2, 0.5] = {res}")
 
-res = pycare.sum(3.14159265359)
+res = engine.sum(3.14159265359)
 print(f"pi + pi = {res}")
 
-res = pycare.sum(-3.14159265359)
+res = engine.sum(-3.14159265359)
 print(f"pi - pi = {res}")
 
-res = pycare.sum(-2)
+res = engine.sum(-2)
 print(f"-1 - 2 = {res}")
 
-res = pycare.sum(2222.2222)
+res = engine.sum(2222.2222)
 print(f"1111.1111 + 2222.2222 = {res}")
 
-res = pycare.sum(-2222.2222)
+res = engine.sum(-2222.2222)
 print(f"1111.1111 - 2222.2222 = {res}")
 
-res = pycare.sum(5.32e13)
+res = engine.sum(5.32e13)
 print(f"3.23e13 + 5.32e13 = {res}")
 
-res = pycare.sum(0.0)
+res = engine.sum(0.0)
 print(f"0 + 0 = {res}")
 
-res = pycare.sum(0.02)
+res = engine.sum(0.02)
 print(f"0.01 + 0.02 = {res}")
 
-pycare.takedown()
+time.sleep(1)
+# engine.takedown()
