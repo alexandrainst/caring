@@ -5,12 +5,15 @@ Python bindings to perform a MPC summation.
 ```py
 import pycare
 # Setup the system over TCP
-pycare.setup("<your address>", "<first peer address>", "<more peer addresses>")
+engine = pycare.setup("<your address>", "<first peer address>", "<more peer addresses>")
 # Some floating point number and receive output
-res = pycare.sum(2.45)
+res = engine.sum(2.45)
 # Takedown the system again.
-pycare.takedown()
+engine.takedown()
 ```
+
+## Tests
+There are two test files showcasing the use between two different parties test1.py and test2.py.
 
 ## Develop
 To install the package locally you want to setup a virtual environment and install `maturin`.

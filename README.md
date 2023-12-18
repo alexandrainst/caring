@@ -10,20 +10,11 @@ rustup default nightly
 cargo build
 ```
 
-## Run Demo
-Pass your socket address as the first argument, then the rest as of adresses as the latter.
-```sh
-cargo run -- my_socket [other_sockets]
-```
-To run three parties you can do the following:
-```sh
-# Party 1
-cargo run -- 127.0.0.1:1234 127.0.0.1:1235 127.0.0.1:1236
-# Party 2
-cargo run -- 127.0.0.1:1235 127.0.0.1:1234 127.0.0.1:1236
-# Party 3
-cargo run -- 127.0.0.1:1236 127.0.0.1:1235 127.0.0.1:1234
-```
+## Subprojects
+
+The base crate here is to provide a library with secret-sharing and other MPC functionality.
+The project contains a sample of a consuming library [`weshare`](./weshare) provinding a subroutine for the securely computing a simple sum.
+This is further used by [`ccare`](./ccare) and [`pycare`]('/pycare') for C and Python bindings respectively.
 
 ## Testing
 Our testing is done by cargo test
