@@ -34,24 +34,25 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     input: tokio::sync::mpsc::Sender<Box<[u8]>>,
-    reader: FramedRead<R, LengthDelimitedCodec>,
-    task: tokio::task::JoinHandle<FramedWrite<W, LengthDelimitedCodec>>,
+    output: tokio::sync::mpsc::Receiver<Result<tokio_util::bytes::BytesMut, ConnectionError>>,
+    receiving: tokio::task::JoinHandle<FramedRead<R, LengthDelimitedCodec>>,
+    sending: tokio::task::JoinHandle<FramedWrite<W, LengthDelimitedCodec>>,
 }
 
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R, W> {
+impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'static> Connection<R, W> {
     /// Construct a new connection from a reader and writer
     /// Messages are serialized with bincode and length delimated.
     ///
     /// * `reader`: Reader to receive messages from
     /// * `writer`: Writer to send messages to
     pub fn new(reader: R, writer: W) -> Self {
-        let (input, mut outgoing): (Sender<Box<[u8]>>, _) = tokio::sync::mpsc::channel(8);
         let codec = LengthDelimitedCodec::new();
-        let reader = FramedRead::new(reader, codec.clone());
+        let mut reader = FramedRead::new(reader, codec.clone());
         let mut writer = FramedWrite::new(writer, codec);
 
-        let task = tokio::spawn(async move {
+        let (input, mut outgoing): (Sender<Box<[u8]>>, _) = tokio::sync::mpsc::channel(8);
+        let sending = tokio::spawn(async move {
             // This self-drops after the sender is gone.
             while let Some(msg) = outgoing.recv().await {
                 writer
@@ -62,25 +63,54 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send + 'static> Connection<R,
             // return the writer
             writer
         });
+
+        let (incoming, output): (Sender<_>, _) = tokio::sync::mpsc::channel(8);
+        let receiving = tokio::task::spawn(async move {
+            while let Some(msg) = reader.next().await {
+                let msg = msg.map_err(|e| ConnectionError::Unknown(Box::new(e)));
+                incoming.send(msg).await.expect("Capacity full");
+            }
+            reader
+
+        });
         Connection {
-            task,
             input,
-            reader,
+            output,
+            sending,
+            receiving
         }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+enum SpecialPackets {
+    Disconnect,
+}
+
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
+
+    pub async fn disconnect(&mut self) {
+        self.send(&SpecialPackets::Disconnect);
+        let _packet : SpecialPackets = self.recv().await.unwrap();
     }
 
     /// Destroy the connection, returning the internal reader and writer.
     pub async fn destroy(self) -> Result<(R, W), ConnectionError> {
         let Self {
             input,
-            reader,
-            task,
+            output,
+            receiving,
+            sending
         } = self;
-        let reader = reader.into_inner();
         drop(input);
+        drop(output);
         // Should not wait much here since we drop input
         // it is really only unsent packages holding us back
-        let writer = task
+        let writer = sending
+            .await
+            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?
+            .into_inner();
+        let reader = receiving
             .await
             .map_err(|e| ConnectionError::Unknown(Box::new(e)))?
             .into_inner();
@@ -115,20 +145,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
         // TODO: Handle timeouts?
-        let buf = self
-            .reader
-            .next()
-            .await
-            .ok_or(ConnectionError::Closed)?
-            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
+        let buf = self.output.recv().await.ok_or(ConnectionError::Closed)??;
         let buf = std::io::Cursor::new(buf);
         bincode::deserialize_from(buf).map_err(ConnectionError::BadSerialization)
     }
 
-    pub async fn send_async(&self, msg: &impl serde::Serialize) -> Result<(), ConnectionError>{
-        let msg = bincode::serialize(msg).unwrap();
-        self.input.send(msg.into()).await.map_err(|e| ConnectionError::Unknown(Box::new(e)))
-    }
 }
 
 pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;

@@ -23,7 +23,7 @@ impl<R: tokio::io::AsyncRead + std::marker::Unpin, W: tokio::io::AsyncWrite + st
     type Error = ConnectionError;
 
     fn send<T: serde::Serialize>(&self, msg: &T) -> impl Future<Output = Result<(), Self::Error>> {
-        Connection::send_async(&self, msg)
+        async {todo!()}
     }
 
     fn recv<T: serde::de::DeserializeOwned>(&mut self) -> impl Future<Output = Result<T, Self::Error>> {

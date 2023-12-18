@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 
-use futures::future;
+use futures::future::{self, join_all};
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use tokio::{
-    io::{AsyncRead, AsyncWrite, DuplexStream, ReadHalf, WriteHalf},
+    io::{AsyncRead, AsyncWrite, DuplexStream, ReadHalf, WriteHalf, AsyncWriteExt},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 
@@ -199,6 +199,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         let n = n + 1; // We need to count ourselves.
         0..n
     }
+
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>
@@ -341,6 +342,20 @@ impl TcpNetwork {
         network.resolute_ids(&mut thread_rng()).await?;
 
         Ok(network)
+    }
+
+
+    pub async fn shutdown(self) -> Result<(), NetworkError> {
+        let futs = self.connections.into_iter().enumerate().map(|(i, conn)| async move {
+            match conn.to_tcp().await {
+                Ok(mut tcp) => {
+                    tcp.shutdown().await.unwrap();
+                    Ok(())
+                },
+                Err(e) => Err(NetworkError{id: i as u32, source: e}),
+            }
+        });
+        join_all(futs).await.into_iter().map_ok(|_| {}).collect()
     }
 }
 
