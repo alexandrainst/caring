@@ -20,6 +20,7 @@ use crate::{
 
 use ff::Field;
 use group::Group;
+use itertools::Itertools;
 use rand::RngCore;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -187,18 +188,15 @@ impl<F: Field, G: Group> std::ops::Add for &VecVerifiableShare<F, G> {
 
 impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
-        // BUG: This thing does not work correctly.
-        // It both ruins the polynomial and the shares, even changing the `x` value.
         let fst = iter.next().unwrap();
         let mut shares = fst.shares;
-        let mut polys: Vec<Polynomial<_>> = fst.polys.iter().cloned().collect();
+        let mut polys = fst.polys.iter().cloned().collect_vec();
 
         for vs in iter {
             shares += vs.shares;
-            polys
-                .iter_mut()
-                .zip(vs.polys.iter())
-                .for_each(|(Polynomial(acc), Polynomial(p))| *acc += p);
+            for (a,b) in polys.iter_mut().zip(vs.polys.iter()) {
+                a.0 += &b.0;
+            }
         }
         let polys: Arc<[_]> = polys.into();
         VecVerifiableShare { shares, polys }

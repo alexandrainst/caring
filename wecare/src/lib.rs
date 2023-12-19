@@ -67,8 +67,7 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
         dbg!(&shares);
 
         // compute
-        let my_result = &shares[0] + &shares[1];
-        // let my_result = shares.into_iter().sum();
+        let my_result = shares.into_iter().sum();
 
         let open_shares: Vec<feldman::VecVerifiableShare<_,_>> =
             network.symmetric_broadcast(my_result).await.expect("Publishing shares");

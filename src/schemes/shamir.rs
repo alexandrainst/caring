@@ -306,12 +306,11 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
     sum
 }
 
-use derive_more::{AddAssign};
 /// A secret shared vector
 ///
 /// * `x`: the id
 /// * `ys`: share values
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, AddAssign)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct VecShare<F: Field> {
     pub(crate) x: F,
     pub(crate) ys: Vector<F>,
@@ -353,6 +352,18 @@ impl<F: Field> From<VecShare<F>> for Vec<Share<F>> {
     fn from(value: VecShare<F>) -> Self {
         let VecShare { x, ys } = value;
         ys.into_iter().map(|y| Share { x, y }).collect()
+    }
+}
+
+impl<F: Field> std::ops::AddAssign for VecShare<F> {
+    fn add_assign(&mut self, rhs: VecShare<F>) {
+        self.ys += &rhs.ys;
+    }
+}
+
+impl<F: Field> std::ops::AddAssign<&VecShare<F>> for VecShare<F> {
+    fn add_assign(&mut self, rhs: &VecShare<F>) {
+        self.ys += &rhs.ys;
     }
 }
 
