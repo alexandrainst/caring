@@ -12,8 +12,8 @@ pub struct AdderEngine {
 impl AdderEngine {
     pub fn shutdown(self) {
         let AdderEngine { network, runtime, .. } = self;
-        // runtime.spawn(network.shutdown());
-        // runtime.shutdown_timeout(Duration::from_secs(5));
+        runtime.spawn(network.shutdown());
+        runtime.shutdown_timeout(Duration::from_secs(5));
     }
 }
 
@@ -70,6 +70,8 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
         let my_result = shares.into_iter().sum();
         let open_shares: Vec<shamir::VecShare<_>> =
             network.symmetric_broadcast(my_result).await.expect("Publishing shares");
+
+        network.flush().await.expect("Failed flushing");
 
         // reconstruct
         let res = shamir::reconstruct_many(&open_shares)

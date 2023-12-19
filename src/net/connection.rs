@@ -37,6 +37,8 @@ pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     output: tokio::sync::mpsc::Receiver<Result<tokio_util::bytes::BytesMut, ConnectionError>>,
     receiving: tokio::task::JoinHandle<FramedRead<R, LengthDelimitedCodec>>,
     sending: tokio::task::JoinHandle<FramedWrite<W, LengthDelimitedCodec>>,
+    flush: tokio::sync::mpsc::Sender<()>,
+    did_flush: tokio::sync::mpsc::Receiver<()>,
 }
 
 
@@ -51,17 +53,29 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
         let mut reader = FramedRead::new(reader, codec.clone());
         let mut writer = FramedWrite::new(writer, codec);
 
+        let (flush, mut should_flush) = tokio::sync::mpsc::channel(1);
+        let (mut flushed, did_flush) = tokio::sync::mpsc::channel(1);
+
         let (input, mut outgoing): (Sender<Box<[u8]>>, _) = tokio::sync::mpsc::channel(8);
         let sending = tokio::spawn(async move {
             // This self-drops after the sender is gone.
-            while let Some(msg) = outgoing.recv().await {
-                writer
-                    .send(msg.into())
-                    .await
-                    .expect("Something went wrong sending a message")
+            loop {
+                tokio::select! {
+                    Some(()) = should_flush.recv() => {
+                        writer.flush().await.unwrap();
+                        flushed.send(()).await.unwrap();
+                    },
+                    Some(msg) = outgoing.recv() => {
+                        writer
+                            .send(msg.into())
+                            .await
+                            .expect("Something went wrong sending a message");
+                    },
+                    else => {
+                        break writer
+                    }
+                };
             }
-            // return the writer
-            writer
         });
 
         let (incoming, output): (Sender<_>, _) = tokio::sync::mpsc::channel(8);
@@ -70,6 +84,7 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
                 let msg = msg.map_err(|e| ConnectionError::Unknown(Box::new(e)));
                 incoming.send(msg).await.expect("Capacity full");
             }
+            // return the reader
             reader
 
         });
@@ -77,22 +92,14 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
             input,
             output,
             sending,
-            receiving
+            receiving,
+            flush,
+            did_flush,
         }
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-enum SpecialPackets {
-    Disconnect,
-}
-
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
-
-    pub async fn disconnect(&mut self) {
-        self.send(&SpecialPackets::Disconnect);
-        let _packet : SpecialPackets = self.recv().await.unwrap();
-    }
 
     /// Destroy the connection, returning the internal reader and writer.
     pub async fn destroy(self) -> Result<(R, W), ConnectionError> {
@@ -100,7 +107,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
             input,
             output,
             receiving,
-            sending
+            sending,
+            ..
         } = self;
         drop(input);
         drop(output);
@@ -117,6 +125,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
         Ok((reader, writer))
     }
 
+    pub async fn flush(&mut self) -> Result<(), ConnectionError> {
+        self.flush.send(()).await.map_err(|_| ConnectionError::Closed)?;
+        self.did_flush.recv().await;
+        Ok(())
+    }
 }
 
 #[derive(Error, Debug)]
@@ -170,6 +183,7 @@ impl TcpConnection {
         // But just don't do that.
         Ok(r.reunite(w).expect("TCP Streams didn't match"))
     }
+
 }
 
 pub type TlsConnection = Connection<
@@ -184,6 +198,7 @@ impl TlsConnection {
         let (reader, writer) = tokio::io::split(stream);
         Self::new(reader, writer)
     }
+
 }
 
 /// Connection to a in-memory data stream.

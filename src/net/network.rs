@@ -357,6 +357,23 @@ impl TcpNetwork {
         });
         join_all(futs).await.into_iter().map_ok(|_| {}).collect()
     }
+
+    pub async fn flush(&mut self) -> Result<(), NetworkError> {
+        join_all(
+            self.connections
+                .iter_mut()
+                .enumerate()
+                .map(|(i, conn)| async move {
+                    conn.flush().await.map_err(|source| NetworkError {
+                        id: i as u32,
+                        source,
+                    })
+                }),
+        )
+        .await
+        .into_iter()
+        .collect()
+    }
 }
 
 #[cfg(test)]
