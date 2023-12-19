@@ -54,7 +54,7 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
         let mut writer = FramedWrite::new(writer, codec);
 
         let (flush, mut should_flush) = tokio::sync::mpsc::channel(1);
-        let (mut flushed, did_flush) = tokio::sync::mpsc::channel(1);
+        let (flushed, did_flush) = tokio::sync::mpsc::channel(1);
 
         let (input, mut outgoing): (Sender<Box<[u8]>>, _) = tokio::sync::mpsc::channel(8);
         let sending = tokio::spawn(async move {
@@ -62,6 +62,7 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
             loop {
                 tokio::select! {
                     Some(()) = should_flush.recv() => {
+                        // HACK: This really should be guaranteed from the writer's `send` itself.
                         writer.flush().await.unwrap();
                         flushed.send(()).await.unwrap();
                     },

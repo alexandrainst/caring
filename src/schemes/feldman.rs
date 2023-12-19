@@ -27,7 +27,7 @@ pub struct VerifiableShare<F: Field, G: Group> {
     share: shamir::Share<F>,
     // We can't actually both unicast and broadcast this.
     // We need to verifyable broadcast the last part.
-    poly: Arc<Polynomial<G>>,
+    poly: Polynomial<G>,
 }
 
 impl<F: Field, G> VerifiableShare<F, G>
@@ -47,12 +47,10 @@ where
 impl<F: Field, G: Group> ops::Add for VerifiableShare<F, G> {
     type Output = Self;
 
-    fn add(mut self, rhs: Self) -> Self::Output {
-        let poly = Arc::make_mut(&mut self.poly);
-        poly.0 += &rhs.poly.0;
+    fn add(self, rhs: Self) -> Self::Output {
         Self {
             share: self.share + rhs.share,
-            poly: self.poly,
+            poly: Polynomial(self.poly.0 + rhs.poly.0),
         }
     }
 }
@@ -60,28 +58,26 @@ impl<F: Field, G: Group> ops::Add for VerifiableShare<F, G> {
 impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
     type Output = Self;
 
-    fn sub(mut self, rhs: Self) -> Self::Output {
-        let poly = Arc::make_mut(&mut self.poly);
-        poly.0 -= &rhs.poly.0;
+    fn sub(self, rhs: Self) -> Self::Output {
         Self {
             share: self.share - rhs.share,
-            poly: self.poly,
+            poly: Polynomial(self.poly.0 - rhs.poly.0),
         }
     }
 }
 
 impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
-        let mut fst = iter.next().unwrap();
+        let fst = iter.next().unwrap();
         let mut share = fst.share;
-        let poly_ref = Arc::make_mut(&mut fst.poly);
+        let mut poly = fst.poly;
         for vs in iter {
             share += vs.share;
-            poly_ref.0 += &vs.poly.0;
+            poly.0 += vs.poly.0;
         }
         VerifiableShare {
             share,
-            poly: fst.poly,
+            poly,
         }
     }
 }
@@ -125,7 +121,6 @@ where
             .fold(F::ZERO, |sum, x| sum + x);
         let share = shamir::Share::<F> { x, y: share };
         let poly = Polynomial(mac_poly.clone());
-        let poly = Arc::new(poly);
         shares.push(VerifiableShare { share, poly });
     }
     shares
@@ -159,10 +154,19 @@ where
     Some(res)
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct VecVerifiableShare<F: Field, G: Group> {
     shares: shamir::VecShare<F>,
     polys: Arc<[Polynomial<G>]>,
+}
+
+
+impl<F: Field, G: Group> std::ops::Add for VecVerifiableShare<F, G> {
+    type Output = VecVerifiableShare<F, G>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        &self + &rhs
+    }
 }
 
 impl<F: Field, G: Group> std::ops::Add for &VecVerifiableShare<F, G> {
@@ -183,9 +187,10 @@ impl<F: Field, G: Group> std::ops::Add for &VecVerifiableShare<F, G> {
 
 impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+        // BUG: This thing does not work correctly.
+        // It both ruins the polynomial and the shares, even changing the `x` value.
         let fst = iter.next().unwrap();
         let mut shares = fst.shares;
-        // let polys : &mut [Polynomial<_>] = match Arc::get_mut(&mut fst.polys) {
         let mut polys: Vec<Polynomial<_>> = fst.polys.iter().cloned().collect();
 
         for vs in iter {

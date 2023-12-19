@@ -311,7 +311,7 @@ use derive_more::{AddAssign};
 ///
 /// * `x`: the id
 /// * `ys`: share values
-#[derive(Clone, serde::Deserialize, serde::Serialize, AddAssign)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, AddAssign)]
 pub struct VecShare<F: Field> {
     pub(crate) x: F,
     pub(crate) ys: Vector<F>,
@@ -321,6 +321,7 @@ impl<F: Field> std::ops::Add for VecShare<F> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
+        debug_assert_eq!(self.x, rhs.x);
         Self {
             x: self.x,
             ys: self.ys + rhs.ys,
@@ -332,6 +333,7 @@ impl<F: Field> std::ops::Add for &VecShare<F> {
     type Output = VecShare<F>;
 
     fn add(self, rhs: Self) -> Self::Output {
+        debug_assert_eq!(self.x, rhs.x);
         let a = &self.ys;
         let b = &rhs.ys;
         let ys: Vector<_> = a + b;
