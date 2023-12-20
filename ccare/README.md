@@ -1,5 +1,5 @@
 <h1 align="center">C Bindings</h1>
-<h2 align="center">*Lingua Franca MPC Routines*</h2>
+<h2 align="center"><i>Lingua Franca MPC Routines</i></h2>
 
 
 ## Build

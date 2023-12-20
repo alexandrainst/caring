@@ -64,7 +64,6 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
 
         // share my shares.
         let shares = network.symmetric_unicast(shares).await.expect("Sharing shares");
-        dbg!(&shares);
 
         // compute
         let my_result = shares.into_iter().sum();
@@ -73,7 +72,6 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
             network.symmetric_broadcast(my_result).await.expect("Publishing shares");
 
         network.flush().await.expect("Failed flushing");
-        dbg!(&open_shares);
 
         // reconstruct
         let res = feldman::reconstruct_many(&open_shares).expect("Failed to validate")
