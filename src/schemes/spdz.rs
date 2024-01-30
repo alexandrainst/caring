@@ -13,11 +13,12 @@ use ff::{Field, PrimeField};
 
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{extra::CoinToss, net::agency::Broadcast};
 
 // Should we allow Field or use PrimeField?
-#[derive(Clone, Copy, Add, Sub, AddAssign, SubAssign)]
+#[derive(Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign)]
 pub struct Share<F: PrimeField> {
     // This field is nice and I like it
     val: F,
@@ -112,7 +113,13 @@ pub fn reconstruct<F: PrimeField>(shares: &[Share<F>]) -> F {
     shares.iter().map(|x| x.val).sum()
 }
 
-pub struct SpdzContext<F: Field> {
+// IDEA:
+//
+// Okay hear me out, since we 'have' to check the opened values at some point
+// during the computation, it somehow acts as sort of 'release of a resource'.
+// As such would it be apt to have the SpdzContext be some sort of manual garbage collector?
+#[derive(Debug)]
+pub struct SpdzContext<F: PrimeField> {
     opened_values: Vec<F>,
     closed_values: Vec<Share<F>>,
     alpha: F,
@@ -120,23 +127,22 @@ pub struct SpdzContext<F: Field> {
 }
 
 // TODO: Convert to associated function?
-pub async fn mac_check<Rng: SeedableRng, F: Field>(
+pub async fn mac_check<Rng: SeedableRng + RngCore, F: PrimeField + Serialize + DeserializeOwned>(
     ctx: &mut SpdzContext<F>,
     cx: &mut impl Broadcast,
 ) -> Result<(), ()> { // TODO: More specific errors
     // This should all be done way nicer.
-    let cointoss = CoinToss::new(thread_rng());
+    let mut cointoss = CoinToss::new(thread_rng());
     let seed = Rng::Seed::default(); // I hate this
     let coin : [u8; 32] = cointoss.toss(cx).await.unwrap();
-    seed.as_mut() = &mut coin;
-    let rng = Rng::from_seed(seed);
+    let mut rng = Rng::from_seed(seed);
 
     // This could probably be a lot nicer if opened and closed values were one list.
     // They probably should be since they should have the same length I think.
     let n =  ctx.opened_values.len();
-    let rs = (0..n).map(|_| F::random(rng)).collect();
-    let a: F = ctx.opened_values.iter().zip(rs).map(|(b, r)| b * r).sum();
-    let gamma : F = ctx.closed_values.iter().zip(rs).map(|(v, r)| v.mac * r).sum();
+    let rs : Vec<_> = (0..n).map(|_| F::random(&mut rng)).collect();
+    let a: F = ctx.opened_values.iter().zip(rs.iter()).map(|(&b, r)| b * r).sum();
+    let gamma : F = ctx.closed_values.iter().zip(rs.iter()).map(|(v, r)| v.mac * r).sum();
     let delta = gamma - ctx.alpha * a;
 
     let deltas = cx.symmetric_broadcast(delta).await.unwrap(); // (commitment)

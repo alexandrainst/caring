@@ -1,6 +1,8 @@
+use std::ops::Index;
+
 use futures::Future;
 
-use crate::net::{agency::Broadcast, connection::{ConnectionError, Connection}};
+use crate::net::{agency::{Broadcast, Unicast}, connection::{ConnectionError, Connection}, network::Network};
 
 pub mod agency;
 pub mod connection;
@@ -33,11 +35,25 @@ impl<R: tokio::io::AsyncRead + std::marker::Unpin, W: tokio::io::AsyncWrite + st
 
 
 pub trait ChannelStation : Broadcast + Unicast {
-    type Error = ConnectionError;
-    type SubChannel : Channel<Error=Self::Error>;
+    type Error;
+    type SubChannel : Channel;
     type Idx;
 
-    fn tune_mut(&mut self, idx: Self::Idx) -> &mut Channel;
+    fn tune_mut(&mut self, idx: Self::Idx) -> &mut Self::SubChannel;
 
-    fn tune(&self, idx: Idx) -> &Channel;
+    fn tune(&self, idx: Self::Idx) -> &Self::SubChannel;
+}
+
+impl<R: tokio::io::AsyncRead + std::marker::Unpin, W: tokio::io::AsyncWrite + std::marker::Unpin> ChannelStation for Network<R, W> {
+    type Error = ConnectionError;
+    type SubChannel = Connection<R, W>;
+    type Idx = usize;
+
+    fn tune_mut(&mut self, idx: Self::Idx) -> &mut Self::SubChannel {
+        todo!()
+    }
+
+    fn tune(&self, idx: Self::Idx) -> &Self::SubChannel {
+        self.index(idx)
+    }
 }

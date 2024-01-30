@@ -20,13 +20,14 @@ impl<Rng: rand::RngCore> CoinToss<Rng> {
         let mut my_seed = [0u8; N];
         self.rng.fill_bytes(&mut my_seed);
         // TODO: Commitment protocol
-        let seeds = cx.symmetric_broadcast(&my_seed).await?;
+        let my_seed : Box<[u8]> = Box::new(my_seed);
+        let seeds = cx.symmetric_broadcast(my_seed).await.unwrap();
 
-        fn xor<const N: usize>(acc: &mut [u8; N], ins: &[u8; N]) {
+        fn xor(acc: &mut [u8], ins: &[u8]) {
             acc.iter_mut().zip(ins).for_each(|(acc, ins)| *acc ^= ins);
         }
-        let acc = [0u8; N];
-        seeds.into_iter().for_each(|seed| xor(&mut acc, seed));
+        let mut acc = [0u8; N];
+        seeds.into_iter().for_each(|seed| xor(&mut acc, &seed));
 
         Ok(acc)
     }

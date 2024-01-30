@@ -22,6 +22,8 @@
 //! from subprotocols in a very elegant manner IMO.
 //!
 
+use std::error::Error;
+
 use futures::Future;
 use itertools::Itertools;
 
@@ -40,7 +42,7 @@ use itertools::Itertools;
 
 
 pub trait Broadcast {
-    type Error;
+    type Error : Error;
 
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
