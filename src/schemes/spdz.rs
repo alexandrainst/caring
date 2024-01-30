@@ -12,7 +12,9 @@
 use ff::{Field, PrimeField};
 
 use derive_more::{Add, AddAssign, Sub, SubAssign};
-use rand::RngCore;
+use rand::{thread_rng, Rng, RngCore, SeedableRng};
+
+use crate::{extra::CoinToss, net::agency::Broadcast};
 
 // Should we allow Field or use PrimeField?
 #[derive(Clone, Copy, Add, Sub, AddAssign, SubAssign)]
@@ -110,7 +112,46 @@ pub fn reconstruct<F: PrimeField>(shares: &[Share<F>]) -> F {
     shares.iter().map(|x| x.val).sum()
 }
 
-// TODO: Round syncronization
+pub struct SpdzContext<F: Field> {
+    opened_values: Vec<F>,
+    closed_values: Vec<Share<F>>,
+    alpha: F,
+    // dbgr supplier (det. random bit generator)
+}
+
+// TODO: Convert to associated function?
+pub async fn mac_check<Rng: SeedableRng, F: Field>(
+    ctx: &mut SpdzContext<F>,
+    cx: &mut impl Broadcast,
+) -> Result<(), ()> { // TODO: More specific errors
+    // This should all be done way nicer.
+    let cointoss = CoinToss::new(thread_rng());
+    let seed = Rng::Seed::default(); // I hate this
+    let coin : [u8; 32] = cointoss.toss(cx).await.unwrap();
+    seed.as_mut() = &mut coin;
+    let rng = Rng::from_seed(seed);
+
+    // This could probably be a lot nicer if opened and closed values were one list.
+    // They probably should be since they should have the same length I think.
+    let n =  ctx.opened_values.len();
+    let rs = (0..n).map(|_| F::random(rng)).collect();
+    let a: F = ctx.opened_values.iter().zip(rs).map(|(b, r)| b * r).sum();
+    let gamma : F = ctx.closed_values.iter().zip(rs).map(|(v, r)| v.mac * r).sum();
+    let delta = gamma - ctx.alpha * a;
+
+    let deltas = cx.symmetric_broadcast(delta).await.unwrap(); // (commitment)
+    let delta_sum : F = deltas.iter().sum();
+
+    if delta_sum.is_zero_vartime() {
+        ctx.opened_values.clear();
+        ctx.closed_values.clear();
+        // great success!
+        Ok(())
+    } else {
+        // bad! someone is corrupted
+        Err(())
+    }
+}
 
 #[cfg(test)]
 mod test {

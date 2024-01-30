@@ -1,6 +1,6 @@
 use futures::Future;
 
-use crate::net::connection::{ConnectionError, Connection};
+use crate::net::{agency::Broadcast, connection::{ConnectionError, Connection}};
 
 pub mod agency;
 pub mod connection;
@@ -29,4 +29,15 @@ impl<R: tokio::io::AsyncRead + std::marker::Unpin, W: tokio::io::AsyncWrite + st
     fn recv<T: serde::de::DeserializeOwned>(&mut self) -> impl Future<Output = Result<T, Self::Error>> {
         Connection::recv(self)
     }
+}
+
+
+pub trait ChannelStation : Broadcast + Unicast {
+    type Error = ConnectionError;
+    type SubChannel : Channel<Error=Self::Error>;
+    type Idx;
+
+    fn tune_mut(&mut self, idx: Self::Idx) -> &mut Channel;
+
+    fn tune(&self, idx: Idx) -> &Channel;
 }
