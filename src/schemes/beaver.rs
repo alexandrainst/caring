@@ -20,7 +20,6 @@ pub struct BeaverSquare<F, S: Shared<F>> {
     val_squared: S,
 }
 
-
 #[derive(Clone)]
 pub struct BeaverPower<F, S: Shared<F>> {
     phantom: PhantomData<F>,

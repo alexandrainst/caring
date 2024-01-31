@@ -31,16 +31,23 @@ pub mod properties;
 ///
 /// *But* the current design is made to allow for interopability with existing generic numeric
 /// code, thus leveraging a possible huge library.
-/// 
+///
 /// ... Regarding the async/blocking we could also just do both, and have the one wrap to other?
-use std::{marker::PhantomData, sync::{Arc, Mutex}};
+use std::{
+    marker::PhantomData,
+    sync::{Arc, Mutex},
+};
 
 use ff::Field;
 use rand::thread_rng;
 
-use crate::{net::network::InMemoryNetwork, schemes::{Shared, beaver::{BeaverTriple, beaver_multiply}}};
-
-
+use crate::{
+    net::network::InMemoryNetwork,
+    schemes::{
+        beaver::{beaver_multiply, BeaverTriple},
+        Shared,
+    },
+};
 
 // Maybe we just need a single Mutex to this struct instead?
 // It would be more efficient
@@ -51,8 +58,7 @@ pub struct Engine<F, S: Shared<F>> {
     runtime: tokio::runtime::Runtime,
 }
 
-
-impl<F, S: Shared<F>> Engine<F,S> {
+impl<F, S: Shared<F>> Engine<F, S> {
     // TODO: Proper error handling
     // INFO: Consider if we should block on all these or actually use async?
     // It is kind of weird since we have a tokio runtime in the engine, but we could just
@@ -60,7 +66,7 @@ impl<F, S: Shared<F>> Engine<F,S> {
 
     pub fn input(&mut self, value: F) -> S {
         let mut rng = thread_rng();
-        
+
         let mut shares = S::share(&self.context, value, &mut rng);
         let index = self.network.index;
         let my_share = shares.remove(index);
@@ -76,13 +82,12 @@ impl<F, S: Shared<F>> Engine<F,S> {
     pub fn symmetric_input(&mut self, value: F) -> Vec<S> {
         let mut rng = thread_rng();
         let shares = S::share(&self.context, value, &mut rng);
-        let fut = async {self.network.symmetric_unicast(shares).await.unwrap()};
+        let fut = async { self.network.symmetric_unicast(shares).await.unwrap() };
         self.runtime.block_on(fut)
     }
 
-
     pub fn open(&mut self, to_open: S) -> F {
-        let fut = async {self.network.symmetric_broadcast(to_open).await.unwrap()};
+        let fut = async { self.network.symmetric_broadcast(to_open).await.unwrap() };
         let shares = self.runtime.block_on(fut);
         S::recombine(&self.context, &shares).unwrap()
     }
@@ -93,10 +98,10 @@ pub struct Secret<F, S: Shared<F>> {
     phantom: PhantomData<F>,
     // HACK: Summarize these different Arcs/refs into one single 'context',
     // since they all should be the same object.
-    engine: Arc<Mutex<Engine<F,S>>>,
+    engine: Arc<Mutex<Engine<F, S>>>,
 }
 
-impl<F, S: Shared<F>> std::ops::Add for Secret<F,S> {
+impl<F, S: Shared<F>> std::ops::Add for Secret<F, S> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -107,8 +112,10 @@ impl<F, S: Shared<F>> std::ops::Add for Secret<F,S> {
     }
 }
 
-
-impl<F, S: Shared<F>> std::ops::Sub for Secret<F,S> where S: std::ops::Sub<Output=S> {
+impl<F, S: Shared<F>> std::ops::Sub for Secret<F, S>
+where
+    S: std::ops::Sub<Output = S>,
+{
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -119,9 +126,11 @@ impl<F, S: Shared<F>> std::ops::Sub for Secret<F,S> where S: std::ops::Sub<Outpu
     }
 }
 
-
-
-impl<Ctx, F, S: Shared<F, Context=Ctx> + Copy> std::ops::Mul for Secret<F,S> where F: serde::Serialize + serde::de::DeserializeOwned + Field, S: std::ops::Mul<F, Output=S> {
+impl<Ctx, F, S: Shared<F, Context = Ctx> + Copy> std::ops::Mul for Secret<F, S>
+where
+    F: serde::Serialize + serde::de::DeserializeOwned + Field,
+    S: std::ops::Mul<F, Output = S>,
+{
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -130,21 +139,24 @@ impl<Ctx, F, S: Shared<F, Context=Ctx> + Copy> std::ops::Mul for Secret<F,S> whe
             "Secret shares are not run on the same engine!"
         );
         let share = {
-            let Engine {context, resources, network, runtime, ..} = &mut *self.engine.lock().unwrap();
+            let Engine {
+                context,
+                resources,
+                network,
+                runtime,
+                ..
+            } = &mut *self.engine.lock().unwrap();
             let triple = resources.pop().unwrap();
 
             let res = beaver_multiply::<Ctx, S, F>(context, self.share, rhs.share, triple, network);
             runtime.block_on(res).unwrap()
         };
 
-        Self {
-            share,
-            ..self
-        }
+        Self { share, ..self }
     }
 }
 
-impl<Ctx, F, S: Shared<F, Context = Ctx>> std::ops::Div for Secret<F,S> {
+impl<Ctx, F, S: Shared<F, Context = Ctx>> std::ops::Div for Secret<F, S> {
     type Output = Self;
 
     fn div(self, _rhs: Self) -> Self::Output {

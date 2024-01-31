@@ -9,7 +9,7 @@
 //! values.
 //!
 
-use ff::{Field};
+use ff::Field;
 use rayon::prelude::*;
 
 // TODO: Consider smallvec or tinyvec
@@ -100,7 +100,6 @@ impl<F: Send + Sync> FromParallelIterator<F> for Vector<F> {
         Self(boxed)
     }
 }
-
 
 impl<T: Send + Sync> AsRef<[T]> for Vector<T> {
     fn as_ref(&self) -> &[T] {
@@ -279,7 +278,6 @@ where
     }
 }
 
-
 /// Generic implementation of row-wise multiplication
 ///
 /// Vector<A> * B -> Vector<B>
@@ -310,7 +308,7 @@ where
 ///
 /// Vector<A> * B -> Vector<A>
 /// if A *= B exists
-/// 
+///
 impl<A: Send + Sync, B: Send + Sync> std::ops::Mul<B> for Vector<A>
 where
     for<'b> A: std::ops::MulAssign<&'b B>,
@@ -322,7 +320,6 @@ where
         self
     }
 }
-
 
 /// Generic implemetantion of sum
 ///
@@ -342,23 +339,24 @@ where
     }
 }
 
-
 impl<F: Field> Vector<F> {
     pub fn inner_product(&self, other: &Self) -> F {
-        self.par_iter().zip(other).map(|(&a, &b)| a*b).sum()
+        self.par_iter().zip(other).map(|(&a, &b)| a * b).sum()
     }
 }
 
 pub fn lagrange_coefficients<F: Field>(xs: &[F], x: F) -> Vec<F> {
-    xs.iter().map(|&i| {
-        let mut prod = F::ONE;
-        for &m in xs.iter() {
-            if m != i {
-                prod *= x - m * (i - m).invert().unwrap_or(F::ZERO);
+    xs.iter()
+        .map(|&i| {
+            let mut prod = F::ONE;
+            for &m in xs.iter() {
+                if m != i {
+                    prod *= x - m * (i - m).invert().unwrap_or(F::ZERO);
+                }
             }
-        }
-        prod
-    }).collect()
+            prod
+        })
+        .collect()
 }
 
 #[cfg(test)]

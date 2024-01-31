@@ -76,10 +76,7 @@ impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
             share += vs.share;
             poly.0 += vs.poly.0;
         }
-        VerifiableShare {
-            share,
-            poly,
-        }
+        VerifiableShare { share, poly }
     }
 }
 
@@ -161,7 +158,6 @@ pub struct VecVerifiableShare<F: Field, G: Group> {
     polys: Arc<[Polynomial<G>]>,
 }
 
-
 impl<F: Field, G: Group> std::ops::Add for VecVerifiableShare<F, G> {
     type Output = VecVerifiableShare<F, G>;
 
@@ -194,7 +190,7 @@ impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F, G> {
 
         for vs in iter {
             shares += vs.shares;
-            for (a,b) in polys.iter_mut().zip(vs.polys.iter()) {
+            for (a, b) in polys.iter_mut().zip(vs.polys.iter()) {
                 a.0 += &b.0;
             }
         }

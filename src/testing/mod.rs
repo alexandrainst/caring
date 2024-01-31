@@ -58,7 +58,6 @@ impl Cluster {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use crate::testing::Cluster;

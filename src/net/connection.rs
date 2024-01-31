@@ -40,8 +40,9 @@ pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     did_flush: tokio::sync::mpsc::Receiver<()>,
 }
 
-
-impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'static> Connection<R, W> {
+impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'static>
+    Connection<R, W>
+{
     /// Construct a new connection from a reader and writer
     /// Messages are serialized with bincode and length delimated.
     ///
@@ -89,7 +90,6 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
-
     /// Destroy the connection, returning the internal reader and writer.
     pub async fn destroy(self) -> Result<(R, W), ConnectionError> {
         let Self {
@@ -110,7 +110,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     }
 
     pub async fn flush(&mut self) -> Result<(), ConnectionError> {
-        self.flush.send(()).await.map_err(|_| ConnectionError::Closed)?;
+        self.flush
+            .send(())
+            .await
+            .map_err(|_| ConnectionError::Closed)?;
         self.did_flush.recv().await;
         Ok(())
     }
@@ -142,12 +145,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
         // TODO: Handle timeouts?
-        let buf = self.reader.next().await.ok_or(ConnectionError::Closed)?
+        let buf = self
+            .reader
+            .next()
+            .await
+            .ok_or(ConnectionError::Closed)?
             .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
         let buf = std::io::Cursor::new(buf);
         bincode::deserialize_from(buf).map_err(ConnectionError::BadSerialization)
     }
-
 }
 
 pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;
@@ -168,7 +174,6 @@ impl TcpConnection {
         // But just don't do that.
         Ok(r.reunite(w).expect("TCP Streams didn't match"))
     }
-
 }
 
 pub type TlsConnection = Connection<
@@ -183,7 +188,6 @@ impl TlsConnection {
         let (reader, writer) = tokio::io::split(stream);
         Self::new(reader, writer)
     }
-
 }
 
 /// Connection to a in-memory data stream.

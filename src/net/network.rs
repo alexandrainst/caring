@@ -4,7 +4,7 @@ use futures::future::{self, join_all};
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use tokio::{
-    io::{AsyncRead, AsyncWrite, DuplexStream, ReadHalf, WriteHalf, AsyncWriteExt},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 
@@ -28,8 +28,12 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
     pub index: usize,
 }
 
-impl<R: tokio::io::AsyncRead + std::marker::Unpin,W: tokio::io::AsyncWrite + std::marker::Unpin> std::ops::Index<usize> for Network<R,W> {
-    type Output = Connection<R,W>;
+impl<
+        R: tokio::io::AsyncRead + std::marker::Unpin,
+        W: tokio::io::AsyncWrite + std::marker::Unpin,
+    > std::ops::Index<usize> for Network<R, W>
+{
+    type Output = Connection<R, W>;
 
     fn index(&self, index: usize) -> &Self::Output {
         let i = self.id_to_index(index);
@@ -37,9 +41,11 @@ impl<R: tokio::io::AsyncRead + std::marker::Unpin,W: tokio::io::AsyncWrite + std
     }
 }
 
-
-impl<R: tokio::io::AsyncRead + std::marker::Unpin,W: tokio::io::AsyncWrite + std::marker::Unpin> std::ops::IndexMut<usize> for Network<R,W> {
-
+impl<
+        R: tokio::io::AsyncRead + std::marker::Unpin,
+        W: tokio::io::AsyncWrite + std::marker::Unpin,
+    > std::ops::IndexMut<usize> for Network<R, W>
+{
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let i = self.id_to_index(index);
         &mut self.connections[i]
@@ -57,7 +63,7 @@ pub struct NetworkError {
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     fn id_to_index(&self, index: usize) -> usize {
         let n = self.connections.len() + 1;
-        if index < self.index { 
+        if index < self.index {
             index
         } else if index == self.index {
             // You probably didn't mean to do that.
@@ -199,12 +205,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         let n = n + 1; // We need to count ourselves.
         0..n
     }
-
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>
-    Unicast for Network<R, W>
-{
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     type Error = NetworkError;
 
     fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
@@ -218,9 +221,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>
         self.symmetric_unicast(msgs).await
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(
-        &mut self,
-    ) -> Result<Vec<T>, Self::Error> {
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
         self.receive_all().await
     }
 }
@@ -239,9 +240,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
         self.symmetric_broadcast(msg).await
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(
-        &mut self,
-    ) -> Result<Vec<T>, Self::Error> {
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
         self.receive_all().await
     }
 }
@@ -344,17 +343,23 @@ impl TcpNetwork {
         Ok(network)
     }
 
-
     pub async fn shutdown(self) -> Result<(), NetworkError> {
-        let futs = self.connections.into_iter().enumerate().map(|(i, conn)| async move {
-            match conn.to_tcp().await {
-                Ok(mut tcp) => {
-                    tcp.shutdown().await.unwrap();
-                    Ok(())
-                },
-                Err(e) => Err(NetworkError{id: i as u32, source: e}),
-            }
-        });
+        let futs = self
+            .connections
+            .into_iter()
+            .enumerate()
+            .map(|(i, conn)| async move {
+                match conn.to_tcp().await {
+                    Ok(mut tcp) => {
+                        tcp.shutdown().await.unwrap();
+                        Ok(())
+                    }
+                    Err(e) => Err(NetworkError {
+                        id: i as u32,
+                        source: e,
+                    }),
+                }
+            });
         join_all(futs).await.into_iter().map_ok(|_| {}).collect()
     }
 

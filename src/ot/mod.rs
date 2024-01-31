@@ -2,14 +2,12 @@ use futures::Future;
 
 use crate::net::Channel;
 
-
-
 // TODO: Handle other things than 1-of-2 OT.
 // Just make everything 1-of-n?
 pub trait ObliviousTransfer<C: Channel> {
     // TODO: Better and less overloaded names
-    type Sender : ObliviousSend<C>;
-    type Receiver : ObliviousReceive<C>; // Selector? Chooser?
+    type Sender: ObliviousSend<C>;
+    type Receiver: ObliviousReceive<C>; // Selector? Chooser?
 }
 
 // INFO: Consider if Channel should be a parameter or part of the object instance?
@@ -31,7 +29,11 @@ pub trait ObliviousSend<C: Channel> {
     /// * `pkg0`: First package to transfer
     /// * `pkg1`: Second package to transfer
     /// * `channel`: Channel to communicate by
-    fn send<T: serde::Serialize>(pkg0: &T, pkg1: &T, channel: &C) -> impl Future<Output = Result<(), Self::Error>>;
+    fn send<T: serde::Serialize>(
+        pkg0: &T,
+        pkg1: &T,
+        channel: &C,
+    ) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 pub trait ObliviousReceive<C: Channel> {
@@ -42,10 +44,11 @@ pub trait ObliviousReceive<C: Channel> {
     ///
     /// * `choice`: Choice between the packages
     /// * `channel`: Channel used for communication
-    fn choose<T: serde::de::DeserializeOwned>(choice: bool, channel: &mut C) -> impl Future<Output = Result<T, Self::Error>>;
+    fn choose<T: serde::de::DeserializeOwned>(
+        choice: bool,
+        channel: &mut C,
+    ) -> impl Future<Output = Result<T, Self::Error>>;
 }
-
-
 
 /// A Mock OT that provides no security what-so-ever.
 struct MockOT();
@@ -67,13 +70,15 @@ impl<C: Channel> ObliviousSend<C> for MockOTSender {
     }
 }
 
-
 struct MockOTReceiver();
 
 impl<C: Channel> ObliviousReceive<C> for MockOTReceiver {
     type Error = C::Error;
 
-    async fn choose<T: serde::de::DeserializeOwned>(choice: bool, channel: &mut C) -> Result<T, Self::Error> {
+    async fn choose<T: serde::de::DeserializeOwned>(
+        choice: bool,
+        channel: &mut C,
+    ) -> Result<T, Self::Error> {
         let (pkg0, pkg1) = channel.recv().await?;
         Ok(if choice { pkg1 } else { pkg0 })
     }

@@ -29,12 +29,18 @@ pub struct Share<F: PrimeField> {
 impl<F: PrimeField> Share<F> {
     pub fn add_public(self, val: F, chosen_one: bool) -> Self {
         let val = if chosen_one { val } else { F::ZERO };
-        Share { val: self.val + val, ..self }
+        Share {
+            val: self.val + val,
+            ..self
+        }
     }
 
     pub fn sub_public(self, val: F, chosen_one: bool) -> Self {
         let val = if chosen_one { val } else { F::ZERO };
-        Share { val: self.val - val, ..self }
+        Share {
+            val: self.val - val,
+            ..self
+        }
     }
 }
 
@@ -44,7 +50,6 @@ impl<F: PrimeField> Share<F> {
         val * key == mac
     }
 }
-
 
 /// Mutliplication between a share and a public value
 ///
@@ -60,7 +65,6 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
     }
 }
 
-
 /// Mutliplication between a share and a public value
 ///
 /// This operation is asymmetric
@@ -74,7 +78,6 @@ impl<F: PrimeField> std::ops::Add<F> for Share<F> {
         }
     }
 }
-
 
 struct SpdzParams<F: PrimeField> {
     key: F,
@@ -130,23 +133,34 @@ pub struct SpdzContext<F: PrimeField> {
 pub async fn mac_check<Rng: SeedableRng + RngCore, F: PrimeField + Serialize + DeserializeOwned>(
     ctx: &mut SpdzContext<F>,
     cx: &mut impl Broadcast,
-) -> Result<(), ()> { // TODO: More specific errors
+) -> Result<(), ()> {
+    // TODO: More specific errors
     // This should all be done way nicer.
     let mut cointoss = CoinToss::new(thread_rng());
     let seed = Rng::Seed::default(); // I hate this
-    let coin : [u8; 32] = cointoss.toss(cx).await.unwrap();
+    let coin: [u8; 32] = cointoss.toss(cx).await.unwrap();
     let mut rng = Rng::from_seed(seed);
 
     // This could probably be a lot nicer if opened and closed values were one list.
     // They probably should be since they should have the same length I think.
-    let n =  ctx.opened_values.len();
-    let rs : Vec<_> = (0..n).map(|_| F::random(&mut rng)).collect();
-    let a: F = ctx.opened_values.iter().zip(rs.iter()).map(|(&b, r)| b * r).sum();
-    let gamma : F = ctx.closed_values.iter().zip(rs.iter()).map(|(v, r)| v.mac * r).sum();
+    let n = ctx.opened_values.len();
+    let rs: Vec<_> = (0..n).map(|_| F::random(&mut rng)).collect();
+    let a: F = ctx
+        .opened_values
+        .iter()
+        .zip(rs.iter())
+        .map(|(&b, r)| b * r)
+        .sum();
+    let gamma: F = ctx
+        .closed_values
+        .iter()
+        .zip(rs.iter())
+        .map(|(v, r)| v.mac * r)
+        .sum();
     let delta = gamma - ctx.alpha * a;
 
     let deltas = cx.symmetric_broadcast(delta).await.unwrap(); // (commitment)
-    let delta_sum : F = deltas.iter().sum();
+    let delta_sum: F = deltas.iter().sum();
 
     if delta_sum.is_zero_vartime() {
         ctx.opened_values.clear();

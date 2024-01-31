@@ -4,8 +4,8 @@
 mod algebra;
 mod extra;
 pub mod net;
+pub mod ot;
 pub mod poly;
 pub mod schemes;
-pub mod theater;
 mod testing;
-pub mod ot;
+pub mod theater;

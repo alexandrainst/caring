@@ -44,7 +44,7 @@ impl<G: Field> Polynomial<G> {
     }
 }
 
-impl<G: Send+Sync> Polynomial<G> {
+impl<G: Send + Sync> Polynomial<G> {
     pub fn degree(&self) -> usize {
         // a0 + a1x1 is degree(1)
         self.0.len() - 1
@@ -88,7 +88,6 @@ where
         Polynomial(res)
     }
 }
-
 
 /// Implementation of cartesian product for polyminials
 ///

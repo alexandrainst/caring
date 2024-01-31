@@ -1,12 +1,16 @@
 //! This is vanilla Shamir Secret Sharing using an arbitrary field F.
 //! See <https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing>
-use std::{borrow::Borrow};
+use std::borrow::Borrow;
 
 use ff::{derive::rand_core::RngCore, Field};
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
-use crate::{algebra::math::{Vector, lagrange_coefficients}, net::agency::Unicast, poly::Polynomial};
+use crate::{
+    algebra::math::{lagrange_coefficients, Vector},
+    net::agency::Unicast,
+    poly::Polynomial,
+};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -143,7 +147,6 @@ impl<F: Field> ExplodedShare<F> {
     pub fn giveup(self) -> Share<F> {
         self.0
     }
-
 }
 
 impl<F: Field> std::ops::Mul for Share<F> {
@@ -202,8 +205,8 @@ pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, 
     let z = z.0;
     let i = z.x;
 
-    let n  = ids.len();
-    assert!(n >= 2*threshold as usize);
+    let n = ids.len();
+    assert!(n >= 2 * threshold as usize);
     // We need 2t < n, otherwise we cannot reconstruct,
     // however 't' is hidden from before, so we just have to assume it is.
     // Now we need to reduce the polynomial back to t
@@ -211,7 +214,7 @@ pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, 
     // issued subshares
     let subshares = share(z.y, ids, threshold, rng); // share -> subshares
                                                      //
-    // Something about a recombination vector and randomization.
+                                                     // Something about a recombination vector and randomization.
 
     // // randominization
     // let am_i_special = false;
@@ -241,7 +244,11 @@ pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, 
     let coeffs = lagrange_coefficients(ids, F::ZERO);
 
     // inner product
-    let z : F = subshares.into_iter().zip(coeffs).map(|(a,b)| a.y*b).sum();
+    let z: F = subshares
+        .into_iter()
+        .zip(coeffs)
+        .map(|(a, b)| a.y * b)
+        .sum();
 
     Ok(Share { x: i, y: z })
 }
@@ -594,7 +601,9 @@ mod test {
                 // secret-sharing
                 let shares = share(input.into(), &ids, threshold, &mut rng);
                 let shares = network.symmetric_unicast(shares).await.unwrap();
-                let [a, b, ..] = shares[..] else { panic!("Can't multiply with only one share") };
+                let [a, b, ..] = shares[..] else {
+                    panic!("Can't multiply with only one share")
+                };
 
                 dbg!(&a);
                 dbg!(&b);

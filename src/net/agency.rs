@@ -40,9 +40,8 @@ use itertools::Itertools;
 // One could still be for the broadcast/unicast operations to have a `size` function
 // which gives the current network size. However I am not sure if this will be relevant?
 
-
 pub trait Broadcast {
-    type Error : Error;
+    type Error: Error;
 
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
@@ -82,7 +81,7 @@ use digest::Digest;
 // There is also the question if we should overload the existing methods or provide
 // new methods prefixed with 'verified' or something.
 
-trait VerifiedBroadcast<D: Digest>: Broadcast {
+pub trait VerifiedBroadcast<D: Digest>: Broadcast {
     /// Ensure that a received broadcast is the same across all parties.
     async fn symmetric_broadcast<T: AsRef<[u8]>>(
         &mut self,
