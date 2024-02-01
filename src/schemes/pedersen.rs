@@ -6,7 +6,6 @@ use rand::RngCore;
 
 use crate::algebra::poly::Polynomial;
 
-
 pub struct VerifiableShare<F: Field, G: Group> {
     secret: F,
     blindness: F,
@@ -48,7 +47,11 @@ where
         .iter()
         .map(|i| {
             // Sample the shares
-            VerifiableShare{secret: p1.eval(i), blindness: p2.eval(i), commitment: commitments.clone()}
+            VerifiableShare {
+                secret: p1.eval(i),
+                blindness: p2.eval(i),
+                commitment: commitments.clone(),
+            }
         })
         .collect();
 
@@ -64,7 +67,11 @@ where
     F: Field,
     G: Group + std::ops::Mul<F, Output = G>,
 {
-    let VerifiableShare { secret, blindness, commitment } = share;
+    let VerifiableShare {
+        secret,
+        blindness,
+        commitment,
+    } = share;
     // C0^(i^0) * C1^(i^1) * C1^(i^2) + ...
     let mut check = G::identity();
     for (i, &a) in commitment.0.iter().enumerate() {
@@ -82,7 +89,10 @@ pub fn reconstruct<F: Field, G: Group>(shares: &[VerifiableShare<F, G>], ids: &[
     let shares: Vec<_> = shares
         .iter()
         .zip(ids)
-        .map(|(share, id)| super::shamir::Share { x: *id, y: share.secret })
+        .map(|(share, id)| super::shamir::Share {
+            x: *id,
+            y: share.secret,
+        })
         .collect();
 
     super::shamir::reconstruct(&shares)

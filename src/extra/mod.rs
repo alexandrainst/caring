@@ -1,7 +1,6 @@
 use std::error::Error;
 
-use crate::net::{agency::Broadcast};
-
+use crate::net::agency::Broadcast;
 
 pub struct CoinToss<Rng: rand::RngCore> {
     rng: Rng,

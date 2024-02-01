@@ -12,11 +12,11 @@
 //!
 use std::{borrow::Borrow, iter, ops, sync::Arc};
 
+use crate::algebra::poly::Polynomial;
 use crate::{
     algebra::math::Vector,
     schemes::shamir::{self},
 };
-use crate::algebra::poly::Polynomial;
 
 use ff::Field;
 use group::Group;
