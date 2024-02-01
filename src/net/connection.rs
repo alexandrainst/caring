@@ -50,7 +50,7 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
     /// * `writer`: Writer to send messages to
     pub fn new(reader: R, writer: W) -> Self {
         let codec = LengthDelimitedCodec::new();
-        let mut reader = FramedRead::new(reader, codec.clone());
+        let reader = FramedRead::new(reader, codec.clone());
         let mut writer = FramedWrite::new(writer, codec);
 
         let (flush, mut should_flush) = tokio::sync::mpsc::channel(1);

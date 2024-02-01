@@ -13,8 +13,6 @@ pub struct VerifiableShare<F: Field, G: Group> {
     commitment: Polynomial<G>,
 }
 
-pub struct Commitment<G: Send + Sync>(Polynomial<G>);
-
 /// Generators for Pedersen Secret Sharing (and Pedersen Commitments)
 ///
 /// Consists of two group elements (g,h), usally elliptic curve points.

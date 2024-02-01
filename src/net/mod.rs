@@ -31,7 +31,7 @@ impl<
 {
     type Error = ConnectionError;
 
-    fn send<T: serde::Serialize>(&self, msg: &T) -> impl Future<Output = Result<(), Self::Error>> {
+    fn send<T: serde::Serialize>(&self, _msg: &T) -> impl Future<Output = Result<(), Self::Error>> {
         async { todo!() }
     }
 
@@ -61,7 +61,7 @@ impl<
     type SubChannel = Connection<R, W>;
     type Idx = usize;
 
-    fn tune_mut(&mut self, idx: Self::Idx) -> &mut Self::SubChannel {
+    fn tune_mut(&mut self, _idx: Self::Idx) -> &mut Self::SubChannel {
         todo!()
     }
 

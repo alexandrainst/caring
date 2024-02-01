@@ -12,8 +12,8 @@
 use ff::{Field, PrimeField};
 
 use derive_more::{Add, AddAssign, Sub, SubAssign};
-use rand::{thread_rng, Rng, RngCore, SeedableRng};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use rand::{thread_rng, RngCore, SeedableRng};
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{extra::CoinToss, net::agency::Broadcast};
 
@@ -138,7 +138,7 @@ pub async fn mac_check<Rng: SeedableRng + RngCore, F: PrimeField + Serialize + D
     // This should all be done way nicer.
     let mut cointoss = CoinToss::new(thread_rng());
     let seed = Rng::Seed::default(); // I hate this
-    let coin: [u8; 32] = cointoss.toss(cx).await.unwrap();
+    let _coin: [u8; 32] = cointoss.toss(cx).await.unwrap();
     let mut rng = Rng::from_seed(seed);
 
     // This could probably be a lot nicer if opened and closed values were one list.
