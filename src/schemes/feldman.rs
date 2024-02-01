@@ -14,9 +14,9 @@ use std::{borrow::Borrow, iter, ops, sync::Arc};
 
 use crate::{
     algebra::math::Vector,
-    poly::Polynomial,
     schemes::shamir::{self},
 };
+use crate::algebra::poly::Polynomial;
 
 use ff::Field;
 use group::Group;
@@ -230,7 +230,7 @@ pub fn share_many<F: Field, G: Group>(
 where
     F: ops::Mul<G, Output = G>,
     Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>,
-    for<'a> &'a crate::poly::Polynomial<F>: std::ops::Mul<G, Output = Polynomial<G>>,
+    for<'a> &'a crate::algebra::poly::Polynomial<F>: std::ops::Mul<G, Output = Polynomial<G>>,
 {
     let n = ids.len();
     assert!(

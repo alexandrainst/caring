@@ -4,7 +4,8 @@ use ff::Field;
 use group::Group;
 use rand::RngCore;
 
-use crate::poly::Polynomial;
+use crate::algebra::poly::Polynomial;
+
 
 pub struct VerifiableShare<F: Field, G: Group> {
     secret: F,

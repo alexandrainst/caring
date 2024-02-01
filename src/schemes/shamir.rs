@@ -9,8 +9,9 @@ use ff::{derive::rand_core::RngCore, Field};
 use crate::{
     algebra::math::{lagrange_coefficients, Vector},
     net::agency::Unicast,
-    poly::Polynomial,
 };
+
+use crate::algebra::poly::Polynomial;
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.

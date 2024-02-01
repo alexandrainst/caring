@@ -5,7 +5,6 @@ mod algebra;
 mod extra;
 pub mod net;
 pub mod ot;
-pub mod poly;
 pub mod schemes;
 mod testing;
 pub mod theater;
