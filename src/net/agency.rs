@@ -22,7 +22,7 @@
 //! from subprotocols in a very elegant manner IMO.
 //!
 
-use std::error::Error;
+use std::{error::Error, marker::PhantomData};
 
 use futures::Future;
 use itertools::Itertools;
@@ -81,22 +81,38 @@ use digest::Digest;
 // There is also the question if we should overload the existing methods or provide
 // new methods prefixed with 'verified' or something.
 
-pub trait VerifiedBroadcast<D: Digest>: Broadcast {
+pub struct VerifiedBroadcast<B: Broadcast, D: Digest>(B, PhantomData<D>);
+
+impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
+
+    pub fn inner(self) -> B {
+        self.0
+    }
+
+    pub fn new(broadcast: B) -> Self {
+        Self(broadcast, PhantomData)
+    }
+// }
+
+// impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
+//     type Error = BroadcastVerificationError<B::Error>;
+
     /// Ensure that a received broadcast is the same across all parties.
-    async fn symmetric_broadcast<T: AsRef<[u8]>>(
+    pub async fn symmetric_broadcast<T: AsRef<[u8]>>(
         &mut self,
         msg: T,
-    ) -> Result<Vec<T>, BroadcastVerificationError<Self::Error>>
+    ) -> Result<Vec<T>, BroadcastVerificationError<B::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
         // TODO: Testing
+        let inner = &mut self.0;
 
         // 1. Send hash of the message
         let mut digest = D::new();
         digest.update(&msg);
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let msg_hashes = Broadcast::symmetric_broadcast(self, hash)
+        let msg_hashes = inner.symmetric_broadcast(hash)
             .await
             .map_err(BroadcastVerificationError::Other)?;
 
@@ -106,7 +122,7 @@ pub trait VerifiedBroadcast<D: Digest>: Broadcast {
             digest.update(hash);
         }
         let sum: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let sum_all: Vec<Box<[u8]>> = Broadcast::symmetric_broadcast(self, sum)
+        let sum_all: Vec<Box<[u8]>> = inner.symmetric_broadcast(sum)
             .await
             .map_err(BroadcastVerificationError::Other)?;
 
@@ -117,7 +133,7 @@ pub trait VerifiedBroadcast<D: Digest>: Broadcast {
         }
 
         // 2. Send the message and check that the hashes match
-        let messages = Broadcast::symmetric_broadcast(self, msg)
+        let messages = inner.symmetric_broadcast(msg)
             .await
             .map_err(BroadcastVerificationError::Other)?;
 
@@ -134,14 +150,19 @@ pub trait VerifiedBroadcast<D: Digest>: Broadcast {
         Ok(messages)
     }
 
-    fn broadcast(&mut self, _msg: &impl serde::Serialize) {
+
+    pub fn broadcast(&mut self, _msg: &impl serde::Serialize) {
         todo!("Need to copy/translate/move implementation from symmetric")
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
+    pub async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
         todo!("Need to apply verification layer")
     }
 }
+
+
+
+
 
 #[derive(thiserror::Error, Debug)]
 pub enum BroadcastVerificationError<E> {

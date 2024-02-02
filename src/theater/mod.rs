@@ -42,9 +42,7 @@ use ff::Field;
 use rand::thread_rng;
 
 use crate::{
-    net::network::InMemoryNetwork, protocols::beaver::{beaver_multiply, BeaverTriple}, schemes::{
-        Shared,
-    }
+    net::network::InMemoryNetwork, protocols::beaver::{beaver_multiply, BeaverTriple}, schemes::Shared
 };
 
 // Maybe we just need a single Mutex to this struct instead?
