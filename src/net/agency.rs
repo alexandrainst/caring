@@ -188,7 +188,7 @@ mod test {
     async fn verified_broadcast() {
         let (n1, n2, n3) = InMemoryNetwork::in_memory(3).drain(..3).tuples().next().unwrap();
 
-        tokio::spawn(async {
+        let t1 = tokio::spawn(async {
             let mut vb = VerifiedBroadcast::<_, Sha256>::new(n1);
             let resp = vb.symmetric_broadcast(String::from("Hi from Alice")).await.unwrap();
             assert_eq!(resp[0], "Hi from Alice");
@@ -196,14 +196,14 @@ mod test {
             assert_eq!(resp[2], "Hi from Charlie");
 
         });
-        tokio::spawn(async {
+        let t2 = tokio::spawn(async {
             let mut vb = VerifiedBroadcast::<_, Sha256>::new(n2);
             let resp = vb.symmetric_broadcast(String::from("Hi from Bob")).await.unwrap();
             assert_eq!(resp[0], "Hi from Alice");
             assert_eq!(resp[1], "Hi from Bob");
             assert_eq!(resp[2], "Hi from Charlie");
         });
-        tokio::spawn(async {
+        let t3 = tokio::spawn(async {
             let mut vb = VerifiedBroadcast::<_, Sha256>::new(n3);
             let resp = vb.symmetric_broadcast(String::from("Hi from Charlie")).await.unwrap();
             assert_eq!(resp[0], "Hi from Alice");
@@ -211,5 +211,9 @@ mod test {
             assert_eq!(resp[2], "Hi from Charlie");
         });
 
+        let (r1, r2, r3) = futures::join!(t1, t2, t3);
+        r1.unwrap();
+        r2.unwrap();
+        r3.unwrap();
     }
 }
