@@ -25,7 +25,6 @@
 //! modelling interaction. However when possible, not having interaction
 //! is preferable, but hard.
 
-pub mod beaver;
 pub mod feldman;
 pub mod pedersen;
 pub mod shamir;
@@ -71,8 +70,8 @@ pub trait Shared<F>:
 
 #[derive(Clone)]
 pub struct ShamirParams<F> {
-    threshold: u64,
-    ids: Vec<F>,
+    pub threshold: u64,
+    pub ids: Vec<F>,
 }
 
 // TODO: Collapse Field with Ser-De since we always require that combo?

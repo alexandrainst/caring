@@ -1,4 +1,3 @@
-// TODO: Move to a 'common' protocol lib since this isn't a secret sharing scheme?
 use std::marker::PhantomData;
 
 use ff::Field;
@@ -90,12 +89,11 @@ pub async fn beaver_multiply<
 
 #[cfg(test)]
 mod test {
-
+    use super::*;
     use crate::{
         algebra::element::Element32,
         net::network::InMemoryNetwork,
         schemes::{
-            beaver::{beaver_multiply, BeaverTriple},
             shamir::{self},
             ShamirParams,
         },

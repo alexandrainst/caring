@@ -9,6 +9,7 @@ use crate::algebra::poly::Polynomial;
 pub struct VerifiableShare<F: Field, G: Group> {
     secret: F,
     blindness: F,
+    // PERF: Wrap in a Arc or something like it?
     commitment: Polynomial<G>,
 }
 

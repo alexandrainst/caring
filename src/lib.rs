@@ -8,3 +8,4 @@ pub mod ot;
 pub mod schemes;
 mod testing;
 pub mod theater;
+mod protocols;
