@@ -77,6 +77,7 @@ pub trait Unicast {
 }
 
 use digest::Digest;
+use tracing::{event, Level};
 // INFO: Reconsider if Broadcast should be a supertrait or just a type parameter
 // There is also the question if we should overload the existing methods or provide
 // new methods prefixed with 'verified' or something.
@@ -98,6 +99,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
 //     type Error = BroadcastVerificationError<B::Error>;
 
     /// Ensure that a received broadcast is the same across all parties.
+    #[tracing::instrument(skip_all)]
     pub async fn symmetric_broadcast<T: AsRef<[u8]>>(
         &mut self,
         msg: T,
@@ -109,6 +111,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
         let inner = &mut self.0;
 
         // 1. Send hash of the message
+        event!(Level::INFO, "Sending commit by hashed message");
         let mut digest = D::new();
         digest.update(&msg);
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
@@ -117,6 +120,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
             .map_err(BroadcastVerificationError::Other)?;
 
         // 3. Hash the hashes together and broadcast that
+        event!(Level::INFO, "Broadcast sum of all commits");
         let mut digest = D::new();
         for hash in msg_hashes.iter() {
             digest.update(hash);
@@ -128,15 +132,18 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
 
         let check = sum_all.iter().all_equal();
         if !check {
+            event!(Level::ERROR, "Failed verifying commit sum");
             // If some of the hashes are different, someone has gotten different results.
             return Err(BroadcastVerificationError::VerificationFailure);
         }
 
         // 2. Send the message and check that the hashes match
+        event!(Level::INFO, "Sending original message");
         let messages = inner.symmetric_broadcast(msg)
             .await
             .map_err(BroadcastVerificationError::Other)?;
 
+        event!(Level::INFO, "Verifiying commitments");
         for (msg, hash) in messages.iter().zip(msg_hashes) {
             // PERF: Maybe just reset the digest?
             let mut digest = D::new();
@@ -151,18 +158,16 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
     }
 
 
+    #[tracing::instrument(skip_all)]
     pub fn broadcast(&mut self, _msg: &impl serde::Serialize) {
         todo!("Need to copy/translate/move implementation from symmetric")
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Vec<T> {
         todo!("Need to apply verification layer")
     }
 }
-
-
-
-
 
 #[derive(thiserror::Error, Debug)]
 pub enum BroadcastVerificationError<E> {
@@ -170,4 +175,41 @@ pub enum BroadcastVerificationError<E> {
     VerificationFailure,
     #[error(transparent)]
     Other(E),
+}
+
+mod test {
+    use super::*;
+    use itertools::Itertools;
+
+    use crate::net::{agency::VerifiedBroadcast, network::InMemoryNetwork};
+    use sha2::Sha256;
+
+    #[tokio::test]
+    async fn verified_broadcast() {
+        let (n1, n2, n3) = InMemoryNetwork::in_memory(3).drain(..3).tuples().next().unwrap();
+
+        tokio::spawn(async {
+            let mut vb = VerifiedBroadcast::<_, Sha256>::new(n1);
+            let resp = vb.symmetric_broadcast(String::from("Hi from Alice")).await.unwrap();
+            assert_eq!(resp[0], "Hi from Alice");
+            assert_eq!(resp[1], "Hi from Bob");
+            assert_eq!(resp[2], "Hi from Charlie");
+
+        });
+        tokio::spawn(async {
+            let mut vb = VerifiedBroadcast::<_, Sha256>::new(n2);
+            let resp = vb.symmetric_broadcast(String::from("Hi from Bob")).await.unwrap();
+            assert_eq!(resp[0], "Hi from Alice");
+            assert_eq!(resp[1], "Hi from Bob");
+            assert_eq!(resp[2], "Hi from Charlie");
+        });
+        tokio::spawn(async {
+            let mut vb = VerifiedBroadcast::<_, Sha256>::new(n3);
+            let resp = vb.symmetric_broadcast(String::from("Hi from Charlie")).await.unwrap();
+            assert_eq!(resp[0], "Hi from Alice");
+            assert_eq!(resp[1], "Hi from Bob");
+            assert_eq!(resp[2], "Hi from Charlie");
+        });
+
+    }
 }

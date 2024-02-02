@@ -210,10 +210,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     type Error = NetworkError;
 
+    #[tracing::instrument(skip_all)]
     fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
         self.unicast(msgs)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, Self::Error>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
@@ -221,6 +223,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
         self.symmetric_unicast(msgs).await
     }
 
+    #[tracing::instrument(skip_all)]
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
         self.receive_all().await
     }
@@ -229,10 +232,13 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
     type Error = NetworkError;
 
+    #[tracing::instrument(skip_all)]
     fn broadcast(&mut self, msg: &impl serde::Serialize) {
         self.broadcast(msg)
     }
 
+
+    #[tracing::instrument(skip_all)]
     async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::Error>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
@@ -240,6 +246,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
         self.symmetric_broadcast(msg).await
     }
 
+    #[tracing::instrument(skip_all)]
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
         self.receive_all().await
     }

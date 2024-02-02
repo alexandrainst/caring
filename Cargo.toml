@@ -25,6 +25,7 @@ overload = "0.1.1"
 rand = "0.8.5"
 rayon = "1.8.0"
 serde = { version = "1.0.188", features = ["rc"] }
+sha2 = "0.10.8"
 thiserror = "1.0.50"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-rustls = "0.24.1"
