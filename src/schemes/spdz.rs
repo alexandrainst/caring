@@ -1,4 +1,4 @@
-//! (Some version of) SPDZ
+//! (Some versirn of) SPDZ
 //!
 //! The idea is to implement the bare-bones version of spdz, probably a more recent one.
 //! We will probably need some homomorphic encryption or oblivious transfer to enable this.

@@ -4,14 +4,19 @@ use std::{ffi::{CStr, c_char}, panic, sync::Mutex};
 static ENGINE : Mutex<Option<AdderEngine>> = Mutex::new(None);
 
 use wecare::*;
-/// # Safety
-/// Strings must null terminated and the array have length `len`
+
+/// Setup a MPC engine with address `my_addr` connected to the parties with addresses in the
+/// array `others`.
+///
+/// This returns an integer returning zero on no errors otherwise.
 ///
 /// # Error Codes
 /// 1. my_addr malformed
 /// 2. others malformed
 /// 3. something went wrong in setup_engine, bad address format?
 ///
+/// # Safety
+/// Strings must null terminated and the array have length `len`
 #[no_mangle]
 pub unsafe extern "C" fn care_setup(my_addr: *const c_char, others: *const *const c_char, len: usize) -> i32 {
     let my_addr = unsafe { CStr::from_ptr(my_addr) };

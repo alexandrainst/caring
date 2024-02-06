@@ -201,7 +201,6 @@ pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, 
     ids: &[F],
     rng: &mut impl RngCore,
 ) -> Result<Share<F>, U::Error> {
-    // FIX: Doesn't work
     // TODO: Maybe use the `Shared` functionality?
     let z = z.0;
     let i = z.x;
@@ -217,27 +216,7 @@ pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, 
                                                      //
                                                      // Something about a recombination vector and randomization.
 
-    // // randominization
-    // let am_i_special = false;
-    // let my_id = 0;
-
-    // let poly_share = if am_i_special {
-    //     // Should one or all parties do this?
-    //     let mut zero_poly : Polynomial<F> = Polynomial::random(2*threshold as usize - 1, rng);
-    //     zero_poly.0[0] = F::ZERO;
-    //     let mut shares = share_many(&zero_poly.0, ids, threshold, rng);
-    //     let mine = shares.remove(my_id);
-    //     unicast.unicast(&shares);
-    //     mine
-    // } else {
-    //     todo!()
-    // };
-    // let poly = poly_share.ys.into_iter().collect::<Polynomial<F>>();
-    // // held subshares
-    // for subshare in subshares.iter_mut() {
-    //     // x can be subbed if we know our id
-    //     subshare.y += poly.eval(&subshare.x);
-    // }
+    // TODO: Randomization
 
     let subshares = unicast.symmetric_unicast::<_>(subshares).await?;
 

@@ -217,7 +217,7 @@ mod test {
     #[tokio::test]
     async fn in_memory() {
         let (conn1, conn2) = DuplexConnection::in_memory();
-        let h1 = tokio::spawn(async move {
+        let h1 = async move {
             let mut conn = conn1;
             conn.send(&"Hello");
             println!("[1] Message sent");
@@ -226,8 +226,8 @@ mod test {
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[1] Message received");
             assert_eq!(msg, "Greetings friend".into());
-        });
-        let h2 = tokio::spawn(async move {
+        };
+        let h2 = async move {
             let mut conn = conn2;
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
@@ -237,17 +237,16 @@ mod test {
             assert_eq!(msg, "Buddy".into());
             conn.send(&"Greetings friend");
             println!("[2] Message sent");
-        });
+        };
 
-        h2.await.unwrap();
-        h1.await.unwrap();
+        futures::join!(h1, h2);
     }
 
     #[tokio::test]
     async fn tcp() {
         let addr = "127.0.0.1:4321".parse::<SocketAddrV4>().unwrap();
         let listener = TcpListener::bind(addr).await.unwrap();
-        let h1 = tokio::spawn(async move {
+        let h1 = async move {
             let stream = TcpStream::connect(addr).await.unwrap();
             let mut conn = Connection::from_tcp(stream);
             conn.send(&"Hello");
@@ -257,8 +256,8 @@ mod test {
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[1] Message received");
             assert_eq!(msg, "Greetings friend".into());
-        });
-        let h2 = tokio::spawn(async move {
+        };
+        let h2 = async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut conn = Connection::from_tcp(stream);
             let msg: Box<str> = conn.recv().await.unwrap();
@@ -269,9 +268,8 @@ mod test {
             assert_eq!(msg, "Buddy".into());
             conn.send(&"Greetings friend");
             println!("[2] Message sent");
-        });
+        };
 
-        h2.await.unwrap();
-        h1.await.unwrap();
+        futures::join!(h1, h2);
     }
 }
