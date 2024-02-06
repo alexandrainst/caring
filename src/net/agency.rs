@@ -43,9 +43,17 @@ use itertools::Itertools;
 pub trait Broadcast {
     type Error: Error;
 
+    /// Broadcast a message to all other parties.
+    ///
+    /// Asymmetric, non-waiting
+    ///
+    /// * `msg`: Message to send
     fn broadcast(&mut self, msg: &impl serde::Serialize);
 
-    // TODO: Reconsider this
+    /// Broadcast a message to all parties and await their messages
+    /// Messages are ordered by their index.
+    ///
+    /// * `msg`: message to send and receive
     fn symmetric_broadcast<T>(
         &mut self,
         msg: T,
@@ -53,6 +61,12 @@ pub trait Broadcast {
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
+
+    /// Receive a message for each party.
+    ///
+    /// Asymmetric, waiting
+    ///
+    /// Returns: A list sorted by the connections (skipping yourself)
     fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>;
@@ -61,9 +75,23 @@ pub trait Broadcast {
 pub trait Unicast {
     type Error;
 
+
+    /// Unicast messages to each party
+    ///
+    /// Messages are supposed to be in order, meaning message `i`
+    /// will be send to party `i`, skipping your own index.
+    ///
+    /// Asymmetric, non-waiting
+    ///
+    /// * `msgs`: Messages to send
     fn unicast(&mut self, msgs: &[impl serde::Serialize]);
 
-    // TODO: Reconsider this
+
+    /// Unicast a message to each party and await their messages
+    /// Messages are supposed to be in order, meaning message `i`
+    /// will be send to party `i`.
+    ///
+    /// * `msg`: message to send and receive
     fn symmetric_unicast<T>(
         &mut self,
         msgs: Vec<T>,
@@ -71,6 +99,12 @@ pub trait Unicast {
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
+
+    /// Receive a message for each party.
+    ///
+    /// Asymmetric, waiting
+    ///
+    /// Returns: A list sorted by the connections (skipping yourself)
     fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>;

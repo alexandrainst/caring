@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::{error::Error, ops::{Index, IndexMut}};
 
 use futures::Future;
 
@@ -15,8 +15,11 @@ pub mod network;
 // TODO: Serde trait bounds on `T`
 // TODO: Properly use this trait for other things (Connection/Agency etc.)
 pub trait Channel {
-    type Error;
+    type Error : Error;
 
+    /// Send a message over the channel
+    ///
+    /// * `msg`: message to serialize and send
     fn send<T: serde::Serialize>(&self, msg: &T) -> impl Future<Output = Result<(), Self::Error>>;
 
     fn recv<T: serde::de::DeserializeOwned>(
@@ -42,27 +45,36 @@ impl<
     }
 }
 
-pub trait ChannelStation: Broadcast + Unicast {
+/// Tune to a specific channel
+pub trait Tuneable {
     type Error;
     type SubChannel: Channel;
     type Idx;
 
+    fn id(&self) -> Self::Idx;
+
     fn tune_mut(&mut self, idx: Self::Idx) -> &mut Self::SubChannel;
 
     fn tune(&self, idx: Self::Idx) -> &Self::SubChannel;
+
 }
+
 
 impl<
         R: tokio::io::AsyncRead + std::marker::Unpin,
         W: tokio::io::AsyncWrite + std::marker::Unpin,
-    > ChannelStation for Network<R, W>
+    > Tuneable for Network<R, W>
 {
     type Error = ConnectionError;
     type SubChannel = Connection<R, W>;
     type Idx = usize;
 
-    fn tune_mut(&mut self, _idx: Self::Idx) -> &mut Self::SubChannel {
-        todo!()
+    fn id(&self) -> Self::Idx {
+        self.index
+    }
+
+    fn tune_mut(&mut self, idx: Self::Idx) -> &mut Self::SubChannel {
+        self.index_mut(idx)
     }
 
     fn tune(&self, idx: Self::Idx) -> &Self::SubChannel {

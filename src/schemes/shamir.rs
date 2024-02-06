@@ -7,8 +7,7 @@ use ff::{derive::rand_core::RngCore, Field};
 // TODO: Important! Switch RngCore to CryptoRngCore
 
 use crate::{
-    algebra::math::{lagrange_coefficients, Vector},
-    net::agency::Unicast,
+    algebra::math::{lagrange_coefficients, Vector}, net::{agency::Unicast, Channel, Tuneable}, schemes::ShamirParams
 };
 
 use crate::algebra::poly::Polynomial;
@@ -115,11 +114,12 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     }
 }
 
-/// A share with a degree larger than the one.
+/// A share with an inflated degree.
 ///
 /// This share have been constructed by multiplying two shares togehter,
 /// each corresponding to a polynomial `p1`, `p2`, producing a share corresponding
 /// to a polynomial `p3` with the degree `|p3| = |p1| + |p2|`.
+/// Most regularly a share with degree double the previous one.
 ///
 /// You can recover the internal share and act if nothing happened.
 /// However, this will encur the penalty of having a larger degree.
@@ -127,21 +127,21 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
 /// ```ignore
 /// # use caring::schemes::shamir::Share;
 /// # use caring::element::Element32;
-/// # use caring::schemes::shamir::ExplodedShare;
+/// # use caring::schemes::shamir::inflatedShare;
 /// # let a = Share{x: Element32::from(2u32), y: Element32::from(2u32)};
 /// # let b = a.clone();
 /// let a : Share<_> = a; // degree t
 /// let b : Share<_> = b; // degree t
-/// let c : ExplodedShare<_> = a * b; // degree 2t
-/// let c : Share<_> = c.recover(); // degree 2t
+/// let c : InflatedShare<_> = a * b; // degree 2t
+/// let c : Share<_> = c.give_up(); // degree 2t
 /// ```
 ///
 #[repr(transparent)]
 #[derive(Debug, Clone)]
-pub struct ExplodedShare<F: Field>(Share<F>);
+pub struct InflatedShare<F: Field>(Share<F>);
 
-impl<F: Field> ExplodedShare<F> {
-    /// Recover the internal share from an exploded share.
+impl<F: Field> InflatedShare<F> {
+    /// Recover the internal share from an inflated share.
     ///
     /// This accepts the higher degree WITHOUT a reduction,
     /// thus the new share have a higher degree than the initial two.
@@ -151,13 +151,13 @@ impl<F: Field> ExplodedShare<F> {
 }
 
 impl<F: Field> std::ops::Mul for Share<F> {
-    type Output = ExplodedShare<F>;
+    type Output = InflatedShare<F>;
 
-    /// Multiply a share with itself, producing an "exploded" share.
+    /// Multiply a share with itself, producing an "inflated" share.
     ///
     /// * `rhs`: share to multiply with
     ///
-    /// The `ExplodedShare` corresponds to a polynomial with double the degree
+    /// The `inflatedShare` corresponds to a polynomial with double the degree
     /// (if the two inital shares have the same degree)
     ///
     /// This "works" if the amount of shares is greater than the new degree,
@@ -168,7 +168,7 @@ impl<F: Field> std::ops::Mul for Share<F> {
     ///
     fn mul(self, rhs: Self) -> Self::Output {
         assert_eq!(self.x, rhs.x);
-        ExplodedShare(Self {
+        InflatedShare(Self {
             x: self.x,
             y: self.y * self.y,
         })
@@ -176,62 +176,71 @@ impl<F: Field> std::ops::Mul for Share<F> {
 }
 
 /// Reduction of the associated polynomial on share.
-///
-/// * `z`: ExplodedShare to recover
-/// * `unicast`: Unicasting functionality
-/// * `threshold`: the original threshold
-/// * `ids`: Party IDs to share to
+/// * `ctx` Shamir parameters
+/// * `z`: inflatedShare to recover
+/// * `net`: network functionality
 /// * `rng`: Random number generator
+///
 /// ```ignore
 /// # use caring::schemes::shamir::Share;
 /// # use caring::element::Element32;
-/// # use caring::schemes::shamir::ExplodedShare;
+/// # use caring::schemes::shamir::inflatedShare;
 /// # let a = Share{x: Element32::from(2u32), y: Element32::from(2u32)};
 /// # let b = a.clone();
 /// let a : Share<_> = a; // degree t
 /// let b : Share<_> = b; // degree t
-/// let c : ExplodedShare<_> = a * b; // degree 2t
-/// let c : Share<_> = reduction(c, network, threshold, ids, rng);
+/// let c : InflatedShare<_> = a * b; // degree 2t
+/// let c : Share<_> = deflate(ctx, c, net, rng);
 /// //  ^-- degree t
 /// ```
-pub async fn reducto<F: Field + serde::Serialize + serde::de::DeserializeOwned, U: Unicast>(
-    z: ExplodedShare<F>,
-    unicast: &mut U,
-    threshold: u64,
-    ids: &[F],
+///
+#[tracing::instrument(skip_all)]
+pub async fn deflate<
+    F: Field + serde::Serialize + serde::de::DeserializeOwned,
+    U: Unicast,
+>(
+    ctx: ShamirParams<F>,
+    z: InflatedShare<F>,
+    net: &mut U,
     rng: &mut impl RngCore,
-) -> Result<Share<F>, U::Error> {
-    // TODO: Maybe use the `Shared` functionality?
+) -> Result<Share<F>, <U as Unicast>::Error> {
+    tracing::info!(
+        threshold = ctx.threshold,
+        party_size = ctx.ids.len(),
+    );
     let z = z.0;
-    let i = z.x;
+    let x = z.x;
 
-    let n = ids.len();
-    assert!(n >= 2 * threshold as usize);
+    let n = ctx.ids.len();
+    assert!(n >= 2 * ctx.threshold as usize);
     // We need 2t < n, otherwise we cannot reconstruct,
     // however 't' is hidden from before, so we just have to assume it is.
     // Now we need to reduce the polynomial back to t
 
+    let random_poly = share(F::ZERO, &ctx.ids, ctx.threshold * 2, rng);
+    let randomness = net.symmetric_unicast(random_poly).await?;
+    let mut y = z.y;
+    for r in randomness {
+        y += r.y;
+    }
+
     // issued subshares
-    let subshares = share(z.y, ids, threshold, rng); // share -> subshares
-                                                     //
-                                                     // Something about a recombination vector and randomization.
-
-    // TODO: Randomization
-
-    let subshares = unicast.symmetric_unicast::<_>(subshares).await?;
+    let subshares = share(y, &ctx.ids, ctx.threshold, rng); // share -> subshares
+    let subshares = net.symmetric_unicast::<_>(subshares).await?;
 
     // reduction (cache?)
-    let coeffs = lagrange_coefficients(ids, F::ZERO);
+    let coeffs = lagrange_coefficients(&ctx.ids, F::ZERO);
 
     // inner product
-    let z: F = subshares
+    let y: F = subshares
         .into_iter()
         .zip(coeffs)
         .map(|(a, b)| a.y * b)
         .sum();
 
-    Ok(Share { x: i, y: z })
+    Ok(Share { x, y })
 }
+
 
 /// Share/shard a secret value `v` into `n` shares
 /// where `n` is the number of the `ids`
@@ -593,7 +602,8 @@ mod test {
                 dbg!(&c);
                 // HACK: It doesn't work yet.
                 //
-                let c = reducto(c, &mut network, threshold, &ids, &mut rng)
+                let ctx = ShamirParams { threshold, ids };
+                let c = deflate(ctx, c, &mut network, &mut rng)
                     .await
                     .expect("reducto failed");
                 //let c = c.giveup();
