@@ -7,7 +7,7 @@ use ff::{derive::rand_core::RngCore, Field};
 // TODO: Important! Switch RngCore to CryptoRngCore
 
 use crate::{
-    algebra::math::{lagrange_coefficients, Vector}, net::{agency::Unicast, Channel, Tuneable}, schemes::ShamirParams
+    algebra::math::{lagrange_coefficients, Vector}, net::agency::Unicast, schemes::ShamirParams
 };
 
 use crate::algebra::poly::Polynomial;
@@ -325,12 +325,13 @@ impl<F: Field> std::ops::Add for VecShare<F> {
     }
 }
 
-impl<F: Field> std::ops::Add for &VecShare<F> {
+
+impl<F: Field> std::ops::Add<&Self> for VecShare<F> {
     type Output = VecShare<F>;
 
-    fn add(self, rhs: Self) -> Self::Output {
+    fn add(self, rhs: &Self) -> Self::Output {
         debug_assert_eq!(self.x, rhs.x);
-        let a = &self.ys;
+        let a = self.ys;
         let b = &rhs.ys;
         let ys: Vector<_> = a + b;
         VecShare { x: self.x, ys }
@@ -529,7 +530,7 @@ mod test {
         };
 
         // MPC
-        let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(a, b)| a + b).collect();
+        let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(a, b)| a.clone() + b).collect();
         let v = reconstruct_many(&shares);
         let v: Vec<u32> = v.into_iter().map(|x| x.into()).collect();
         assert_eq!(v, a.iter().zip(b).map(|(a, b)| a + b).collect::<Vec<_>>());

@@ -156,30 +156,23 @@ where
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct VecVerifiableShare<F: Field, G: Group> {
     shares: shamir::VecShare<F>,
-    polys: Arc<[Polynomial<G>]>,
+    polys: Box<[Polynomial<G>]>,
 }
 
-impl<F: Field, G: Group> std::ops::Add for VecVerifiableShare<F, G> {
+
+impl<F: Field, G: Group> std::ops::Add<&Self> for VecVerifiableShare<F, G> {
     type Output = VecVerifiableShare<F, G>;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        &self + &rhs
-    }
-}
-
-impl<F: Field, G: Group> std::ops::Add for &VecVerifiableShare<F, G> {
-    type Output = VecVerifiableShare<F, G>;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        let shares = &self.shares + &rhs.shares;
-        let polys: Arc<[Polynomial<_>]> = self
-            .polys
-            .iter()
-            .cloned()
+    fn add(mut self, rhs: &Self) -> Self::Output {
+        self.shares += &rhs.shares;
+        self.polys
+            .iter_mut()
             .zip(rhs.polys.iter())
-            .map(|(a, b)| Polynomial(a.0 + &b.0))
-            .collect();
-        VecVerifiableShare { shares, polys }
+            .for_each(|(a, b)| {
+                let a = &mut a.0;
+                *a += &b.0;
+            });
+        self
     }
 }
 
@@ -195,7 +188,7 @@ impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F, G> {
                 a.0 += &b.0;
             }
         }
-        let polys: Arc<[_]> = polys.into();
+        let polys: Box<[_]> = polys.into();
         VecVerifiableShare { shares, polys }
     }
 }
@@ -250,7 +243,7 @@ where
             p
         })
         .collect();
-    let macs: Arc<[Polynomial<G>]> = polys.iter().map(|p| p * G::generator()).collect();
+    let macs: Box<[Polynomial<G>]> = polys.iter().map(|p| p * G::generator()).collect();
 
     let mut vshares: Vec<_> = Vec::with_capacity(n);
     for x in ids {
@@ -388,7 +381,7 @@ mod test {
             assert!(share.verify());
         }
         let shares: Vec<VecVerifiableShare<_, _>> =
-            vs1.into_iter().zip(vs2).map(|(s1, s2)| &s1 + &s2).collect();
+            vs1.into_iter().zip(vs2).map(|(s1, s2)| s1 + &s2).collect();
 
         for share in &shares {
             assert!(share.verify());

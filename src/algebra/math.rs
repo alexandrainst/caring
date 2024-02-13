@@ -9,6 +9,10 @@
 //! values.
 //!
 
+// TODO:
+// Reconsider most of this, as this is just a more primitive manual implementation of something,
+// like `ndarray`.
+
 use ff::Field;
 use rayon::prelude::*;
 
@@ -113,29 +117,31 @@ impl<T: Send + Sync> AsMut<[T]> for Vector<T> {
     }
 }
 
-impl<A: Send + Sync + Copy> std::ops::Add for &Vector<A>
-where
-    A: std::ops::Add<Output = A>,
-{
-    type Output = Vector<A>;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        let internal = if cfg!(feature = "rayon") {
-            self.0
-                .par_iter()
-                .zip(rhs.0.par_iter())
-                .map(|(&a, &b)| a + b)
-                .collect()
-        } else {
-            self.0
-                .iter()
-                .zip(rhs.0.iter())
-                .map(|(&a, &b)| a + b)
-                .collect()
-        };
-        Vector(internal)
-    }
-}
+// // Inefficient.
+// impl<A: Send + Sync + Copy> std::ops::Add for &Vector<A>
+// where
+//     A: std::ops::Add<Output = A>,
+// {
+//     type Output = Vector<A>;
+
+//     fn add(self, rhs: Self) -> Self::Output {
+//         let internal = if cfg!(feature = "rayon") {
+//             self.0
+//                 .par_iter()
+//                 .zip(rhs.0.par_iter())
+//                 .map(|(&a, &b)| a + b)
+//                 .collect()
+//         } else {
+//             self.0
+//                 .iter()
+//                 .zip(rhs.0.iter())
+//                 .map(|(&a, &b)| a + b)
+//                 .collect()
+//         };
+//         Vector(internal)
+//     }
+// }
 
 impl<A: Send + Sync> std::ops::AddAssign<&Vector<A>> for Vector<A>
 where
@@ -189,29 +195,30 @@ where
     }
 }
 
-impl<A: Send + Sync, B: Send + Sync> std::ops::Sub for &Vector<A>
-where
-    for<'a> &'a A: std::ops::Sub<Output = B>,
-{
-    type Output = Vector<B>;
+// Inefficient
+// impl<A: Send + Sync, B: Send + Sync> std::ops::Sub for &Vector<A>
+// where
+//     for<'a> &'a A: std::ops::Sub<Output = B>,
+// {
+//     type Output = Vector<B>;
 
-    fn sub(self, rhs: Self) -> Self::Output {
-        let internal = if cfg!(feature = "rayon") {
-            self.0
-                .par_iter()
-                .zip(rhs.0.par_iter())
-                .map(|(a, b)| a - b)
-                .collect()
-        } else {
-            self.0
-                .iter()
-                .zip(rhs.0.iter())
-                .map(|(a, b)| a - b)
-                .collect()
-        };
-        Vector(internal)
-    }
-}
+//     fn sub(self, rhs: Self) -> Self::Output {
+//         let internal = if cfg!(feature = "rayon") {
+//             self.0
+//                 .par_iter()
+//                 .zip(rhs.0.par_iter())
+//                 .map(|(a, b)| a - b)
+//                 .collect()
+//         } else {
+//             self.0
+//                 .iter()
+//                 .zip(rhs.0.iter())
+//                 .map(|(a, b)| a - b)
+//                 .collect()
+//         };
+//         Vector(internal)
+//     }
+// }
 
 impl<A: Send + Sync> std::ops::SubAssign<&Vector<A>> for Vector<A>
 where
