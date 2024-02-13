@@ -81,7 +81,7 @@ pub trait InteractiveMult<F> : Shared<F> {
     ///
     /// Returns a result which contains the shared value corresponding
     /// to the multiplication of `a` and `b`.
-    fn interactive_mult<U: Unicast>(ctx: Self::Context, net: &mut U, a: Self, b: Self) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
+    fn interactive_mult<U: Unicast>(ctx: &Self::Context, net: &mut U, a: Self, b: Self) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
 }
 
 
@@ -92,6 +92,7 @@ pub trait InteractiveMult<F> : Shared<F> {
 pub struct ShamirParams<F> {
     pub threshold: u64,
     pub ids: Vec<F>,
+    // TODO: add self_id
 }
 
 // TODO: Collapse Field with Ser-De since we always require that combo?
@@ -102,13 +103,13 @@ impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> Shared<F> for sh
         shamir::share(secret, &ctx.ids, ctx.threshold, rng)
     }
 
-    fn recombine(_ctx: &Self::Context, shares: &[Self]) -> Option<F> {
-        Some(shamir::reconstruct(shares))
+    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F> {
+        Some(shamir::reconstruct(ctx, shares))
     }
 }
 
 impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> InteractiveMult<F> for shamir::Share<F> {
-    async fn interactive_mult<U: Unicast>(ctx: Self::Context, net: &mut U, a: Self, b: Self) -> Result<Self, Box<dyn Error>> {
+    async fn interactive_mult<U: Unicast>(ctx: &Self::Context, net: &mut U, a: Self, b: Self) -> Result<Self, Box<dyn Error>> {
         let c = a * b;
         let mut rng = thread_rng();
         let c = shamir::deflate(ctx, c, net, &mut rng).await?;
@@ -127,7 +128,7 @@ impl<
         feldman::share::<F, G>(secret, &ctx.ids, ctx.threshold, rng)
     }
 
-    fn recombine(_ctx: &Self::Context, shares: &[Self]) -> Option<F> {
-        feldman::reconstruct::<F, G>(shares)
+    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F> {
+        feldman::reconstruct::<F, G>(ctx, shares)
     }
 }

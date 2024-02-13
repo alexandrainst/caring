@@ -24,7 +24,7 @@ use crate::algebra::poly::Polynomial;
 pub struct Share<F: Field> {
     // NOTE: Consider
     //removing 'x' as it should be implied by the user handling it
-    pub(crate) x: F,
+    // pub(crate) x: F,
     pub(crate) y: F,
 }
 
@@ -36,9 +36,9 @@ impl<F: Field> std::ops::Add for Share<F> {
     ///
     /// * `rhs`: the other share
     fn add(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.x, rhs.x);
+        // assert_eq!(self.x, rhs.x);
         Self {
-            x: self.x,
+            // x: self.x,
             y: self.y + rhs.y,
         }
     }
@@ -46,7 +46,7 @@ impl<F: Field> std::ops::Add for Share<F> {
 
 impl<F: Field> std::ops::AddAssign for Share<F> {
     fn add_assign(&mut self, rhs: Self) {
-        assert_eq!(self.x, rhs.x);
+        // assert_eq!(self.x, rhs.x);
         self.y += rhs.y;
     }
 }
@@ -59,9 +59,9 @@ impl<F: Field> std::ops::Sub for Share<F> {
     ///
     /// * `rhs`: the other share
     fn sub(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.x, rhs.x);
+        // assert_eq!(self.x, rhs.x);
         Self {
-            x: self.x,
+            // x: self.x,
             y: self.y - rhs.y,
         }
     }
@@ -77,7 +77,7 @@ impl<F: Field> std::ops::Add<F> for Share<F> {
     /// NOTE: This will be redundant if we remove `x` as a share will be a field element
     fn add(self, rhs: F) -> Self::Output {
         Self {
-            x: self.x,
+            // x: self.x,
             y: self.y + rhs,
         }
     }
@@ -85,18 +85,18 @@ impl<F: Field> std::ops::Add<F> for Share<F> {
 
 impl<F: Field> std::iter::Sum for Share<F> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
-        let Some(Share { x, y }) = iter.next() else {
+        let Some(Share { y }) = iter.next() else {
             return Share {
-                x: F::ZERO,
+                // x: F::ZERO,
                 y: F::ZERO,
             };
         };
         let mut acc = y;
         for share in iter {
-            assert_eq!(share.x, x);
+            // assert_eq!(share.x, x);
             acc += share.y;
         }
-        Share { x, y: acc }
+        Share { y: acc }
     }
 }
 
@@ -167,9 +167,9 @@ impl<F: Field> std::ops::Mul for Share<F> {
     /// TODO: Construct that
     ///
     fn mul(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.x, rhs.x);
+        // assert_eq!(self.x, rhs.x);
         InflatedShare(Self {
-            x: self.x,
+            // x: self.x,
             y: self.y * self.y,
         })
     }
@@ -199,13 +199,13 @@ pub async fn deflate<
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
     U: Unicast,
 >(
-    ctx: ShamirParams<F>,
+    ctx: &ShamirParams<F>,
     z: InflatedShare<F>,
     net: &mut U,
     rng: &mut impl RngCore,
 ) -> Result<Share<F>, <U as Unicast>::Error> {
     let z = z.0;
-    let x = z.x;
+    // let x = z.x;
     let n = ctx.ids.len();
     tracing::info!(
         threshold = ctx.threshold,
@@ -239,7 +239,7 @@ pub async fn deflate<
         .map(|(a, b)| a.y * b)
         .sum();
 
-    Ok(Share { x, y })
+    Ok(Share { y })
 }
 
 
@@ -272,7 +272,7 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
     for x in ids {
         let x = *x;
         let y = polynomial.eval(&x);
-        shares.push(Share::<F> { x, y });
+        shares.push(Share::<F> { y });
     }
 
     shares
@@ -281,24 +281,22 @@ pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) 
 /// Reconstruct or open shares
 ///
 /// * `shares`: shares to be combined into an open value
-pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
+pub fn reconstruct<F: Field>(ctx: &ShamirParams<F>, shares: &[Share<F>]) -> F {
     // Lagrange interpolation:
     // L(x) = sum( y_i * l_i(x) )
     // where l_i(x) = prod( (x - x_k)/(x_i - x_k) | k != i)
     // here we always evaluate with x = 0
     let mut sum = F::ZERO;
-    for share in shares.iter() {
-        let xi = share.x;
-        let yi = share.y;
+    for (&xi, yi) in ctx.ids.iter().zip(shares) {
+        // let xi = share.x;
 
         let mut prod = F::ONE;
-        for Share { x: xk, y: _ } in shares.iter() {
-            let xk = *xk;
+        for &xk in ctx.ids.iter() {
             if xk != xi {
                 prod *= -xk * (xi - xk).invert().unwrap_or(F::ZERO)
             }
         }
-        sum += yi * prod;
+        sum += yi.y * prod;
     }
     sum
 }
@@ -309,7 +307,7 @@ pub fn reconstruct<F: Field>(shares: &[Share<F>]) -> F {
 /// * `ys`: share values
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct VecShare<F: Field> {
-    pub(crate) x: F,
+    //pub(crate) x: F,
     pub(crate) ys: Vector<F>,
 }
 
@@ -317,9 +315,9 @@ impl<F: Field> std::ops::Add for VecShare<F> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        debug_assert_eq!(self.x, rhs.x);
+        // debug_assert_eq!(self.x, rhs.x);
         Self {
-            x: self.x,
+            // x: self.x,
             ys: self.ys + rhs.ys,
         }
     }
@@ -330,26 +328,26 @@ impl<F: Field> std::ops::Add<&Self> for VecShare<F> {
     type Output = VecShare<F>;
 
     fn add(self, rhs: &Self) -> Self::Output {
-        debug_assert_eq!(self.x, rhs.x);
+        // debug_assert_eq!(self.x, rhs.x);
         let a = self.ys;
         let b = &rhs.ys;
         let ys: Vector<_> = a + b;
-        VecShare { x: self.x, ys }
+        VecShare { ys }
     }
 }
 
 impl<F: Field> From<Vec<Share<F>>> for VecShare<F> {
     fn from(value: Vec<Share<F>>) -> Self {
-        let x = value[0].x;
-        let ys = value.into_iter().map(|Share { x: _, y }| y).collect();
-        VecShare { x, ys }
+        // let x = value[0].x;
+        let ys = value.into_iter().map(|Share { y }| y).collect();
+        VecShare { ys }
     }
 }
 
 impl<F: Field> From<VecShare<F>> for Vec<Share<F>> {
     fn from(value: VecShare<F>) -> Self {
-        let VecShare { x, ys } = value;
-        ys.into_iter().map(|y| Share { x, y }).collect()
+        let VecShare { ys } = value;
+        ys.into_iter().map(|y| Share { y }).collect()
     }
 }
 
@@ -424,7 +422,7 @@ pub fn share_many<F: Field>(
                 .map(|(i, _)| polynomials[i].eval(&x))
                 .collect()
         };
-        shares.push(VecShare { x, ys: vecshare })
+        shares.push(VecShare { ys: vecshare })
     }
 
     shares
@@ -435,7 +433,7 @@ use rayon::prelude::*;
 /// Reconstruct or open shares
 ///
 /// * `shares`: shares to be combined into open values
-pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F> {
+pub fn reconstruct_many<F: Field>(ctx: &ShamirParams<F>, shares: &[impl Borrow<VecShare<F>>]) -> Vec<F> {
     // FIX: Code duplication with 'reconstruction'
     //
     // Lagrange interpolation:
@@ -444,13 +442,11 @@ pub fn reconstruct_many<F: Field>(shares: &[impl Borrow<VecShare<F>>]) -> Vec<F>
     // here we always evaluate with x = 0
     let m = shares[0].borrow().ys.len();
     let mut sum = vec![F::ZERO; m];
-    for share in shares.iter() {
-        let xi = share.borrow().x;
+    for (&xi, share) in ctx.ids.iter().zip(shares) {
         let yi: &Vector<_> = &share.borrow().ys;
 
         let mut prod = F::ONE;
-        for VecShare { x: xk, ys: _ } in shares.iter().map(|s| s.borrow()) {
-            let xk = *xk;
+        for &xk in &ctx.ids {
             if xk != xi {
                 prod *= -xk * (xi - xk).invert().unwrap_or(F::ZERO)
             }
@@ -477,12 +473,13 @@ mod test {
 
     #[test]
     fn simple() {
+        let ids: Vec<_> = (1..=5u32).map(Element32::from).collect();
+        let ctx = ShamirParams { threshold: 4, ids };
         // We test that we can secret-share a number and reconstruct it.
         let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         let v = Element32::from(42u32);
-        let ids: Vec<_> = (1..=5u32).map(Element32::from).collect();
-        let shares = share(v, &ids, 4, &mut rng);
-        let v: u32 = reconstruct(&shares).into();
+        let shares = share(v, &ctx.ids, 4, &mut rng);
+        let v: u32 = reconstruct(&ctx, &shares).into();
         assert_eq!(v, 42u32);
     }
 
@@ -493,20 +490,21 @@ mod test {
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let a = 3;
         let b = 7;
+        let ids: Vec<_> = PARTIES.map(Element32::from).collect();
         let vs1 = {
             let v = Element32::from(a);
-            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
         let vs2 = {
             let v = Element32::from(b);
-            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
 
+        let ctx = ShamirParams { threshold: 2, ids };
+
         // MPC
         let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a, &b)| a + b).collect();
-        let v = reconstruct(&shares);
+        let v = reconstruct(&ctx, &shares);
         let v: u32 = v.into();
         assert_eq!(v, a + b);
     }
@@ -518,20 +516,22 @@ mod test {
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let a: Vec<u32> = (0..256).map(|_| rng.gen_range(1..100)).collect();
         let b: Vec<u32> = (0..256).map(|_| rng.gen_range(1..100)).collect();
+        let ids: Vec<_> = PARTIES.map(Element32::from).collect();
         let vs1 = {
             let v: Vec<_> = a.clone().into_iter().map(Element32::from).collect();
-            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share_many(&v, &ids, 4, &mut rng)
         };
         let vs2 = {
             let v: Vec<_> = b.clone().into_iter().map(Element32::from).collect();
-            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share_many(&v, &ids, 4, &mut rng)
         };
 
+
+        let ctx = ShamirParams { threshold: 2, ids };
+
         // MPC
         let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(a, b)| a.clone() + b).collect();
-        let v = reconstruct_many(&shares);
+        let v = reconstruct_many(&ctx, &shares);
         let v: Vec<u32> = v.into_iter().map(|x| x.into()).collect();
         assert_eq!(v, a.iter().zip(b).map(|(a, b)| a + b).collect::<Vec<_>>());
     }
@@ -549,23 +549,23 @@ mod test {
         let b = 3.0;
         let a = Fix::from_num(a);
         let b = Fix::from_num(b);
+        let ids: Vec<_> = PARTIES.map(Element32::from).collect();
+        let ctx = ShamirParams { threshold: 2, ids: ids.clone() };
 
         let vs1 = {
             let v = Element32::from(a.to_bits() as u64);
             dbg!(&v);
-            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
         let vs2 = {
             let v = Element32::from(b.to_bits() as u64);
             dbg!(&v);
-            let ids: Vec<_> = PARTIES.map(Element32::from).collect();
             share(v, &ids, 4, &mut rng)
         };
 
         // MPC
         let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a, &b)| a + b).collect();
-        let v = reconstruct(&shares);
+        let v = reconstruct(&ctx, &shares);
         dbg!(v);
 
         // back to fixed
@@ -605,7 +605,7 @@ mod test {
                 // HACK: It doesn't work yet.
                 //
                 let ctx = ShamirParams { threshold, ids };
-                let c = deflate(ctx, c, &mut network, &mut rng)
+                let c = deflate(&ctx, c, &mut network, &mut rng)
                     .await
                     .expect("reducto failed");
                 //let c = c.giveup();
@@ -613,7 +613,7 @@ mod test {
 
                 // opening
                 let shares = network.symmetric_broadcast(c).await.unwrap();
-                let c: u32 = reconstruct(&shares).into();
+                let c: u32 = reconstruct(&ctx, &shares).into();
 
                 assert_eq!(c, 25);
             })

@@ -12,7 +12,7 @@
 //!
 use std::{borrow::Borrow, iter, ops, sync::Arc};
 
-use crate::algebra::poly::Polynomial;
+use crate::{algebra::poly::Polynomial, schemes::ShamirParams};
 use crate::{
     algebra::math::Vector,
     schemes::shamir::{self},
@@ -36,11 +36,12 @@ impl<F: Field, G> VerifiableShare<F, G>
 where
     G: Group + std::ops::Mul<F, Output = G>,
 {
-    pub fn verify(&self) -> bool {
+    pub fn verify(&self, ctx: &ShamirParams<F>) -> bool {
         let VerifiableShare { share, poly } = self;
         let mut check = G::identity();
+        let x = ctx.ids[0]; // HACK: Find the real id.
         for (i, &a) in poly.0.iter().enumerate() {
-            check += a * share.x.pow([i as u64]);
+            check += a * x.pow([i as u64]);
         }
         check == G::generator() * share.y
     }
@@ -118,7 +119,7 @@ where
                 *a * x.pow([i as u64])
             }) // sum: s + a1 x + a2 x^2 + ...
             .fold(F::ZERO, |sum, x| sum + x);
-        let share = shamir::Share::<F> { x, y: share };
+        let share = shamir::Share::<F> { y: share };
         let poly = Polynomial(mac_poly.clone());
         shares.push(VerifiableShare { share, poly });
     }
@@ -137,18 +138,18 @@ where
 // We can rely on the verified broadcast operation to some extent, however it might
 // need some rework, such that is threshold-safe.
 
-pub fn reconstruct<F: Field, G: Group>(shares: &[VerifiableShare<F, G>]) -> Option<F>
+pub fn reconstruct<F: Field, G: Group>(ctx: &ShamirParams<F>, shares: &[VerifiableShare<F, G>]) -> Option<F>
 where
     G: Group + std::ops::Mul<F, Output = G>,
 {
     // let (shares, macs) : (Vec<_>, Vec<_>) = shares.iter().map(|s| (s.share)).unzip();
     for share in shares {
-        if !share.verify() {
+        if !share.verify(ctx) {
             return None;
         }
     }
     let shares: Vec<_> = shares.iter().map(|s| s.share).collect();
-    let res = shamir::reconstruct(&shares);
+    let res = shamir::reconstruct(ctx, &shares);
 
     Some(res)
 }
@@ -197,9 +198,9 @@ impl<F: Field, G> VecVerifiableShare<F, G>
 where
     G: Group + std::ops::Mul<F, Output = G>,
 {
-    pub fn verify(&self) -> bool {
+    pub fn verify(&self, ctx: &ShamirParams<F>) -> bool {
         let VecVerifiableShare { shares, polys } = self;
-        let x = shares.x;
+        let x = ctx.ids[0]; // HACK:
         let ys = &shares.ys;
         for (&y, poly) in ys.iter().zip(polys.iter()) {
             let mut check = G::identity();
@@ -254,7 +255,6 @@ where
             vecshare.push(y);
         }
         let shares = shamir::VecShare {
-            x,
             ys: Vector::from_vec(vecshare),
         };
         let polys = macs.clone();
@@ -264,7 +264,7 @@ where
     vshares
 }
 
-pub fn reconstruct_many<F, G, T>(vec_shares: &[T]) -> Option<Vec<F>>
+pub fn reconstruct_many<F, G, T>(ctx: &ShamirParams<F>, vec_shares: &[T]) -> Option<Vec<F>>
 where
     G: Group + std::ops::Mul<F, Output = G>,
     F: Field,
@@ -272,13 +272,13 @@ where
     T: Borrow<VecVerifiableShare<F, G>>,
 {
     for shares in vec_shares {
-        if !(shares.borrow().verify()) {
+        if !(shares.borrow().verify(ctx)) {
             return None;
         };
     }
 
     let shares: Vec<_> = vec_shares.iter().map(|x| &x.borrow().shares).collect();
-    Some(shamir::reconstruct_many(&shares))
+    Some(shamir::reconstruct_many(ctx, &shares))
 }
 
 #[cfg(test)]
@@ -296,10 +296,11 @@ mod test {
 
         let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
         let shares = share::<Scalar, RistrettoPoint>(v, &parties, 2, &mut rng);
+        let ctx = ShamirParams { threshold: 2, ids: parties };
         for share in &shares {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
-        let v2 = reconstruct(&shares).unwrap();
+        let v2 = reconstruct(&ctx, &shares).unwrap();
         assert_eq!(v, v2);
     }
 
@@ -308,15 +309,16 @@ mod test {
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let mut rng = rand::rngs::mock::StepRng::new(42, 7);
         let a: Vec<u32> = (0..32).map(|_| rng.gen()).collect();
+            let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
+        let ctx = ShamirParams { threshold: 2, ids};
         let vs1 = {
             let v: Vec<_> = a.clone().into_iter().map(to_scalar).collect();
-            let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
-            share_many::<Scalar, RistrettoPoint>(&v, &ids, 4, &mut rng)
+            share_many::<Scalar, RistrettoPoint>(&v, &ctx.ids, 4, &mut rng)
         };
         for share in &vs1 {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
-        let vsum = reconstruct_many(&vs1).unwrap();
+        let vsum = reconstruct_many(&ctx, &vs1).unwrap();
         let v: Vec<u32> = vsum
             .into_iter()
             .map(|x| {
@@ -338,11 +340,12 @@ mod test {
         let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
         let shares1 = share::<Scalar, RistrettoPoint>(v1, &parties, 2, &mut rng);
         let shares2 = share::<Scalar, RistrettoPoint>(v2, &parties, 2, &mut rng);
+        let ctx = ShamirParams { threshold: 2, ids: parties };
         for share in &shares1 {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
         for share in &shares2 {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
         let shares: Vec<_> = shares1
             .into_iter()
@@ -351,10 +354,10 @@ mod test {
             .collect();
 
         for share in &shares {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
 
-        let vsum = reconstruct(&shares).unwrap();
+        let vsum = reconstruct(&ctx, &shares).unwrap();
         assert_eq!(v1 + v2, vsum);
     }
 
@@ -364,30 +367,30 @@ mod test {
         let mut rng = rand::rngs::mock::StepRng::new(42, 7);
         let a: Vec<u32> = (0..32).map(|_| rng.gen()).collect();
         let b: Vec<u32> = (0..32).map(|_| rng.gen()).collect();
+        let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
+        let ctx = ShamirParams { threshold: 2, ids };
         let vs1 = {
             let v: Vec<_> = a.clone().into_iter().map(to_scalar).collect();
-            let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
-            share_many::<Scalar, RistrettoPoint>(&v, &ids, 4, &mut rng)
+            share_many::<Scalar, RistrettoPoint>(&v, &ctx.ids, 4, &mut rng)
         };
         let vs2 = {
             let v: Vec<_> = b.clone().into_iter().map(to_scalar).collect();
-            let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
-            share_many::<Scalar, RistrettoPoint>(&v, &ids, 4, &mut rng)
+            share_many::<Scalar, RistrettoPoint>(&v, &ctx.ids, 4, &mut rng)
         };
         for share in &vs1 {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
         for share in &vs2 {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
         let shares: Vec<VecVerifiableShare<_, _>> =
             vs1.into_iter().zip(vs2).map(|(s1, s2)| s1 + &s2).collect();
 
         for share in &shares {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
 
-        let vsum = reconstruct_many(&shares).unwrap();
+        let vsum = reconstruct_many(&ctx, &shares).unwrap();
         let v: Vec<u32> = vsum
             .into_iter()
             .map(|x| {
@@ -425,13 +428,14 @@ mod test {
 
         let mut rng = thread_rng();
         let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
-        let shares1 = share::<Scalar, RistrettoPoint>(v1, &parties, 2, &mut rng);
-        let shares2 = share::<Scalar, RistrettoPoint>(v2, &parties, 2, &mut rng);
+        let ctx = ShamirParams { threshold: 2, ids: parties };
+        let shares1 = share::<Scalar, RistrettoPoint>(v1, &ctx.ids, 2, &mut rng);
+        let shares2 = share::<Scalar, RistrettoPoint>(v2, &ctx.ids, 2, &mut rng);
         for share in &shares1 {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
         for share in &shares2 {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
         let shares: Vec<_> = shares1
             .into_iter()
@@ -440,10 +444,10 @@ mod test {
             .collect();
 
         for share in &shares {
-            assert!(share.verify());
+            assert!(share.verify(&ctx));
         }
 
-        let vsum = reconstruct(&shares).unwrap();
+        let vsum = reconstruct(&ctx, &shares).unwrap();
         let sum = &vsum.as_bytes()[0..4];
         let sum: [u8; 4] = sum.try_into().unwrap();
         let sum = Fix::from_le_bytes(sum);

@@ -208,7 +208,7 @@ mod test {
                 .await
                 .unwrap();
             let res = network.symmetric_broadcast(res).await.unwrap();
-            let res = shamir::reconstruct(&res);
+            let res = shamir::reconstruct(&ctx, &res);
             let res: u32 = res.into();
             assert_eq!(res, 25);
         }
