@@ -3,7 +3,6 @@ use std::{error::Error, ops::{Index, IndexMut}};
 use futures::Future;
 
 use crate::net::{
-    agency::{Broadcast, Unicast},
     connection::{Connection, ConnectionError},
     network::Network,
 };

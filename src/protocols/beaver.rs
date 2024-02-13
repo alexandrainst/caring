@@ -175,10 +175,7 @@ mod test {
     use crate::{
         algebra::element::Element32,
         net::network::InMemoryNetwork,
-        schemes::{
-            shamir::{self},
-            ShamirParams,
-        },
+        schemes::shamir::{self, ShamirParams},
     };
 
     #[tokio::test]
@@ -189,7 +186,7 @@ mod test {
         let threshold: u64 = 2;
 
         // preproccessing
-        let ctx = ShamirParams { threshold, ids };
+        let ctx = ShamirParams {threshold,ids, this_id: Element32::ZERO };
         let triples = BeaverTriple::fake(&ctx, &mut rng);
 
         let mut taskset = tokio::task::JoinSet::new();

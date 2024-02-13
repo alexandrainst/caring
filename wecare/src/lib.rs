@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, time::Duration};
 
-use caring::{net::network::TcpNetwork, schemes::feldman};
+use caring::{net::network::TcpNetwork, schemes::{feldman, shamir::ShamirParams}};
 use rand::thread_rng;
 
 pub struct AdderEngine {
@@ -56,6 +56,7 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
             .map(curve25519_dalek::Scalar::from)
             .collect();
 
+
         let mut rng = thread_rng();
         let shares = feldman::share_many::<
             curve25519_dalek::Scalar,
@@ -65,16 +66,26 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
         // share my shares.
         let shares = network.symmetric_unicast(shares).await.expect("Sharing shares");
 
+        let my_id = curve25519_dalek::Scalar::from(network.index as u32);
+        let ctx = ShamirParams { ids: parties, threshold: *threshold, this_id: my_id };
+        for share in shares.iter() {
+            assert_eq!(share.x, my_id);
+        }
+
         // compute
         let my_result = shares.into_iter().sum();
 
         let open_shares: Vec<feldman::VecVerifiableShare<_,_>> =
             network.symmetric_broadcast(my_result).await.expect("Publishing shares");
 
+        for (share, id) in open_shares.iter().zip(&ctx.ids) {
+            assert_eq!(share.x, *id);
+        }
+
         network.flush().await.expect("Failed flushing");
 
         // reconstruct
-        let res = feldman::reconstruct_many(&open_shares).expect("Failed to validate")
+        let res = feldman::reconstruct_many(&ctx, &open_shares).expect("Failed to validate")
             .into_iter()
             .map(|x| x.as_bytes()[0..128/8].try_into().expect("Should be infalliable"))
             .map(u128::from_le_bytes)

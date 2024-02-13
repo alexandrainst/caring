@@ -88,47 +88,4 @@ pub trait InteractiveMult<F> : Shared<F> {
 
 // Move to shamir.rs
 
-#[derive(Clone)]
-pub struct ShamirParams<F> {
-    pub threshold: u64,
-    pub ids: Vec<F>,
-    // TODO: add self_id
-}
 
-// TODO: Collapse Field with Ser-De since we always require that combo?
-impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> Shared<F> for shamir::Share<F> {
-    type Context = ShamirParams<F>;
-
-    fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
-        shamir::share(secret, &ctx.ids, ctx.threshold, rng)
-    }
-
-    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F> {
-        Some(shamir::reconstruct(ctx, shares))
-    }
-}
-
-impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> InteractiveMult<F> for shamir::Share<F> {
-    async fn interactive_mult<U: Unicast>(ctx: &Self::Context, net: &mut U, a: Self, b: Self) -> Result<Self, Box<dyn Error>> {
-        let c = a * b;
-        let mut rng = thread_rng();
-        let c = shamir::deflate(ctx, c, net, &mut rng).await?;
-        Ok(c)
-    }
-}
-
-impl<
-        F: ff::Field + serde::Serialize + serde::de::DeserializeOwned,
-        G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>,
-    > Shared<F> for feldman::VerifiableShare<F, G>
-{
-    type Context = ShamirParams<F>;
-
-    fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
-        feldman::share::<F, G>(secret, &ctx.ids, ctx.threshold, rng)
-    }
-
-    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F> {
-        feldman::reconstruct::<F, G>(ctx, shares)
-    }
-}

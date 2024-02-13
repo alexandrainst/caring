@@ -1,13 +1,13 @@
 //! This is vanilla Shamir Secret Sharing using an arbitrary field F.
 //! See <https://en.wikipedia.org/wiki/Shamir%27s_secret_sharing>
-use std::borrow::Borrow;
+use std::{borrow::Borrow, error::Error};
 
 use ff::{derive::rand_core::RngCore, Field};
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
 use crate::{
-    algebra::math::{lagrange_coefficients, Vector}, net::agency::Unicast, schemes::ShamirParams
+    algebra::math::{lagrange_coefficients, Vector}, net::agency::Unicast, schemes::InteractiveMult
 };
 
 use crate::algebra::poly::Polynomial;
@@ -22,10 +22,96 @@ use crate::algebra::poly::Polynomial;
 /// * `y`: The 'share' part of the share
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Share<F: Field> {
-    // NOTE: Consider
-    //removing 'x' as it should be implied by the user handling it
-    // pub(crate) x: F,
     pub(crate) y: F,
+}
+
+
+#[derive(Clone)]
+pub struct ShamirParams<F> {
+    pub threshold: u64,
+    pub ids: Vec<F>,
+    pub this_id: F,
+}
+
+// TODO: Collapse Field with Ser-De since we always require that combo?
+impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> super::Shared<F> for Share<F> {
+    type Context = ShamirParams<F>;
+
+    fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
+        share(secret, &ctx.ids, ctx.threshold, rng)
+    }
+
+    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F> {
+        Some(reconstruct(ctx, shares))
+    }
+}
+
+impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> InteractiveMult<F> for Share<F> {
+    async fn interactive_mult<U: Unicast>(ctx: &Self::Context, net: &mut U, a: Self, b: Self) -> Result<Self, Box<dyn Error>> {
+        let c = a * b;
+        let mut rng = rand::thread_rng();
+        let c = deflate(ctx, c, net, &mut rng).await?;
+        Ok(c)
+    }
+}
+
+
+/// Share/shard a secret value `v` into `n` shares
+/// where `n` is the number of the `ids`
+///
+/// * `v`: secret value to share
+/// * `ids`: ids to share to
+/// * `threshold`: threshold to reconstruct it
+/// * `rng`: rng to generate shares from
+pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) -> Vec<Share<F>> {
+    let n = ids.len();
+    assert!(
+        n >= threshold as usize,
+        "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
+    );
+    assert!(
+        ids.iter().all(|x| !x.is_zero_vartime()),
+        "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
+    );
+
+    // Sample random t-degree polynomial, where t = threshold - 1, since we need
+    // t+1 shares to construct a t-degree polynomial.
+    let mut polynomial = Polynomial::random(threshold as usize - 1, rng);
+    polynomial.0[0] = v;
+    let polynomial = polynomial;
+
+    // Sample n points from 1..=n in the polynomial
+    let mut shares: Vec<Share<F>> = Vec::with_capacity(n);
+    for x in ids {
+        let x = *x;
+        let y = polynomial.eval(&x);
+        shares.push(Share::<F> { y });
+    }
+
+    shares
+}
+
+/// Reconstruct or open shares
+///
+/// * `shares`: shares to be combined into an open value
+pub fn reconstruct<F: Field>(ctx: &ShamirParams<F>, shares: &[Share<F>]) -> F {
+    // Lagrange interpolation:
+    // L(x) = sum( y_i * l_i(x) )
+    // where l_i(x) = prod( (x - x_k)/(x_i - x_k) | k != i)
+    // here we always evaluate with x = 0
+    let mut sum = F::ZERO;
+    for (&xi, yi) in ctx.ids.iter().zip(shares) {
+        // let xi = share.x;
+
+        let mut prod = F::ONE;
+        for &xk in ctx.ids.iter() {
+            if xk != xi {
+                prod *= -xk * (xi - xk).invert().unwrap_or(F::ZERO)
+            }
+        }
+        sum += yi.y * prod;
+    }
+    sum
 }
 
 impl<F: Field> std::ops::Add for Share<F> {
@@ -170,7 +256,7 @@ impl<F: Field> std::ops::Mul for Share<F> {
         // assert_eq!(self.x, rhs.x);
         InflatedShare(Self {
             // x: self.x,
-            y: self.y * self.y,
+            y: self.y * rhs.y,
         })
     }
 }
@@ -243,63 +329,6 @@ pub async fn deflate<
 }
 
 
-/// Share/shard a secret value `v` into `n` shares
-/// where `n` is the number of the `ids`
-///
-/// * `v`: secret value to share
-/// * `ids`: ids to share to
-/// * `threshold`: threshold to reconstruct it
-/// * `rng`: rng to generate shares from
-pub fn share<F: Field>(v: F, ids: &[F], threshold: u64, rng: &mut impl RngCore) -> Vec<Share<F>> {
-    let n = ids.len();
-    assert!(
-        n >= threshold as usize,
-        "Threshold should be less-than-equal to the number of shares: t={threshold}, n={n}"
-    );
-    assert!(
-        ids.iter().all(|x| !x.is_zero_vartime()),
-        "ID with zero-element provided. Zero-based x coordinates are insecure as they disclose the secret."
-    );
-
-    // Sample random t-degree polynomial, where t = threshold - 1, since we need
-    // t+1 shares to construct a t-degree polynomial.
-    let mut polynomial = Polynomial::random(threshold as usize - 1, rng);
-    polynomial.0[0] = v;
-    let polynomial = polynomial;
-
-    // Sample n points from 1..=n in the polynomial
-    let mut shares: Vec<Share<F>> = Vec::with_capacity(n);
-    for x in ids {
-        let x = *x;
-        let y = polynomial.eval(&x);
-        shares.push(Share::<F> { y });
-    }
-
-    shares
-}
-
-/// Reconstruct or open shares
-///
-/// * `shares`: shares to be combined into an open value
-pub fn reconstruct<F: Field>(ctx: &ShamirParams<F>, shares: &[Share<F>]) -> F {
-    // Lagrange interpolation:
-    // L(x) = sum( y_i * l_i(x) )
-    // where l_i(x) = prod( (x - x_k)/(x_i - x_k) | k != i)
-    // here we always evaluate with x = 0
-    let mut sum = F::ZERO;
-    for (&xi, yi) in ctx.ids.iter().zip(shares) {
-        // let xi = share.x;
-
-        let mut prod = F::ONE;
-        for &xk in ctx.ids.iter() {
-            if xk != xi {
-                prod *= -xk * (xi - xk).invert().unwrap_or(F::ZERO)
-            }
-        }
-        sum += yi.y * prod;
-    }
-    sum
-}
 
 /// A secret shared vector
 ///
@@ -474,7 +503,7 @@ mod test {
     #[test]
     fn simple() {
         let ids: Vec<_> = (1..=5u32).map(Element32::from).collect();
-        let ctx = ShamirParams { threshold: 4, ids };
+        let ctx = ShamirParams { threshold: 4, ids, this_id: Element32::ZERO };
         // We test that we can secret-share a number and reconstruct it.
         let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         let v = Element32::from(42u32);
@@ -500,7 +529,7 @@ mod test {
             share(v, &ids, 4, &mut rng)
         };
 
-        let ctx = ShamirParams { threshold: 2, ids };
+        let ctx = ShamirParams { threshold: 2, ids, this_id: Element32::ZERO };
 
         // MPC
         let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a, &b)| a + b).collect();
@@ -527,7 +556,7 @@ mod test {
         };
 
 
-        let ctx = ShamirParams { threshold: 2, ids };
+        let ctx = ShamirParams { threshold: 2, ids, this_id: Element32::ZERO };
 
         // MPC
         let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(a, b)| a.clone() + b).collect();
@@ -550,7 +579,7 @@ mod test {
         let a = Fix::from_num(a);
         let b = Fix::from_num(b);
         let ids: Vec<_> = PARTIES.map(Element32::from).collect();
-        let ctx = ShamirParams { threshold: 2, ids: ids.clone() };
+        let ctx = ShamirParams { threshold: 2, ids: ids.clone(), this_id: Element32::ZERO };
 
         let vs1 = {
             let v = Element32::from(a.to_bits() as u64);
@@ -604,7 +633,7 @@ mod test {
                 dbg!(&c);
                 // HACK: It doesn't work yet.
                 //
-                let ctx = ShamirParams { threshold, ids };
+                let ctx = ShamirParams { threshold, ids, this_id: Element32::ZERO };
                 let c = deflate(&ctx, c, &mut network, &mut rng)
                     .await
                     .expect("reducto failed");
