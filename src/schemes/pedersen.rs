@@ -4,7 +4,7 @@ use ff::Field;
 use group::Group;
 use rand::RngCore;
 
-use crate::{algebra::poly::Polynomial, schemes::shamir::ShamirParams};
+use crate::algebra::{math::lagrange_interpolation, poly::Polynomial};
 
 pub struct VerifiableShare<F: Field, G: Group> {
     secret: F,
@@ -87,13 +87,12 @@ pub fn reconstruct<F: Field, G: Group>(shares: &[VerifiableShare<F, G>], ids: &[
     // TODO: Maybe verify that the shares are all correct.
 
     // HACK: Parse as shamir, since we just use lagrange interpolation.
-    let shares: Vec<_> = shares
+    let secrets: Vec<_> = shares
         .iter()
-        .map(|s| super::shamir::Share {y: s.secret})
+        .map(|s| s.secret)
         .collect();
 
-    let ctx = ShamirParams { threshold: 0, ids: ids.to_vec(), this_id: F::ZERO }; // HACK:
-    super::shamir::reconstruct(&ctx, &shares)
+    lagrange_interpolation(F::ZERO, ids, &secrets)
 }
 
 #[cfg(test)]

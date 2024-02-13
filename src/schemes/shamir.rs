@@ -30,7 +30,6 @@ pub struct Share<F: Field> {
 pub struct ShamirParams<F> {
     pub threshold: u64,
     pub ids: Vec<F>,
-    pub this_id: F,
 }
 
 // TODO: Collapse Field with Ser-De since we always require that combo?
@@ -503,7 +502,7 @@ mod test {
     #[test]
     fn simple() {
         let ids: Vec<_> = (1..=5u32).map(Element32::from).collect();
-        let ctx = ShamirParams { threshold: 4, ids, this_id: Element32::ZERO };
+        let ctx = ShamirParams { threshold: 4, ids, };
         // We test that we can secret-share a number and reconstruct it.
         let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         let v = Element32::from(42u32);
@@ -529,7 +528,7 @@ mod test {
             share(v, &ids, 4, &mut rng)
         };
 
-        let ctx = ShamirParams { threshold: 2, ids, this_id: Element32::ZERO };
+        let ctx = ShamirParams { threshold: 2, ids, };
 
         // MPC
         let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a, &b)| a + b).collect();
@@ -556,7 +555,7 @@ mod test {
         };
 
 
-        let ctx = ShamirParams { threshold: 2, ids, this_id: Element32::ZERO };
+        let ctx = ShamirParams { threshold: 2, ids, };
 
         // MPC
         let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(a, b)| a.clone() + b).collect();
@@ -579,7 +578,7 @@ mod test {
         let a = Fix::from_num(a);
         let b = Fix::from_num(b);
         let ids: Vec<_> = PARTIES.map(Element32::from).collect();
-        let ctx = ShamirParams { threshold: 2, ids: ids.clone(), this_id: Element32::ZERO };
+        let ctx = ShamirParams { threshold: 2, ids: ids.clone(), };
 
         let vs1 = {
             let v = Element32::from(a.to_bits() as u64);
@@ -633,7 +632,7 @@ mod test {
                 dbg!(&c);
                 // HACK: It doesn't work yet.
                 //
-                let ctx = ShamirParams { threshold, ids, this_id: Element32::ZERO };
+                let ctx = ShamirParams { threshold, ids, };
                 let c = deflate(&ctx, c, &mut network, &mut rng)
                     .await
                     .expect("reducto failed");

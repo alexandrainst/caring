@@ -66,8 +66,8 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
         // share my shares.
         let shares = network.symmetric_unicast(shares).await.expect("Sharing shares");
 
-        let my_id = curve25519_dalek::Scalar::from(network.index as u32);
-        let ctx = ShamirParams { ids: parties, threshold: *threshold, this_id: my_id };
+        let my_id = curve25519_dalek::Scalar::from(network.index as u32 + 1);
+        let ctx = ShamirParams { ids: parties, threshold: *threshold };
         for share in shares.iter() {
             assert_eq!(share.x, my_id);
         }
@@ -161,7 +161,6 @@ mod test {
             println!("[1] Done");
             drop(engine);
             res
-
         });
         std::thread::sleep(Duration::from_millis(50));
         let t2 = thread::spawn(|| {
