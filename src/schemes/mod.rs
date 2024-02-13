@@ -31,11 +31,14 @@ pub mod shamir;
 pub mod spdz;
 pub mod spdz2k;
 
-use std::ops::Add;
+use std::{error::Error, ops::{Add, Sub}};
 
 use ff::Field;
+use futures::Future;
 use group::Group;
-use rand::RngCore;
+use rand::{thread_rng, RngCore};
+
+use crate::net::agency::Unicast;
 
 trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output = Self> + std::ops::MulAssign<A> {}
 
@@ -45,7 +48,7 @@ trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output = Self> + std::ops::Mul
 /// This is used to implement generic MPC based schemes and protocols,
 /// such as beaver triple multiplication.
 pub trait Shared<F>:
-    Sized + Add<Output = Self> + serde::Serialize + serde::de::DeserializeOwned
+    Sized + Add<Output = Self> + Sub<Output = Self> + serde::Serialize + serde::de::DeserializeOwned
 {
     /// The context needed to use the scheme.
     /// This can be a struct containing the threshold, ids and other things.
@@ -68,6 +71,23 @@ pub trait Shared<F>:
     // TODO: Should be Result<F, impl Error> with some generic Secret-sharing error
 }
 
+pub trait InteractiveMult<F> : Shared<F> {
+    /// Perform interactive multiplication
+    ///
+    /// * `ctx`: scheme and instance specific context
+    /// * `net`: Unicasting network
+    /// * `a`: first share to multiply
+    /// * `b`: second share to multiply
+    ///
+    /// Returns a result which contains the shared value corresponding
+    /// to the multiplication of `a` and `b`.
+    fn interactive_mult<U: Unicast>(ctx: Self::Context, net: &mut U, a: Self, b: Self) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
+}
+
+
+
+// Move to shamir.rs
+
 #[derive(Clone)]
 pub struct ShamirParams<F> {
     pub threshold: u64,
@@ -84,6 +104,15 @@ impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> Shared<F> for sh
 
     fn recombine(_ctx: &Self::Context, shares: &[Self]) -> Option<F> {
         Some(shamir::reconstruct(shares))
+    }
+}
+
+impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> InteractiveMult<F> for shamir::Share<F> {
+    async fn interactive_mult<U: Unicast>(ctx: Self::Context, net: &mut U, a: Self, b: Self) -> Result<Self, Box<dyn Error>> {
+        let c = a * b;
+        let mut rng = thread_rng();
+        let c = shamir::deflate(ctx, c, net, &mut rng).await?;
+        Ok(c)
     }
 }
 

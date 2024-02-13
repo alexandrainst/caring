@@ -41,7 +41,7 @@ use itertools::Itertools;
 // which gives the current network size. However I am not sure if this will be relevant?
 
 pub trait Broadcast {
-    type Error: Error;
+    type Error: Error + 'static;
 
     /// Broadcast a message to all other parties.
     ///
@@ -73,7 +73,7 @@ pub trait Broadcast {
 }
 
 pub trait Unicast {
-    type Error;
+    type Error: Error + 'static;
 
 
     /// Unicast messages to each party

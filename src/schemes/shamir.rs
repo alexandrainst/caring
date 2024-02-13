@@ -204,15 +204,15 @@ pub async fn deflate<
     net: &mut U,
     rng: &mut impl RngCore,
 ) -> Result<Share<F>, <U as Unicast>::Error> {
-    tracing::info!(
-        threshold = ctx.threshold,
-        party_size = ctx.ids.len(),
-    );
     let z = z.0;
     let x = z.x;
-
     let n = ctx.ids.len();
-    assert!(n >= 2 * ctx.threshold as usize);
+    tracing::info!(
+        threshold = ctx.threshold,
+        party_size = n,
+    );
+    // Consider if this should be an error instead.
+    assert!(n >= 2 * ctx.threshold as usize, "Threshold larger than the player count!");
     // We need 2t < n, otherwise we cannot reconstruct,
     // however 't' is hidden from before, so we just have to assume it is.
     // Now we need to reduce the polynomial back to t
@@ -229,6 +229,7 @@ pub async fn deflate<
     let subshares = net.symmetric_unicast::<_>(subshares).await?;
 
     // reduction (cache?)
+    // This should be equivalent to during a recombination
     let coeffs = lagrange_coefficients(&ctx.ids, F::ZERO);
 
     // inner product

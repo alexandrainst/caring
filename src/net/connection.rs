@@ -122,7 +122,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
 #[derive(Error, Debug)]
 pub enum ConnectionError {
     #[error("Deserialization failed")]
-    BadSerialization(#[from] bincode::Error),
+    MalformedMessage(#[from] bincode::Error),
     #[error("Connection timed out after {0}")]
     TimeOut(Elapsed),
     #[error("No message to receive")]
@@ -152,7 +152,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
             .ok_or(ConnectionError::Closed)?
             .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
         let buf = std::io::Cursor::new(buf);
-        bincode::deserialize_from(buf).map_err(ConnectionError::BadSerialization)
+        bincode::deserialize_from(buf).map_err(ConnectionError::MalformedMessage)
     }
 }
 

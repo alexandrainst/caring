@@ -12,12 +12,6 @@ pub struct BeaverTriple<F, S: Shared<F>> {
     pub shares: (S, S, S),
 }
 
-#[derive(Clone)]
-pub struct BeaverSquare<F, S: Shared<F>> {
-    phantom: PhantomData<F>,
-    val: S,
-    val_squared: S,
-}
 
 #[derive(Clone)]
 pub struct BeaverPower<F, S: Shared<F>> {
@@ -25,6 +19,8 @@ pub struct BeaverPower<F, S: Shared<F>> {
     val: S,
     powers: Vec<S>,
 }
+
+
 
 impl<F: Field, C, S: Shared<F, Context = C>> BeaverTriple<F, S> {
     /// Fake a set of beaver triples.
@@ -50,10 +46,23 @@ impl<F: Field, C, S: Shared<F, Context = C>> BeaverTriple<F, S> {
             })
             .collect()
     }
+
+    /// Construct a beaver triple from shares.
+    ///
+    /// The shares must hold the invariant that `a * b = c`,
+    /// for the underlying field `F`, otherwise they are
+    /// considered malformed.
+    pub fn from_foreign(a: S, b: S, c: S) -> Self {
+        Self {
+            shares: (a, b, c),
+            phantom: PhantomData,
+        }
+    }
 }
 
 /// Perform multiplication using beaver triples
 ///
+/// * `ctx`: context for secret sharing scheme
 /// * `x`: first share to multiply
 /// * `y`: second share to multiply
 /// * `triple`: beaver triple
@@ -86,6 +95,79 @@ pub async fn beaver_multiply<
 
     Some(y * ax + a * (-by) + c)
 }
+
+
+
+#[derive(Clone)]
+pub struct BeaverSquare<F, S: Shared<F>> {
+    phantom: PhantomData<F>,
+    val: S,
+    val_squared: S,
+}
+
+impl<F: Field, C, S: Shared<F, Context = C>> BeaverSquare<F, S> {
+    pub fn fake(ctx: &C, mut rng: &mut impl RngCore) -> Vec<Self> {
+        let a = F::random(&mut rng);
+        let c: F = a * a;
+        // Share (preproccess)
+        let a = S::share(ctx, a, rng);
+        let c = S::share(ctx, c, rng);
+        itertools::izip!(a, c)
+            .map(|(a, c)| Self {
+                val: a,
+                val_squared: c,
+                phantom: PhantomData,
+            })
+            .collect()
+    }
+
+
+    /// Construct a beaver triple from shares.
+    ///
+    /// The shares must hold the invariant that `a * a = c`,
+    /// for the underlying field `F`, otherwise they are
+    /// considered malformed.
+    pub fn from_foreign(val: S, val_squared: S) -> Self {
+        Self {
+            val,
+            val_squared,
+            phantom: PhantomData,
+        }
+    }
+}
+
+
+/// Perform squaring using beaver's trick
+///
+/// * `ctx` context for secret sharing scheme
+/// * `x`: first share to square
+/// * `triple`: beaver triple
+/// * `network`: unicasting network
+pub async fn beaver_square<
+    C,
+    S: Shared<F, Context = C> + Copy + std::ops::Mul<F, Output = S>,
+    F: Field + serde::Serialize + serde::de::DeserializeOwned,
+>(
+    ctx: &C,
+    x: S,
+    triple: BeaverSquare<F, S>,
+    agent: &mut impl Broadcast,
+) -> Option<S> {
+    // TODO: Better error handling.
+    let BeaverSquare {
+        val,
+        val_squared,
+        phantom: _,
+    } = triple;
+    let ax: S = val + x;
+
+    // Sending both at once it more efficient.
+    let ax = agent.symmetric_broadcast::<_>(ax).await.ok()?;
+    let ax = S::recombine(ctx, &ax)?;
+
+    Some((x - val) * ax + val_squared)
+}
+
 
 #[cfg(test)]
 mod test {

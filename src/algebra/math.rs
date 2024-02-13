@@ -359,6 +359,20 @@ pub fn lagrange_coefficients<F: Field>(xs: &[F], x: F) -> Vec<F> {
         .collect()
 }
 
+pub fn lagrange_interpolation<F: Field>(x: F, xs: &[F], ys: &[F]) -> F {
+    // Lagrange interpolation:
+    // L(x) = sum( y_i * l_i(x) )
+    // where l_i(x) = prod( (x - x_k)/(x_i - x_k) | k != i)
+    // here we always evaluate with x = 0
+    let mut sum = F::ZERO;
+    let ls = lagrange_coefficients(xs, x);
+    for (&li, &yi) in ls.iter().zip(ys) {
+        sum += yi * li;
+    }
+    sum
+}
+
+
 #[cfg(test)]
 mod test {
     use crate::algebra::element::Mod11;

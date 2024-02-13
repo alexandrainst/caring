@@ -34,8 +34,8 @@ impl<
 {
     type Error = ConnectionError;
 
-    fn send<T: serde::Serialize>(&self, _msg: &T) -> impl Future<Output = Result<(), Self::Error>> {
-        async { todo!() }
+    async fn send<T: serde::Serialize>(&self, _msg: &T) -> Result<(), Self::Error> {
+        todo!()
     }
 
     fn recv<T: serde::de::DeserializeOwned>(
