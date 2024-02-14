@@ -5,7 +5,7 @@ mod algebra;
 mod extra;
 pub mod net;
 pub mod ot;
+mod protocols;
 pub mod schemes;
 mod testing;
 pub mod theater;
-mod protocols;

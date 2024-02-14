@@ -27,16 +27,19 @@
 
 pub mod feldman;
 pub mod pedersen;
+pub mod rep3;
 pub mod shamir;
 pub mod spdz;
 pub mod spdz2k;
 
-use std::{error::Error, ops::{Add, Sub}};
+use std::{
+    error::Error,
+    ops::{Add, Sub},
+};
 
-use ff::Field;
 use futures::Future;
-use group::Group;
-use rand::{thread_rng, RngCore};
+
+use rand::RngCore;
 
 use crate::net::agency::Unicast;
 
@@ -71,7 +74,7 @@ pub trait Shared<F>:
     // TODO: Should be Result<F, impl Error> with some generic Secret-sharing error
 }
 
-pub trait InteractiveMult<F> : Shared<F> {
+pub trait InteractiveMult<F>: Shared<F> {
     /// Perform interactive multiplication
     ///
     /// * `ctx`: scheme and instance specific context
@@ -81,11 +84,12 @@ pub trait InteractiveMult<F> : Shared<F> {
     ///
     /// Returns a result which contains the shared value corresponding
     /// to the multiplication of `a` and `b`.
-    fn interactive_mult<U: Unicast>(ctx: &Self::Context, net: &mut U, a: Self, b: Self) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
+    fn interactive_mult<U: Unicast>(
+        ctx: &Self::Context,
+        net: &mut U,
+        a: Self,
+        b: Self,
+    ) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
 }
 
-
-
 // Move to shamir.rs
-
-

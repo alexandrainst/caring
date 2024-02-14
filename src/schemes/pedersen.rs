@@ -87,10 +87,7 @@ pub fn reconstruct<F: Field, G: Group>(shares: &[VerifiableShare<F, G>], ids: &[
     // TODO: Maybe verify that the shares are all correct.
 
     // HACK: Parse as shamir, since we just use lagrange interpolation.
-    let secrets: Vec<_> = shares
-        .iter()
-        .map(|s| s.secret)
-        .collect();
+    let secrets: Vec<_> = shares.iter().map(|s| s.secret).collect();
 
     lagrange_interpolation(F::ZERO, ids, &secrets)
 }

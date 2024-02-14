@@ -7,7 +7,9 @@ use ff::{derive::rand_core::RngCore, Field};
 // TODO: Important! Switch RngCore to CryptoRngCore
 
 use crate::{
-    algebra::math::{lagrange_coefficients, Vector}, net::agency::Unicast, schemes::InteractiveMult
+    algebra::math::{lagrange_coefficients, Vector},
+    net::agency::Unicast,
+    schemes::InteractiveMult,
 };
 
 use crate::algebra::poly::Polynomial;
@@ -24,7 +26,6 @@ use crate::algebra::poly::Polynomial;
 pub struct Share<F: Field> {
     pub(crate) y: F,
 }
-
 
 #[derive(Clone)]
 pub struct ShamirParams<F> {
@@ -46,14 +47,18 @@ impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> super::Shared<F>
 }
 
 impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> InteractiveMult<F> for Share<F> {
-    async fn interactive_mult<U: Unicast>(ctx: &Self::Context, net: &mut U, a: Self, b: Self) -> Result<Self, Box<dyn Error>> {
+    async fn interactive_mult<U: Unicast>(
+        ctx: &Self::Context,
+        net: &mut U,
+        a: Self,
+        b: Self,
+    ) -> Result<Self, Box<dyn Error>> {
         let c = a * b;
         let mut rng = rand::thread_rng();
         let c = deflate(ctx, c, net, &mut rng).await?;
         Ok(c)
     }
 }
-
 
 /// Share/shard a secret value `v` into `n` shares
 /// where `n` is the number of the `ids`
@@ -280,10 +285,7 @@ impl<F: Field> std::ops::Mul for Share<F> {
 /// ```
 ///
 #[tracing::instrument(skip_all)]
-pub async fn deflate<
-    F: Field + serde::Serialize + serde::de::DeserializeOwned,
-    U: Unicast,
->(
+pub async fn deflate<F: Field + serde::Serialize + serde::de::DeserializeOwned, U: Unicast>(
     ctx: &ShamirParams<F>,
     z: InflatedShare<F>,
     net: &mut U,
@@ -292,12 +294,12 @@ pub async fn deflate<
     let z = z.0;
     // let x = z.x;
     let n = ctx.ids.len();
-    tracing::info!(
-        threshold = ctx.threshold,
-        party_size = n,
-    );
+    tracing::info!(threshold = ctx.threshold, party_size = n,);
     // Consider if this should be an error instead.
-    assert!(n >= 2 * ctx.threshold as usize, "Threshold larger than the player count!");
+    assert!(
+        n >= 2 * ctx.threshold as usize,
+        "Threshold larger than the player count!"
+    );
     // We need 2t < n, otherwise we cannot reconstruct,
     // however 't' is hidden from before, so we just have to assume it is.
     // Now we need to reduce the polynomial back to t
@@ -327,8 +329,6 @@ pub async fn deflate<
     Ok(Share { y })
 }
 
-
-
 /// A secret shared vector
 ///
 /// * `x`: the id
@@ -350,7 +350,6 @@ impl<F: Field> std::ops::Add for VecShare<F> {
         }
     }
 }
-
 
 impl<F: Field> std::ops::Add<&Self> for VecShare<F> {
     type Output = VecShare<F>;
@@ -461,7 +460,10 @@ use rayon::prelude::*;
 /// Reconstruct or open shares
 ///
 /// * `shares`: shares to be combined into open values
-pub fn reconstruct_many<F: Field>(ctx: &ShamirParams<F>, shares: &[impl Borrow<VecShare<F>>]) -> Vec<F> {
+pub fn reconstruct_many<F: Field>(
+    ctx: &ShamirParams<F>,
+    shares: &[impl Borrow<VecShare<F>>],
+) -> Vec<F> {
     // FIX: Code duplication with 'reconstruction'
     //
     // Lagrange interpolation:
@@ -502,7 +504,7 @@ mod test {
     #[test]
     fn simple() {
         let ids: Vec<_> = (1..=5u32).map(Element32::from).collect();
-        let ctx = ShamirParams { threshold: 4, ids, };
+        let ctx = ShamirParams { threshold: 4, ids };
         // We test that we can secret-share a number and reconstruct it.
         let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         let v = Element32::from(42u32);
@@ -528,7 +530,7 @@ mod test {
             share(v, &ids, 4, &mut rng)
         };
 
-        let ctx = ShamirParams { threshold: 2, ids, };
+        let ctx = ShamirParams { threshold: 2, ids };
 
         // MPC
         let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a, &b)| a + b).collect();
@@ -554,11 +556,14 @@ mod test {
             share_many(&v, &ids, 4, &mut rng)
         };
 
-
-        let ctx = ShamirParams { threshold: 2, ids, };
+        let ctx = ShamirParams { threshold: 2, ids };
 
         // MPC
-        let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(a, b)| a.clone() + b).collect();
+        let shares: Vec<_> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(a, b)| a.clone() + b)
+            .collect();
         let v = reconstruct_many(&ctx, &shares);
         let v: Vec<u32> = v.into_iter().map(|x| x.into()).collect();
         assert_eq!(v, a.iter().zip(b).map(|(a, b)| a + b).collect::<Vec<_>>());
@@ -578,7 +583,10 @@ mod test {
         let a = Fix::from_num(a);
         let b = Fix::from_num(b);
         let ids: Vec<_> = PARTIES.map(Element32::from).collect();
-        let ctx = ShamirParams { threshold: 2, ids: ids.clone(), };
+        let ctx = ShamirParams {
+            threshold: 2,
+            ids: ids.clone(),
+        };
 
         let vs1 = {
             let v = Element32::from(a.to_bits() as u64);
@@ -632,7 +640,7 @@ mod test {
                 dbg!(&c);
                 // HACK: It doesn't work yet.
                 //
-                let ctx = ShamirParams { threshold, ids, };
+                let ctx = ShamirParams { threshold, ids };
                 let c = deflate(&ctx, c, &mut network, &mut rng)
                     .await
                     .expect("reducto failed");

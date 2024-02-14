@@ -1,4 +1,7 @@
-use std::{error::Error, ops::{Index, IndexMut}};
+use std::{
+    error::Error,
+    ops::{Index, IndexMut},
+};
 
 use futures::Future;
 
@@ -14,7 +17,7 @@ pub mod network;
 // TODO: Serde trait bounds on `T`
 // TODO: Properly use this trait for other things (Connection/Agency etc.)
 pub trait Channel {
-    type Error : Error;
+    type Error: Error;
 
     /// Send a message over the channel
     ///
@@ -55,9 +58,7 @@ pub trait Tuneable {
     fn tune_mut(&mut self, idx: Self::Idx) -> &mut Self::SubChannel;
 
     fn tune(&self, idx: Self::Idx) -> &Self::SubChannel;
-
 }
-
 
 impl<
         R: tokio::io::AsyncRead + std::marker::Unpin,

@@ -61,7 +61,6 @@ pub trait Broadcast {
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
 
-
     /// Receive a message for each party.
     ///
     /// Asymmetric, waiting
@@ -75,7 +74,6 @@ pub trait Broadcast {
 pub trait Unicast {
     type Error: Error + 'static;
 
-
     /// Unicast messages to each party
     ///
     /// Messages are supposed to be in order, meaning message `i`
@@ -85,7 +83,6 @@ pub trait Unicast {
     ///
     /// * `msgs`: Messages to send
     fn unicast(&mut self, msgs: &[impl serde::Serialize]);
-
 
     /// Unicast a message to each party and await their messages
     /// Messages are supposed to be in order, meaning message `i`
@@ -98,7 +95,6 @@ pub trait Unicast {
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned;
-
 
     /// Receive a message for each party.
     ///
@@ -118,8 +114,7 @@ use tracing::{event, Level};
 
 pub struct VerifiedBroadcast<B: Broadcast, D: Digest>(B, PhantomData<D>);
 
-impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
-
+impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
     pub fn inner(self) -> B {
         self.0
     }
@@ -127,10 +122,10 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
     pub fn new(broadcast: B) -> Self {
         Self(broadcast, PhantomData)
     }
-// }
+    // }
 
-// impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
-//     type Error = BroadcastVerificationError<B::Error>;
+    // impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
+    //     type Error = BroadcastVerificationError<B::Error>;
 
     /// Ensure that a received broadcast is the same across all parties.
     #[tracing::instrument(skip_all)]
@@ -149,7 +144,8 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
         let mut digest = D::new();
         digest.update(&msg);
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let msg_hashes = inner.symmetric_broadcast(hash)
+        let msg_hashes = inner
+            .symmetric_broadcast(hash)
             .await
             .map_err(BroadcastVerificationError::Other)?;
 
@@ -160,7 +156,8 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
             digest.update(hash);
         }
         let sum: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        let sum_all: Vec<Box<[u8]>> = inner.symmetric_broadcast(sum)
+        let sum_all: Vec<Box<[u8]>> = inner
+            .symmetric_broadcast(sum)
             .await
             .map_err(BroadcastVerificationError::Other)?;
 
@@ -173,7 +170,8 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
 
         // 2. Send the message and check that the hashes match
         event!(Level::INFO, "Sending original message");
-        let messages = inner.symmetric_broadcast(msg)
+        let messages = inner
+            .symmetric_broadcast(msg)
             .await
             .map_err(BroadcastVerificationError::Other)?;
 
@@ -190,7 +188,6 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B,D> {
         // Finally, return the packets
         Ok(messages)
     }
-
 
     #[tracing::instrument(skip_all)]
     pub fn broadcast(&mut self, _msg: &impl serde::Serialize) {
@@ -212,35 +209,41 @@ pub enum BroadcastVerificationError<E> {
 }
 
 mod test {
-    use super::*;
-    use futures::join;
-    use itertools::Itertools;
-
-    use crate::net::{agency::VerifiedBroadcast, network::InMemoryNetwork};
-    use sha2::Sha256;
 
     #[tokio::test]
     async fn verified_broadcast() {
-        let (n1, n2, n3) = InMemoryNetwork::in_memory(3).drain(..3).tuples().next().unwrap();
+        let (n1, n2, n3) = InMemoryNetwork::in_memory(3)
+            .drain(..3)
+            .tuples()
+            .next()
+            .unwrap();
 
         let t1 = async {
             let mut vb = VerifiedBroadcast::<_, Sha256>::new(n1);
-            let resp = vb.symmetric_broadcast(String::from("Hi from Alice")).await.unwrap();
+            let resp = vb
+                .symmetric_broadcast(String::from("Hi from Alice"))
+                .await
+                .unwrap();
             assert_eq!(resp[0], "Hi from Alice");
             assert_eq!(resp[1], "Hi from Bob");
             assert_eq!(resp[2], "Hi from Charlie");
-
         };
         let t2 = async {
             let mut vb = VerifiedBroadcast::<_, Sha256>::new(n2);
-            let resp = vb.symmetric_broadcast(String::from("Hi from Bob")).await.unwrap();
+            let resp = vb
+                .symmetric_broadcast(String::from("Hi from Bob"))
+                .await
+                .unwrap();
             assert_eq!(resp[0], "Hi from Alice");
             assert_eq!(resp[1], "Hi from Bob");
             assert_eq!(resp[2], "Hi from Charlie");
         };
         let t3 = async {
             let mut vb = VerifiedBroadcast::<_, Sha256>::new(n3);
-            let resp = vb.symmetric_broadcast(String::from("Hi from Charlie")).await.unwrap();
+            let resp = vb
+                .symmetric_broadcast(String::from("Hi from Charlie"))
+                .await
+                .unwrap();
             assert_eq!(resp[0], "Hi from Alice");
             assert_eq!(resp[1], "Hi from Bob");
             assert_eq!(resp[2], "Hi from Charlie");

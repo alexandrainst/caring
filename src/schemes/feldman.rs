@@ -12,11 +12,11 @@
 //!
 use std::{borrow::Borrow, iter, ops};
 
-use crate::{algebra::poly::Polynomial, schemes::shamir::ShamirParams};
 use crate::{
     algebra::math::Vector,
     schemes::shamir::{self},
 };
+use crate::{algebra::poly::Polynomial, schemes::shamir::ShamirParams};
 
 use ff::Field;
 use group::Group;
@@ -29,7 +29,6 @@ pub struct VerifiableShare<F: Field, G: Group> {
     poly: Polynomial<G>,
     pub x: F, // :(
 }
-
 
 impl<
         F: ff::Field + serde::Serialize + serde::de::DeserializeOwned,
@@ -155,7 +154,10 @@ where
 // We can rely on the verified broadcast operation to some extent, however it might
 // need some rework, such that is threshold-safe.
 
-pub fn reconstruct<F: Field, G: Group>(ctx: &ShamirParams<F>, shares: &[VerifiableShare<F, G>]) -> Option<F>
+pub fn reconstruct<F: Field, G: Group>(
+    ctx: &ShamirParams<F>,
+    shares: &[VerifiableShare<F, G>],
+) -> Option<F>
 where
     G: Group + std::ops::Mul<F, Output = G>,
 {
@@ -177,7 +179,6 @@ pub struct VecVerifiableShare<F: Field, G: Group> {
     polys: Box<[Polynomial<G>]>,
     pub x: F,
 }
-
 
 impl<F: Field, G: Group> std::ops::Add<&Self> for VecVerifiableShare<F, G> {
     type Output = VecVerifiableShare<F, G>;
@@ -314,7 +315,10 @@ mod test {
 
         let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
         let shares = share::<Scalar, RistrettoPoint>(v, &parties, 2, &mut rng);
-        let ctx = ShamirParams { threshold: 2, ids: parties, };
+        let ctx = ShamirParams {
+            threshold: 2,
+            ids: parties,
+        };
         let v2 = reconstruct(&ctx, &shares).unwrap();
         assert_eq!(v, v2);
     }
@@ -324,8 +328,8 @@ mod test {
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let mut rng = rand::rngs::mock::StepRng::new(42, 7);
         let a: Vec<u32> = (0..32).map(|_| rng.gen()).collect();
-            let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
-        let ctx = ShamirParams { threshold: 2, ids, };
+        let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
+        let ctx = ShamirParams { threshold: 2, ids };
         let vs1 = {
             let v: Vec<_> = a.clone().into_iter().map(to_scalar).collect();
             share_many::<Scalar, RistrettoPoint>(&v, &ctx.ids, 4, &mut rng)
@@ -355,7 +359,10 @@ mod test {
         let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
         let shares1 = share::<Scalar, RistrettoPoint>(v1, &parties, 2, &mut rng);
         let shares2 = share::<Scalar, RistrettoPoint>(v2, &parties, 2, &mut rng);
-        let ctx = ShamirParams { threshold: 2, ids: parties, };
+        let ctx = ShamirParams {
+            threshold: 2,
+            ids: parties,
+        };
         let shares: Vec<_> = shares1
             .into_iter()
             .zip(shares2)
@@ -377,7 +384,7 @@ mod test {
         let a: Vec<u32> = (0..32).map(|_| rng.gen()).collect();
         let b: Vec<u32> = (0..32).map(|_| rng.gen()).collect();
         let ids: Vec<_> = PARTIES.map(Scalar::from).collect();
-        let ctx = ShamirParams { threshold: 2, ids, };
+        let ctx = ShamirParams { threshold: 2, ids };
         let vs1 = {
             let v: Vec<_> = a.clone().into_iter().map(to_scalar).collect();
             share_many::<Scalar, RistrettoPoint>(&v, &ctx.ids, 4, &mut rng)
@@ -437,7 +444,10 @@ mod test {
 
         let mut rng = thread_rng();
         let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
-        let ctx = ShamirParams { threshold: 2, ids: parties, };
+        let ctx = ShamirParams {
+            threshold: 2,
+            ids: parties,
+        };
         let shares1 = share::<Scalar, RistrettoPoint>(v1, &ctx.ids, 2, &mut rng);
         let shares2 = share::<Scalar, RistrettoPoint>(v2, &ctx.ids, 2, &mut rng);
         for share in &shares1 {

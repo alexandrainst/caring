@@ -237,7 +237,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
         self.broadcast(msg)
     }
 
-
     #[tracing::instrument(skip_all)]
     async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::Error>
     where

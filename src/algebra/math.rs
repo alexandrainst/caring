@@ -117,7 +117,6 @@ impl<T: Send + Sync> AsMut<[T]> for Vector<T> {
     }
 }
 
-
 // // Inefficient.
 // impl<A: Send + Sync + Copy> std::ops::Add for &Vector<A>
 // where
@@ -378,7 +377,6 @@ pub fn lagrange_interpolation<F: Field>(x: F, xs: &[F], ys: &[F]) -> F {
     }
     sum
 }
-
 
 #[cfg(test)]
 mod test {

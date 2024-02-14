@@ -12,15 +12,12 @@ pub struct BeaverTriple<F, S: Shared<F>> {
     pub shares: (S, S, S),
 }
 
-
 #[derive(Clone)]
 pub struct BeaverPower<F, S: Shared<F>> {
     phantom: PhantomData<F>,
     val: S,
     powers: Vec<S>,
 }
-
-
 
 impl<F: Field, C, S: Shared<F, Context = C>> BeaverTriple<F, S> {
     /// Fake a set of beaver triples.
@@ -96,8 +93,6 @@ pub async fn beaver_multiply<
     Some(y * ax + a * (-by) + c)
 }
 
-
-
 #[derive(Clone)]
 pub struct BeaverSquare<F, S: Shared<F>> {
     phantom: PhantomData<F>,
@@ -121,7 +116,6 @@ impl<F: Field, C, S: Shared<F, Context = C>> BeaverSquare<F, S> {
             .collect()
     }
 
-
     /// Construct a beaver triple from shares.
     ///
     /// The shares must hold the invariant that `a * a = c`,
@@ -135,7 +129,6 @@ impl<F: Field, C, S: Shared<F, Context = C>> BeaverSquare<F, S> {
         }
     }
 }
-
 
 /// Perform squaring using beaver's trick
 ///
@@ -168,7 +161,6 @@ pub async fn beaver_square<
     Some((x - val) * ax + val_squared)
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -186,7 +178,7 @@ mod test {
         let threshold: u64 = 2;
 
         // preproccessing
-        let ctx = ShamirParams {threshold,ids};
+        let ctx = ShamirParams { threshold, ids };
         let triples = BeaverTriple::fake(&ctx, &mut rng);
 
         let mut taskset = tokio::task::JoinSet::new();
