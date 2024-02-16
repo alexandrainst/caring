@@ -2,7 +2,6 @@
 #![allow(refining_impl_trait)]
 
 mod algebra;
-mod extra;
 pub mod net;
 pub mod ot;
 mod protocols;

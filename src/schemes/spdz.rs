@@ -15,7 +15,7 @@ use derive_more::{Add, AddAssign, Sub, SubAssign};
 use rand::{thread_rng, RngCore, SeedableRng};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{extra::CoinToss, net::agency::Broadcast};
+use crate::{net::agency::Broadcast, protocols::cointoss::CoinToss};
 
 // Should we allow Field or use PrimeField?
 #[derive(Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign)]

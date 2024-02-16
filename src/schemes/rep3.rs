@@ -7,7 +7,6 @@
 // TODO: Parametrize this over fields instead?
 
 use ff::Field;
-use futures::prelude::*;
 use rand::RngCore;
 
 use derive_more::{Add, Sub};

@@ -1,8 +1,6 @@
 //! This module documents various tools which can be used to test or benchmark schemes.
-#[cfg(test)]
 use std::future::Future;
 
-use itertools::Itertools;
 use tokio::task::JoinError;
 
 use crate::net::network::InMemoryNetwork;
