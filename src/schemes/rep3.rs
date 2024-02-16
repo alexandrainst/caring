@@ -1,8 +1,7 @@
 //! Replicated Secret Sharing over Three Parites (Rep3)
 //!
-//!
-//!
-//!
+//! For an example see
+//! https://medium.com/partisia-blockchain/mpc-techniques-series-part-1-secret-sharing-d8f98324674a
 //!
 // TODO: Parametrize this over fields instead?
 
