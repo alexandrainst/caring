@@ -1,3 +1,5 @@
+//! Currently unused.
+
 pub mod properties;
 
 /// # Design

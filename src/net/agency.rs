@@ -209,6 +209,10 @@ pub enum BroadcastVerificationError<E> {
 }
 
 mod test {
+    #[allow(unused_imports)]
+    use crate::net::{agency::VerifiedBroadcast, network::InMemoryNetwork};
+    #[allow(unused_imports)]
+    use itertools::Itertools;
 
     #[tokio::test]
     async fn verified_broadcast() {
@@ -219,7 +223,7 @@ mod test {
             .unwrap();
 
         let t1 = async {
-            let mut vb = VerifiedBroadcast::<_, Sha256>::new(n1);
+            let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n1);
             let resp = vb
                 .symmetric_broadcast(String::from("Hi from Alice"))
                 .await
@@ -229,7 +233,7 @@ mod test {
             assert_eq!(resp[2], "Hi from Charlie");
         };
         let t2 = async {
-            let mut vb = VerifiedBroadcast::<_, Sha256>::new(n2);
+            let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n2);
             let resp = vb
                 .symmetric_broadcast(String::from("Hi from Bob"))
                 .await
@@ -239,7 +243,7 @@ mod test {
             assert_eq!(resp[2], "Hi from Charlie");
         };
         let t3 = async {
-            let mut vb = VerifiedBroadcast::<_, Sha256>::new(n3);
+            let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n3);
             let resp = vb
                 .symmetric_broadcast(String::from("Hi from Charlie"))
                 .await
@@ -249,6 +253,6 @@ mod test {
             assert_eq!(resp[2], "Hi from Charlie");
         };
 
-        join!(t1, t2, t3);
+        futures::join!(t1, t2, t3);
     }
 }

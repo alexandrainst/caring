@@ -30,74 +30,6 @@ pub struct VerifiableShare<F: Field, G: Group> {
     pub x: F, // :(
 }
 
-impl<
-        F: ff::Field + serde::Serialize + serde::de::DeserializeOwned,
-        G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>,
-    > super::Shared<F> for VerifiableShare<F, G>
-{
-    type Context = ShamirParams<F>;
-
-    fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
-        share::<F, G>(secret, &ctx.ids, ctx.threshold, rng)
-    }
-
-    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F> {
-        reconstruct::<F, G>(ctx, shares)
-    }
-}
-
-impl<F: Field, G> VerifiableShare<F, G>
-where
-    G: Group + std::ops::Mul<F, Output = G>,
-{
-    pub fn verify(&self) -> bool {
-        let VerifiableShare { share, poly, x } = self;
-        let mut check = G::identity();
-        for (i, &a) in poly.0.iter().enumerate() {
-            check += a * x.pow([i as u64]);
-        }
-        check == G::generator() * share.y
-    }
-}
-
-impl<F: Field, G: Group> ops::Add for VerifiableShare<F, G> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self {
-            x: self.x,
-            share: self.share + rhs.share,
-            poly: Polynomial(self.poly.0 + rhs.poly.0),
-        }
-    }
-}
-
-impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self {
-            x: self.x,
-            share: self.share - rhs.share,
-            poly: Polynomial(self.poly.0 - rhs.poly.0),
-        }
-    }
-}
-
-impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
-    fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
-        let fst = iter.next().unwrap();
-        let x = fst.x;
-        let mut share = fst.share;
-        let mut poly = fst.poly;
-        for vs in iter {
-            share += vs.share;
-            poly.0 += vs.poly.0;
-        }
-        VerifiableShare { share, poly, x }
-    }
-}
-
 pub fn share<F: Field, G: Group>(
     val: F,
     ids: &[F],
@@ -171,6 +103,74 @@ where
     let res = shamir::reconstruct(ctx, &shares);
 
     Some(res)
+}
+
+impl<
+        F: ff::Field + serde::Serialize + serde::de::DeserializeOwned,
+        G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>,
+    > super::Shared<F> for VerifiableShare<F, G>
+{
+    type Context = ShamirParams<F>;
+
+    fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
+        share::<F, G>(secret, &ctx.ids, ctx.threshold, rng)
+    }
+
+    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F> {
+        reconstruct::<F, G>(ctx, shares)
+    }
+}
+
+impl<F: Field, G> VerifiableShare<F, G>
+where
+    G: Group + std::ops::Mul<F, Output = G>,
+{
+    pub fn verify(&self) -> bool {
+        let VerifiableShare { share, poly, x } = self;
+        let mut check = G::identity();
+        for (i, &a) in poly.0.iter().enumerate() {
+            check += a * x.pow([i as u64]);
+        }
+        check == G::generator() * share.y
+    }
+}
+
+impl<F: Field, G: Group> ops::Add for VerifiableShare<F, G> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x,
+            share: self.share + rhs.share,
+            poly: Polynomial(self.poly.0 + rhs.poly.0),
+        }
+    }
+}
+
+impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x,
+            share: self.share - rhs.share,
+            poly: Polynomial(self.poly.0 - rhs.poly.0),
+        }
+    }
+}
+
+impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
+    fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+        let fst = iter.next().unwrap();
+        let x = fst.x;
+        let mut share = fst.share;
+        let mut poly = fst.poly;
+        for vs in iter {
+            share += vs.share;
+            poly.0 += vs.poly.0;
+        }
+        VerifiableShare { share, poly, x }
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]

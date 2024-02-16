@@ -49,15 +49,17 @@ impl<
 
 /// Tune to a specific channel
 pub trait Tuneable {
-    type Error;
+    type Error: Error;
     type SubChannel: Channel;
-    type Idx;
 
-    fn id(&self) -> Self::Idx;
+    fn id(&self) -> usize;
 
-    fn tune_mut(&mut self, idx: Self::Idx) -> &mut Self::SubChannel;
+    fn recv_from<T: serde::de::DeserializeOwned>(
+        &mut self,
+        idx: usize,
+    ) -> impl Future<Output = Result<T, Self::Error>>;
 
-    fn tune(&self, idx: Self::Idx) -> &Self::SubChannel;
+    fn send_to<T: serde::Serialize>(&self, idx: usize, msg: &T);
 }
 
 impl<
@@ -67,17 +69,19 @@ impl<
 {
     type Error = ConnectionError;
     type SubChannel = Connection<R, W>;
-    type Idx = usize;
 
-    fn id(&self) -> Self::Idx {
+    fn id(&self) -> usize {
         self.index
     }
 
-    fn tune_mut(&mut self, idx: Self::Idx) -> &mut Self::SubChannel {
-        self.index_mut(idx)
+    async fn recv_from<T: serde::de::DeserializeOwned>(
+        &mut self,
+        idx: usize,
+    ) -> Result<T, Self::Error> {
+        self[idx].recv().await
     }
 
-    fn tune(&self, idx: Self::Idx) -> &Self::SubChannel {
-        self.index(idx)
+    fn send_to<T: serde::Serialize>(&self, idx: usize, msg: &T) {
+        self[idx].send(msg)
     }
 }

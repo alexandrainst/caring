@@ -41,8 +41,13 @@ use futures::Future;
 
 use rand::RngCore;
 
-use crate::net::agency::Unicast;
+use crate::net::{
+    agency::{Broadcast, Unicast},
+    Tuneable,
+};
 
+/// Currently unused trait, but might be a better way to represent that a share
+/// can be multiplied by a const, however, it could also just be baked into 'Shared' directly.
 trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output = Self> + std::ops::MulAssign<A> {}
 
 /// For a value of type `F` the value is secret-shared
@@ -50,6 +55,8 @@ trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output = Self> + std::ops::Mul
 /// The secret-shared value needs to support addition and serialization.
 /// This is used to implement generic MPC based schemes and protocols,
 /// such as beaver triple multiplication.
+///
+/// (Maybe rename to SecretShared?)
 pub trait Shared<F>:
     Sized + Add<Output = Self> + Sub<Output = Self> + serde::Serialize + serde::de::DeserializeOwned
 {
@@ -74,6 +81,11 @@ pub trait Shared<F>:
     // TODO: Should be Result<F, impl Error> with some generic Secret-sharing error
 }
 
+/// Support for multiplication of two shares for producing a share.
+///
+/// Note, that this is different to beaver multiplication as it does not require
+/// triplets, however it does require a native multiplication protocol.
+///
 pub trait InteractiveMult<F>: Shared<F> {
     /// Perform interactive multiplication
     ///
@@ -84,12 +96,10 @@ pub trait InteractiveMult<F>: Shared<F> {
     ///
     /// Returns a result which contains the shared value corresponding
     /// to the multiplication of `a` and `b`.
-    fn interactive_mult<U: Unicast>(
+    fn interactive_mult<U: Unicast + Tuneable + Broadcast>(
         ctx: &Self::Context,
         net: &mut U,
         a: Self,
         b: Self,
     ) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
 }
-
-// Move to shamir.rs

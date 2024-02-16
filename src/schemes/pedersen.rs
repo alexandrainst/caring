@@ -1,10 +1,15 @@
 //! Implementation of Pedersen Secret Sharing
 //! <https://www.cs.cornell.edu/courses/cs754/2001fa/129.PDF>
+use std::ops::{Add, Mul, MulAssign, Sub};
+
 use ff::Field;
 use group::Group;
 use rand::RngCore;
 
-use crate::algebra::{math::lagrange_interpolation, poly::Polynomial};
+use crate::algebra::{
+    math::{lagrange_interpolation, Vector},
+    poly::Polynomial,
+};
 
 pub struct VerifiableShare<F: Field, G: Group> {
     secret: F,
@@ -92,10 +97,47 @@ pub fn reconstruct<F: Field, G: Group>(shares: &[VerifiableShare<F, G>], ids: &[
     lagrange_interpolation(F::ZERO, ids, &secrets)
 }
 
+impl<F: Field, G: Group> Add<&Self> for VerifiableShare<F, G> {
+    type Output = Self;
+
+    fn add(mut self, rhs: &Self) -> Self::Output {
+        self.secret += &rhs.secret;
+        self.blindness += &rhs.blindness;
+        self.commitment.0 += &rhs.commitment.0;
+        self
+    }
+}
+
+impl<F: Field, G: Group> Sub<&Self> for VerifiableShare<F, G> {
+    type Output = Self;
+
+    fn sub(mut self, rhs: &Self) -> Self::Output {
+        self.secret -= &rhs.secret;
+        self.blindness -= &rhs.blindness;
+        self.commitment.0 -= &rhs.commitment.0;
+        self
+    }
+}
+
+impl<F: Field, G: Group> Mul<F> for VerifiableShare<F, G>
+where
+    Vector<G>: for<'a> MulAssign<&'a F>,
+{
+    type Output = Self;
+
+    fn mul(mut self, rhs: F) -> Self::Output {
+        self.secret *= rhs;
+        self.blindness *= rhs;
+        self.commitment.0 *= &rhs;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use curve25519_dalek::{RistrettoPoint, Scalar};
+    use ff::PrimeField;
     use rand::thread_rng;
 
     use super::*;
@@ -119,5 +161,27 @@ mod tests {
 
         let v2 = reconstruct(&shares, &parties);
         assert_eq!(v, v2);
+    }
+
+    #[test]
+    fn cheaters() {
+        const PARTIES: std::ops::Range<u32> = 1..5u32;
+        let mut rng = thread_rng();
+        let v = Scalar::random(&mut rng);
+
+        let gens = PedersenGenParams(
+            RistrettoPoint::generator(),
+            RistrettoPoint::random(&mut rng),
+        );
+        let parties: Vec<_> = PARTIES.map(Scalar::from).collect();
+        let mut shares = share::<Scalar, RistrettoPoint>(v, &parties, 2, &mut rng, &gens);
+
+        for share in &mut shares {
+            share.secret *= Scalar::from_u128(2);
+        }
+
+        for (i, share) in parties.iter().zip(shares.iter()) {
+            assert!(!verify(i, share, &gens));
+        }
     }
 }

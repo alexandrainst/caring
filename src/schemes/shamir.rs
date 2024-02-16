@@ -624,28 +624,20 @@ mod test {
                     .map(Element32::from)
                     .collect();
                 let threshold = 2;
+                let ctx = ShamirParams { threshold, ids };
 
                 // secret-sharing
-                let shares = share(input.into(), &ids, threshold, &mut rng);
+                let shares = share(input.into(), &ctx.ids, ctx.threshold, &mut rng);
                 let shares = network.symmetric_unicast(shares).await.unwrap();
                 let [a, b, ..] = shares[..] else {
                     panic!("Can't multiply with only one share")
                 };
 
-                dbg!(&a);
-                dbg!(&b);
-
                 // mpc
                 let c = a * b;
-                dbg!(&c);
-                // HACK: It doesn't work yet.
-                //
-                let ctx = ShamirParams { threshold, ids };
                 let c = deflate(&ctx, c, &mut network, &mut rng)
                     .await
                     .expect("reducto failed");
-                //let c = c.giveup();
-                dbg!(&c);
 
                 // opening
                 let shares = network.symmetric_broadcast(c).await.unwrap();

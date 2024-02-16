@@ -7,5 +7,6 @@ pub mod net;
 pub mod ot;
 mod protocols;
 pub mod schemes;
+
+#[cfg(test)]
 mod testing;
-pub mod theater;
