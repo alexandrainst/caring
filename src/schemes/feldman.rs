@@ -20,14 +20,13 @@ use crate::{algebra::poly::Polynomial, schemes::shamir::ShamirParams};
 
 use ff::Field;
 use group::Group;
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use rand::RngCore;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VerifiableShare<F: Field, G: Group> {
     share: shamir::Share<F>,
     poly: Polynomial<G>,
-    pub x: F, // :(
 }
 
 pub fn share<F: Field, G: Group>(
@@ -69,7 +68,7 @@ where
             .fold(F::ZERO, |sum, x| sum + x);
         let share = shamir::Share::<F> { y: share };
         let poly = Polynomial(mac_poly.clone());
-        shares.push(VerifiableShare { share, poly, x });
+        shares.push(VerifiableShare { share, poly });
     }
     shares
 }
@@ -94,8 +93,8 @@ where
     G: Group + std::ops::Mul<F, Output = G>,
 {
     // let (shares, macs) : (Vec<_>, Vec<_>) = shares.iter().map(|s| (s.share)).unzip();
-    for share in shares {
-        if !share.verify() {
+    for (share, x) in izip!(shares, &ctx.ids) {
+        if !share.verify(*x) {
             return None;
         }
     }
@@ -125,8 +124,8 @@ impl<F: Field, G> VerifiableShare<F, G>
 where
     G: Group + std::ops::Mul<F, Output = G>,
 {
-    pub fn verify(&self) -> bool {
-        let VerifiableShare { share, poly, x } = self;
+    pub fn verify(&self, x: F) -> bool {
+        let VerifiableShare { share, poly } = self;
         let mut check = G::identity();
         for (i, &a) in poly.0.iter().enumerate() {
             check += a * x.pow([i as u64]);
@@ -140,7 +139,6 @@ impl<F: Field, G: Group> ops::Add for VerifiableShare<F, G> {
 
     fn add(self, rhs: Self) -> Self::Output {
         Self {
-            x: self.x,
             share: self.share + rhs.share,
             poly: Polynomial(self.poly.0 + rhs.poly.0),
         }
@@ -152,7 +150,6 @@ impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
 
     fn sub(self, rhs: Self) -> Self::Output {
         Self {
-            x: self.x,
             share: self.share - rhs.share,
             poly: Polynomial(self.poly.0 - rhs.poly.0),
         }
@@ -162,14 +159,13 @@ impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
 impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         let fst = iter.next().unwrap();
-        let x = fst.x;
         let mut share = fst.share;
         let mut poly = fst.poly;
         for vs in iter {
             share += vs.share;
             poly.0 += vs.poly.0;
         }
-        VerifiableShare { share, poly, x }
+        VerifiableShare { share, poly }
     }
 }
 
@@ -350,6 +346,7 @@ mod test {
     }
 
     #[test]
+
     fn addition() {
         const PARTIES: std::ops::Range<u32> = 1..5u32;
         let mut rng = thread_rng();
@@ -369,8 +366,8 @@ mod test {
             .map(|(s1, s2)| s1 + s2)
             .collect();
 
-        for share in &shares {
-            assert!(share.verify());
+        for (share,x) in shares.iter().zip(ctx.ids.iter()) {
+            assert!(share.verify(*x));
         }
 
         let vsum = reconstruct(&ctx, &shares).unwrap();
@@ -450,20 +447,22 @@ mod test {
         };
         let shares1 = share::<Scalar, RistrettoPoint>(v1, &ctx.ids, 2, &mut rng);
         let shares2 = share::<Scalar, RistrettoPoint>(v2, &ctx.ids, 2, &mut rng);
-        for share in &shares1 {
-            assert!(share.verify());
+
+        for (share,x) in shares1.iter().zip(ctx.ids.iter()) {
+            assert!(share.verify(*x));
         }
-        for share in &shares2 {
-            assert!(share.verify());
+        for (share,x) in shares2.iter().zip(ctx.ids.iter()) {
+            assert!(share.verify(*x));
         }
+
         let shares: Vec<_> = shares1
             .into_iter()
             .zip(shares2)
             .map(|(s1, s2)| s1 + s2)
             .collect();
 
-        for share in &shares {
-            assert!(share.verify());
+        for (share,x) in shares.iter().zip(ctx.ids.iter()) {
+            assert!(share.verify(*x));
         }
 
         let vsum = reconstruct(&ctx, &shares).unwrap();
