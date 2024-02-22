@@ -49,7 +49,7 @@ impl<
 
 /// Tune to a specific channel
 pub trait Tuneable {
-    type Error: Error;
+    type Error: Error + 'static;
     type SubChannel: Channel;
 
     fn id(&self) -> usize;

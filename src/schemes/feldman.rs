@@ -1,5 +1,7 @@
 //! This is an implementation of verifiable secret sharing using Feldman's scheme
 //! see <https://en.wikipedia.org/wiki/Verifiable_secret_sharing#Feldman's_scheme>
+//! or <https://www.cs.umd.edu/~gasarch/TOPICS/secretsharing/feldmanVSS.pdf>
+//!
 //! The scheme can be instansiated with any field F and a corresponding group G
 //! for which there exists a mapping F -> G using a generator `g`.
 //! It should also be noted that the discrete log problem in G should be *hard*.
@@ -10,18 +12,19 @@
 //! when receiving a share, parallel to everything else, and just 'awaited' before sending
 //! anything based on that.
 //!
-use std::{borrow::Borrow, iter, ops};
+use std::{borrow::Borrow, iter, ops::{self, Mul}};
 
 use crate::{
-    algebra::math::Vector,
-    schemes::shamir::{self},
+    algebra::{math::Vector, poly}, net::agency::Unicast, schemes::shamir
 };
 use crate::{algebra::poly::Polynomial, schemes::shamir::ShamirParams};
 
 use ff::Field;
 use group::Group;
 use itertools::{izip, Itertools};
+use num_traits::Zero;
 use rand::RngCore;
+use serde::{de::DeserializeOwned, Serialize};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VerifiableShare<F: Field, G: Group> {
@@ -71,6 +74,28 @@ where
         shares.push(VerifiableShare { share, poly });
     }
     shares
+}
+
+pub async fn interactive_mult<F, G>(
+    ctx: &ShamirParams<F>,
+    a: VerifiableShare<F, G>,
+    b: VerifiableShare<F, G>,
+    net: &mut impl Unicast,
+    rng: &mut impl RngCore,
+) -> VerifiableShare<F, G>
+where
+    F: Field + Send + Sync + Serialize + DeserializeOwned,
+    G: Group + Send + Sync + Mul<G, Output=G> + Zero,
+{
+    // HACK: This is all very ad-hoc and might not even be 'secure'.
+    let c_share = a.share * b.share; // 2t
+    let c_poly = a.poly.mult(&b.poly); // 2t
+
+    let c_share = shamir::deflate(ctx, c_share, net, rng).await.unwrap();
+
+    // TODO: Degree reduction of polynomial.
+
+    VerifiableShare { share: c_share, poly: c_poly }
 }
 
 // TODO: Distribution protocol.
