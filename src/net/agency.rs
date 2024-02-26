@@ -184,9 +184,11 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
             digest.update(msg);
             let res = digest.finalize().to_vec().into_boxed_slice();
             if res != hash {
+                event!(Level::ERROR, "Received object is not equal to the hash");
                 return Err(BroadcastVerificationError::VerificationFailure);
             }
         }
+
         // Finally, return the packets
         Ok(messages)
     }
@@ -205,11 +207,14 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
         inner.broadcast(&hash);
 
         // unneeded. (but everyone else except you to do it)
+        event!(Level::INFO, "Broadcasting received hash");
         inner.symmetric_broadcast(hash).await.unwrap();
 
+        event!(Level::INFO, "Broadcasting payload");
         inner.broadcast(msg);
 
         // hope!
+        event!(Level::INFO, "Broadcasting agreement to the message");
         let _ = inner.symmetric_broadcast(true).await.unwrap();
     }
 
@@ -221,25 +226,36 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
         let inner = &mut self.0;
-        let hash : Box<[u8]> = inner.recv_from(party).await.expect("Proper error handling");
+        let hash: Box<[u8]> = inner
+            .recv_from(party)
+            .await
+            .map_err(BroadcastVerificationError::Other)?;
 
         // todo; exclude the broadcaster.
+        event!(Level::INFO, "Broadcasting received hash");
         let all = inner.symmetric_broadcast(hash).await.unwrap();
         if !all.iter().all_equal() {
             return Err(BroadcastVerificationError::VerificationFailure);
         }
 
-        let msg : T = inner.recv_from(party).await.expect("Proper error handling");
+        let msg : T = inner.recv_from(party).await
+            .map_err(BroadcastVerificationError::Other)?;
         let mut digest = D::new();
         digest.update(&msg);
         let new_hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
 
         if new_hash != all[0] { // We could also just use 'hash'
+            event!(Level::ERROR, "Received object is not equal to the hash");
             let _ = inner.symmetric_broadcast(false).await;
             Err(BroadcastVerificationError::VerificationFailure)
         } else {
-            let checks = inner.symmetric_broadcast(true).await.unwrap();
+            event!(Level::INFO, "Received message did match hash");
+            let checks = inner
+                .symmetric_broadcast(true)
+                .await
+                .expect("TODO: Need to convert this.");
             if checks.iter().any(|c| !c) {
+                event!(Level::ERROR, "Disagreement about broadcasted message.");
                 return Err(BroadcastVerificationError::VerificationFailure)
             }
             Ok(msg)
@@ -253,7 +269,7 @@ pub enum BroadcastVerificationError<E> {
     #[error("Could not verify broadcast")]
     VerificationFailure,
     #[error(transparent)]
-    Other(E),
+    Other(E), // TODO: Handle the possible two kinds of errors.
 }
 
 mod test {
