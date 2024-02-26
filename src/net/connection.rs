@@ -142,6 +142,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
         self.input.try_send(msg.into()).unwrap();
     }
 
+    pub async fn send_async(&self, msg: &impl serde::Serialize) -> Result<(), ConnectionError>{
+        let msg = bincode::serialize(msg).unwrap();
+        self.input.send(msg.into()).await.map_err(|_| ConnectionError::Closed)
+    }
+
     /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
         // TODO: Handle timeouts?
