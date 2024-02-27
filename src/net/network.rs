@@ -128,16 +128,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     ) -> Result<Vec<T>, NetworkError> {
         let my_id = self.index;
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
-            let msg = conn.recv();
+            let msg = conn.recv::<T>();
             let msg = tokio::time::timeout(Duration::from_secs(5), msg);
             let id = if i < my_id { i } else { i + 1 } as u32;
             async move { (id, msg.await) }
         });
-        let mut messages = future::join_all(messages).await;
+        let messages = future::join_all(messages).await;
         // Maybe we should pass the id with it?
         // Idk, it doesn't seem like there is a single good way for this.
-        messages.sort_unstable_by_key(|(i, _)| *i);
-        messages
+        let messages : Vec<_> = messages
             .into_iter()
             .map(|(id, m)| match m {
                 Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
@@ -146,7 +145,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
                     source: ConnectionError::TimeOut(duration),
                 }),
             })
-            .collect()
+            .collect::<Result<_,_>>()?;
+
+            assert!(messages.len() == self.connections.len(), "Too few messages received");
+
+            Ok(messages)
     }
 
     /// Broadcast a message to all parties and await their messages
@@ -179,7 +182,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         // Maybe we should pass the id with it?
         // Idk, it doesn't seem like there is a single good way for this.
         // messages.sort_unstable_by_key(|(i, _)| *i);
-        messages
+        let mut messages : Vec<_> = messages
             .into_iter()
             .map(|(i, m)| {
                 let id = i;
@@ -191,7 +194,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
                     }),
                 }
             })
-            .collect()
+            .collect::<Result<_,_>>()?;
+
+        messages.insert(self.index, msg);
+        Ok(messages)
     }
 
     /// Unicast a message to each party and await their messages
@@ -199,7 +205,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// will be send to party `i`.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, NetworkError>
+    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Result<Vec<T>, NetworkError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -230,7 +236,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         // Maybe we should pass the id with it?
         // Idk, it doesn't seem like there is a single good way for this.
         // messages.sort_unstable_by_key(|(i, _)| *i);
-        messages
+        let mut messages : Vec<_> = messages
             .into_iter()
             .map(|(id, m)| match m {
                 Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
@@ -239,7 +245,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
                     source: ConnectionError::TimeOut(duration),
                 }),
             })
-            .collect()
+            .collect::<Result<_,_>>()?;
+
+        messages.insert(self.index, msgs.remove(0));
+        Ok(messages)
     }
 
     /// Resolute IDs
@@ -472,6 +481,46 @@ mod test {
                 for package in post {
                     assert_eq!(package, "Joy to the world!");
                 }
+            });
+        }
+    }
+
+
+    #[tokio::test]
+    async fn broadcasting() {
+        const N : usize = 3;
+        let players = Network::in_memory(N);
+        let mut messages = vec!["Over".to_string(), "And".to_string(), "Out".to_string()];
+
+        for p in players {
+            let msg = messages.pop().unwrap();
+            tokio::spawn(async move {
+                let mut network = p;
+                let post = network.symmetric_broadcast(msg).await.unwrap();
+                assert!(post.len() == N);
+                assert_eq!(post[0], "Over");
+                assert_eq!(post[1], "And");
+                assert_eq!(post[2], "Out");
+            });
+        }
+    }
+
+
+    #[tokio::test]
+    async fn unicasting() {
+        const N : usize = 3;
+        let players = Network::in_memory(N);
+        let mut messages = vec![[0,1,2], [0,1,2], [0,1,2]];
+
+        for p in players {
+            let msg = messages.pop().unwrap();
+            tokio::spawn(async move {
+                let mut network = p;
+                let post = network.symmetric_unicast(msg.to_vec()).await.unwrap();
+                assert!(post.len() == N);
+                assert_eq!(post[0], network.index);
+                assert_eq!(post[2], network.index);
+                assert_eq!(post[3], network.index);
             });
         }
     }
