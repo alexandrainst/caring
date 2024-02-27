@@ -57,7 +57,7 @@ pub async fn multiplication<F: Field + Serialize + DeserializeOwned>(
 
     // TODO: randomization (currently we lose privacy);
 
-    cx.send_to(next_id, &c0);
+    cx.send_to(next_id, &c0).await.unwrap();
     let c1 = cx.recv_from(prev_id).await.unwrap();
     dbg!(cx.id(), c1);
 

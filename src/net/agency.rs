@@ -48,7 +48,10 @@ pub trait Broadcast {
     /// Asymmetric, non-waiting
     ///
     /// * `msg`: Message to send
-    fn broadcast(&mut self, msg: &impl serde::Serialize);
+    fn broadcast(
+        &mut self,
+        msg: &impl serde::Serialize,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 
     /// Broadcast a message to all parties and await their messages
     /// Messages are ordered by their index.
@@ -82,7 +85,10 @@ pub trait Unicast {
     /// Asymmetric, non-waiting
     ///
     /// * `msgs`: Messages to send
-    fn unicast(&mut self, msgs: &[impl serde::Serialize]);
+    fn unicast(
+        &mut self,
+        msgs: &[impl serde::Serialize],
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 
     /// Unicast a message to each party and await their messages
     /// Messages are supposed to be in order, meaning message `i`
@@ -141,6 +147,8 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
         // TODO: Testing
         let inner = &mut self.0;
 
+        let msg = bincode::serialize(&msg).expect("Serialization failed.");
+
         // 1. Send hash of the message
         event!(Level::INFO, "Sending commit by hashed message");
         let mut digest = D::new();
@@ -189,6 +197,13 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
             }
         }
 
+        let messages: Result<_, _> = messages
+            .into_iter()
+            .map(|m| bincode::deserialize(&m))
+            .collect();
+
+        let messages = messages.unwrap();
+
         // Finally, return the packets
         Ok(messages)
     }
@@ -204,14 +219,14 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
         let mut digest = D::new();
         digest.update(msg);
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-        inner.broadcast(&hash);
+        inner.broadcast(&hash).await.unwrap();
 
         // unneeded. (but everyone else except you to do it)
         event!(Level::INFO, "Broadcasting received hash");
         inner.symmetric_broadcast(hash).await.unwrap();
 
         event!(Level::INFO, "Broadcasting payload");
-        inner.broadcast(msg);
+        inner.broadcast(msg).await.unwrap();
 
         // hope!
         event!(Level::INFO, "Broadcasting agreement to the message");
@@ -220,7 +235,8 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
 
     #[tracing::instrument(skip_all)]
     pub async fn recv_from<T: serde::de::DeserializeOwned + AsRef<[u8]>>(
-        &mut self, party: usize,
+        &mut self,
+        party: usize,
     ) -> Result<T, BroadcastVerificationError<<B as Tuneable>::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
@@ -238,13 +254,16 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
             return Err(BroadcastVerificationError::VerificationFailure);
         }
 
-        let msg : T = inner.recv_from(party).await
+        let msg: T = inner
+            .recv_from(party)
+            .await
             .map_err(BroadcastVerificationError::Other)?;
         let mut digest = D::new();
         digest.update(&msg);
         let new_hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
 
-        if new_hash != all[0] { // We could also just use 'hash'
+        if new_hash != all[0] {
+            // We could also just use 'hash'
             event!(Level::ERROR, "Received object is not equal to the hash");
             let _ = inner.symmetric_broadcast(false).await;
             Err(BroadcastVerificationError::VerificationFailure)
@@ -256,11 +275,10 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
                 .expect("TODO: Need to convert this.");
             if checks.iter().any(|c| !c) {
                 event!(Level::ERROR, "Disagreement about broadcasted message.");
-                return Err(BroadcastVerificationError::VerificationFailure)
+                return Err(BroadcastVerificationError::VerificationFailure);
             }
             Ok(msg)
         }
-
     }
 }
 
@@ -272,14 +290,33 @@ pub enum BroadcastVerificationError<E> {
     Other(E), // TODO: Handle the possible two kinds of errors.
 }
 
+impl<B: Broadcast + Tuneable, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
+    type Error = BroadcastVerificationError<<B as Broadcast>::Error>;
+
+    async fn broadcast(&mut self, msg: &impl serde::Serialize) -> Result<(), Self::Error> {
+        todo!("Lower trait constraints")
+    }
+
+    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::Error>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        todo!("Lower trait constraints")
+    }
+
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
+        todo!("Lower trait constraints")
+    }
+}
+
 mod test {
-    use crate::net::{agency::{BroadcastVerificationError, Unicast}, Tuneable};
+
+    use crate::net::{agency::BroadcastVerificationError, Tuneable};
     #[allow(unused_imports)]
     use crate::net::{agency::VerifiedBroadcast, network::InMemoryNetwork};
-    use digest::crypto_common::KeyInit;
+
     #[allow(unused_imports)]
     use itertools::Itertools;
-    use sha2::Digest;
 
     #[tokio::test]
     async fn verified_broadcast() {
@@ -338,18 +375,17 @@ mod test {
 
         let t2 = async {
             let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n2);
-            let resp : String = vb.recv_from(0).await.unwrap();
+            let resp: String = vb.recv_from(0).await.unwrap();
             assert_eq!(resp, "Hello everyone!");
         };
         let t3 = async {
             let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n3);
-            let resp : String = vb.recv_from(0).await.unwrap();
+            let resp: String = vb.recv_from(0).await.unwrap();
             assert_eq!(resp, "Hello everyone!");
         };
 
         futures::join!(t1, t2, t3);
     }
-
 
     #[tokio::test]
     async fn verified_broadcast_cheating_assym() {
@@ -374,24 +410,28 @@ mod test {
             let s0 = String::from("Hi from cheating Charlie");
             let s1 = String::from("Hi from charming Charlie");
             // protocol emulation.
+            use digest::Digest;
             let mut digest = sha2::Sha256::new();
             digest.update(&s1);
             let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
-            net.broadcast(&hash);
+            net.broadcast(&hash).await.unwrap();
             net.symmetric_broadcast(hash).await.unwrap();
             // fake broadcast
-            net.send_to(0, &s0);
-            net.send_to(1, &s1);
+            net.send_to(0, &s0).await.unwrap();
+            net.send_to(1, &s1).await.unwrap();
             let _ = net.symmetric_broadcast(true).await.unwrap();
-
         };
 
         let (res1, res2, _) = futures::join!(t1, t2, t3);
-        assert!(res1.as_ref().is_err_and(|e| {
-            matches!(e, BroadcastVerificationError::VerificationFailure)
-        }), "Should be a verification failure, was: {res1:?}");
-        assert!(res2.as_ref().is_err_and(|e| {
-            matches!(e, BroadcastVerificationError::VerificationFailure)
-        }), "Should be a verification failure, was: {res2:?}");
+        assert!(
+            res1.as_ref()
+                .is_err_and(|e| { matches!(e, BroadcastVerificationError::VerificationFailure) }),
+            "Should be a verification failure, was: {res1:?}"
+        );
+        assert!(
+            res2.as_ref()
+                .is_err_and(|e| { matches!(e, BroadcastVerificationError::VerificationFailure) }),
+            "Should be a verification failure, was: {res2:?}"
+        );
     }
 }

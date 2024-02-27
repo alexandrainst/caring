@@ -1,7 +1,4 @@
-use std::{
-    error::Error,
-    ops::{Index, IndexMut},
-};
+use std::{error::Error, ops::Index};
 
 use futures::Future;
 
@@ -22,7 +19,10 @@ pub trait Channel {
     /// Send a message over the channel
     ///
     /// * `msg`: message to serialize and send
-    fn send<T: serde::Serialize>(&self, msg: &T) -> impl Future<Output = Result<(), Self::Error>>;
+    fn send<T: serde::Serialize>(
+        &mut self,
+        msg: &T,
+    ) -> impl Future<Output = Result<(), Self::Error>>;
 
     fn recv<T: serde::de::DeserializeOwned>(
         &mut self,
@@ -36,7 +36,7 @@ impl<
 {
     type Error = ConnectionError;
 
-    async fn send<T: serde::Serialize>(&self, _msg: &T) -> Result<(), Self::Error> {
+    async fn send<T: serde::Serialize>(&mut self, _msg: &T) -> Result<(), Self::Error> {
         self.send_async(_msg).await
     }
 
@@ -59,7 +59,11 @@ pub trait Tuneable {
         idx: usize,
     ) -> impl Future<Output = Result<T, Self::Error>>;
 
-    fn send_to<T: serde::Serialize>(&self, idx: usize, msg: &T);
+    fn send_to<T: serde::Serialize>(
+        &mut self,
+        idx: usize,
+        msg: &T,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 }
 
 impl<
@@ -81,7 +85,11 @@ impl<
         self[idx].recv().await
     }
 
-    fn send_to<T: serde::Serialize>(&self, idx: usize, msg: &T) {
-        self[idx].send(msg)
+    async fn send_to<T: serde::Serialize>(
+        &mut self,
+        idx: usize,
+        msg: &T,
+    ) -> Result<(), Self::Error> {
+        self[idx].send_async(msg).await
     }
 }

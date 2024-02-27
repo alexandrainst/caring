@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 
 use futures::future::{self, join_all};
+use futures::prelude::*;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use tokio::{
@@ -8,9 +9,10 @@ use tokio::{
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 
-use crate::{
-    net::agency::{Broadcast, Unicast},
-    net::connection::{Connection, ConnectionError},
+use crate::net::{
+    agency::{Broadcast, Unicast},
+    connection::{Connection, ConnectionError},
+    Tuneable,
 };
 
 /// Peer-2-peer network
@@ -81,10 +83,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// Asymmetric, non-waiting
     ///
     /// * `msg`: Message to send
-    pub fn broadcast(&mut self, msg: &impl serde::Serialize) {
-        for conn in &self.connections {
-            conn.send(msg);
-        }
+    pub async fn broadcast(&mut self, msg: &impl serde::Serialize) -> Result<(), NetworkError> {
+        let my_id = self.index;
+        let outgoing = self.connections.iter_mut().enumerate().map(|(i, conn)| {
+            let id = if i < my_id { i } else { i + 1 } as u32;
+            conn.send_async(&msg)
+                .map_err(move |e| NetworkError { source: e, id })
+        });
+        future::try_join_all(outgoing).await?;
+        Ok(())
     }
 
     /// Unicast messages to each party
@@ -95,10 +102,20 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// Asymmetric, non-waiting
     ///
     /// * `msgs`: Messages to send
-    pub fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
-        for (conn, msg) in self.connections.iter().zip(msgs.iter()) {
-            conn.send(msg);
-        }
+    pub async fn unicast(&mut self, msgs: &[impl serde::Serialize]) -> Result<(), NetworkError> {
+        let my_id = self.index;
+        let outgoing = self
+            .connections
+            .iter_mut()
+            .zip(msgs.iter())
+            .enumerate()
+            .map(|(i, (conn, msg))| {
+                let id = if i < my_id { i } else { i + 1 } as u32;
+                conn.send_async(msg)
+                    .map_err(move |e| NetworkError { source: e, id })
+            });
+        future::try_join_all(outgoing).await?;
+        Ok(())
     }
 
     /// Receive a message for each party.
@@ -109,10 +126,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     pub async fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
     ) -> Result<Vec<T>, NetworkError> {
+        let my_id = self.index;
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv();
             let msg = tokio::time::timeout(Duration::from_secs(5), msg);
-            async move { (i, msg.await) }
+            let id = if i < my_id { i } else { i + 1 } as u32;
+            async move { (id, msg.await) }
         });
         let mut messages = future::join_all(messages).await;
         // Maybe we should pass the id with it?
@@ -120,15 +139,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         messages.sort_unstable_by_key(|(i, _)| *i);
         messages
             .into_iter()
-            .map(|(i, m)| {
-                let id = i as u32;
-                match m {
-                    Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
-                    Err(duration) => Err(NetworkError {
-                        id,
-                        source: ConnectionError::TimeOut(duration),
-                    }),
-                }
+            .map(|(id, m)| match m {
+                Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
+                Err(duration) => Err(NetworkError {
+                    id,
+                    source: ConnectionError::TimeOut(duration),
+                }),
             })
             .collect()
     }
@@ -141,10 +157,41 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        self.broadcast(&msg);
-        let mut messages = self.receive_all().await?;
-        messages.insert(self.index, msg);
-        Ok(messages)
+        let my_id = self.index;
+        let (mut rx, mut tx): (Vec<_>, Vec<_>) =
+            self.connections.iter_mut().map(|c| c.split()).unzip();
+
+        let outgoing = tx.iter_mut().enumerate().map(|(id, conn)| {
+            let id = if id < my_id { id } else { id + 1 } as u32;
+            conn.send_async(&msg)
+                .map_err(move |e| NetworkError { source: e, id })
+        });
+        let messages = rx.iter_mut().enumerate().map(|(i, conn)| {
+            let msg = conn.recv::<T>();
+            let msg = tokio::time::timeout(Duration::from_secs(5), msg);
+            let id = if i < my_id { i } else { i + 1 } as u32;
+            async move { (id, msg.await) }
+        });
+        let (receipts, messages) =
+            futures::join!(future::try_join_all(outgoing), future::join_all(messages));
+        receipts?;
+
+        // Maybe we should pass the id with it?
+        // Idk, it doesn't seem like there is a single good way for this.
+        // messages.sort_unstable_by_key(|(i, _)| *i);
+        messages
+            .into_iter()
+            .map(|(i, m)| {
+                let id = i;
+                match m {
+                    Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
+                    Err(duration) => Err(NetworkError {
+                        id,
+                        source: ConnectionError::TimeOut(duration),
+                    }),
+                }
+            })
+            .collect()
     }
 
     /// Unicast a message to each party and await their messages
@@ -152,15 +199,47 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// will be send to party `i`.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Result<Vec<T>, NetworkError>
+    pub async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, NetworkError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        let mine = msgs.remove(self.index);
-        self.unicast(&msgs);
-        let mut messages = self.receive_all().await?;
-        messages.insert(self.index, mine);
-        Ok(messages)
+        let my_id = self.index;
+        let (mut rx, mut tx): (Vec<_>, Vec<_>) =
+            self.connections.iter_mut().map(|c| c.split()).unzip();
+
+        let outgoing = tx
+            .iter_mut()
+            .zip(msgs.iter())
+            .enumerate()
+            .map(|(id, (conn, msg))| {
+                let id = id as u32;
+                conn.send_async(msg)
+                    .map_err(move |e| NetworkError { source: e, id })
+            });
+
+        let messages = rx.iter_mut().enumerate().map(|(i, conn)| {
+            let id = if i < my_id { i } else { i + 1 } as u32;
+            let msg = conn.recv::<T>();
+            let msg = tokio::time::timeout(Duration::from_secs(5), msg);
+            async move { (id, msg.await) }
+        });
+        let (receipts, messages) =
+            futures::join!(future::try_join_all(outgoing), future::join_all(messages));
+        receipts?;
+
+        // Maybe we should pass the id with it?
+        // Idk, it doesn't seem like there is a single good way for this.
+        // messages.sort_unstable_by_key(|(i, _)| *i);
+        messages
+            .into_iter()
+            .map(|(id, m)| match m {
+                Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
+                Err(duration) => Err(NetworkError {
+                    id,
+                    source: ConnectionError::TimeOut(duration),
+                }),
+            })
+            .collect()
     }
 
     /// Resolute IDs
@@ -211,8 +290,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     type Error = NetworkError;
 
     #[tracing::instrument(skip_all)]
-    fn unicast(&mut self, msgs: &[impl serde::Serialize]) {
-        self.unicast(msgs)
+    async fn unicast(&mut self, msgs: &[impl serde::Serialize]) -> Result<(), Self::Error> {
+        self.unicast(msgs).await
     }
 
     #[tracing::instrument(skip_all)]
@@ -233,8 +312,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
     type Error = NetworkError;
 
     #[tracing::instrument(skip_all)]
-    fn broadcast(&mut self, msg: &impl serde::Serialize) {
-        self.broadcast(msg)
+    async fn broadcast(&mut self, msg: &impl serde::Serialize) -> Result<(), Self::Error> {
+        self.broadcast(msg).await
     }
 
     #[tracing::instrument(skip_all)]
@@ -370,20 +449,7 @@ impl TcpNetwork {
     }
 
     pub async fn flush(&mut self) -> Result<(), NetworkError> {
-        join_all(
-            self.connections
-                .iter_mut()
-                .enumerate()
-                .map(|(i, conn)| async move {
-                    conn.flush().await.map_err(|source| NetworkError {
-                        id: i as u32,
-                        source,
-                    })
-                }),
-        )
-        .await
-        .into_iter()
-        .collect()
+        todo!()
     }
 }
 
@@ -401,7 +467,7 @@ mod test {
             tokio::spawn(async move {
                 let mut network = p;
                 let msg = "Joy to the world!".to_owned();
-                network.broadcast(&msg);
+                network.broadcast(&msg).await.unwrap();
                 let post: Vec<String> = network.receive_all().await.unwrap();
                 for package in post {
                     assert_eq!(package, "Joy to the world!");
