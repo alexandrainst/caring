@@ -188,7 +188,7 @@ mod test {
 
     use std::net::SocketAddrV4;
 
-    use tokio::net::{TcpListener, TcpStream};
+    use tokio::net::TcpListener;
 
     use super::*;
 

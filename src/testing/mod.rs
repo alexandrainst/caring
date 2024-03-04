@@ -71,7 +71,7 @@ mod test {
         Cluster::new(32)
             .run(|mut network| async move {
                 let msg = "Joy to the world!".to_owned();
-                network.broadcast(&msg);
+                network.broadcast(&msg).await.unwrap();
                 let post: Vec<String> = network.receive_all().await.unwrap();
                 for package in post {
                     assert_eq!(package, "Joy to the world!");

@@ -11,7 +11,7 @@ use tokio::{
 
 use crate::net::{
     agency::{Broadcast, Unicast},
-    connection::{Connection, ConnectionError},
+    connection::{Connection, ConnectionError}, Tuneable,
 };
 
 /// Peer-2-peer network
@@ -335,9 +335,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
         self.symmetric_broadcast(msg).await
     }
 
-    #[tracing::instrument(skip_all)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
-        self.receive_all().await
+    fn recv_from<T: serde::de::DeserializeOwned>(
+        &mut self,
+        idx: usize,
+    ) -> impl Future<Output = Result<T, Self::Error>> {
+            Tuneable::recv_from(self, idx)
+                .map_err(move |e| NetworkError{id: idx as u32, source: e})
     }
 }
 
