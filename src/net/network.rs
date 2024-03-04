@@ -169,6 +169,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
             conn.send_async(&msg)
                 .map_err(move |e| NetworkError { source: e, id })
         });
+
         let messages = rx.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv::<T>();
             let msg = tokio::time::timeout(Duration::from_secs(5), msg);
@@ -210,6 +211,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
         let my_id = self.index;
+        let my_own_msg = msgs.remove(my_id);
+
         let (mut rx, mut tx): (Vec<_>, Vec<_>) =
             self.connections.iter_mut().map(|c| c.split()).unzip();
 
@@ -247,7 +250,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
             })
             .collect::<Result<_,_>>()?;
 
-        messages.insert(self.index, msgs.remove(0));
+        messages.insert(self.index, my_own_msg);
         Ok(messages)
     }
 
@@ -464,6 +467,8 @@ impl TcpNetwork {
 
 #[cfg(test)]
 mod test {
+    use std::collections::VecDeque;
+
     use super::*;
 
     #[tokio::test]
@@ -490,11 +495,12 @@ mod test {
     async fn broadcasting() {
         const N : usize = 3;
         let players = Network::in_memory(N);
-        let mut messages = vec!["Over".to_string(), "And".to_string(), "Out".to_string()];
+        let mut messages : VecDeque<_> = vec!["Over".to_string(), "And".to_string(), "Out".to_string()].into();
 
+        let mut tasks = Vec::new();
         for p in players {
-            let msg = messages.pop().unwrap();
-            tokio::spawn(async move {
+            let msg = messages.pop_front().unwrap();
+            let t = tokio::spawn(async move {
                 let mut network = p;
                 let post = network.symmetric_broadcast(msg).await.unwrap();
                 assert!(post.len() == N);
@@ -502,7 +508,10 @@ mod test {
                 assert_eq!(post[1], "And");
                 assert_eq!(post[2], "Out");
             });
+            tasks.push(t);
         }
+        let res = future::try_join_all(tasks.into_iter()).await;
+        res.unwrap();
     }
 
 
@@ -510,18 +519,24 @@ mod test {
     async fn unicasting() {
         const N : usize = 3;
         let players = Network::in_memory(N);
-        let mut messages = vec![[0,1,2], [0,1,2], [0,1,2]];
-
+        let mut messages : VecDeque<_> = vec![[0,1,2], [0,1,2], [0,1,2]].into();
+        // Each party sends each other party a message.
+        // To test this we send each party their id as the message.
+        let mut tasks = Vec::new();
         for p in players {
-            let msg = messages.pop().unwrap();
-            tokio::spawn(async move {
+            let msg = messages.pop_front().unwrap();
+            let t = tokio::spawn(async move {
                 let mut network = p;
                 let post = network.symmetric_unicast(msg.to_vec()).await.unwrap();
+                dbg!(network.index, &post);
                 assert!(post.len() == N);
                 assert_eq!(post[0], network.index);
+                assert_eq!(post[1], network.index);
                 assert_eq!(post[2], network.index);
-                assert_eq!(post[3], network.index);
             });
+            tasks.push(t);
         }
+        let res = future::try_join_all(tasks.into_iter()).await;
+        res.unwrap();
     }
 }
