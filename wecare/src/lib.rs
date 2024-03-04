@@ -82,8 +82,6 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
             assert_eq!(share.x, *id);
         }
 
-        network.flush().await.expect("Failed flushing");
-
         // reconstruct
         let res = feldman::reconstruct_many(&ctx, &open_shares).expect("Failed to validate")
             .into_iter()

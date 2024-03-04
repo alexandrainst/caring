@@ -461,10 +461,6 @@ impl TcpNetwork {
             });
         join_all(futs).await.into_iter().map_ok(|_| {}).collect()
     }
-
-    pub async fn flush(&mut self) -> Result<(), NetworkError> {
-        todo!()
-    }
 }
 
 #[cfg(test)]
