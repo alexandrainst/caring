@@ -116,9 +116,6 @@ use digest::Digest;
 use tracing::{event, Level};
 
 use crate::net::Tuneable;
-// INFO: Reconsider if Broadcast should be a supertrait or just a type parameter
-// There is also the question if we should overload the existing methods or provide
-// new methods prefixed with 'verified' or something.
 
 pub struct VerifiedBroadcast<B: Broadcast + Tuneable, D: Digest>(B, PhantomData<D>);
 
@@ -130,17 +127,13 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
     pub fn new(broadcast: B) -> Self {
         Self(broadcast, PhantomData)
     }
-    // }
 
-    // impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
-    //     type Error = BroadcastVerificationError<B::Error>;
 
-    /// Ensure that a received broadcast is the same across all parties.
     #[tracing::instrument(skip_all)]
-    pub async fn symmetric_broadcast<T: AsRef<[u8]>>(
+    pub async fn symmetric_broadcast<T>(
         &mut self,
         msg: T,
-    ) -> Result<Vec<T>, BroadcastVerificationError<<B as Broadcast>::Error>>
+    ) -> Result<Vec<T>, BroadcastVerificationError<<B as Broadcast>::Error, <B as Tuneable>::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -157,7 +150,7 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
         let msg_hashes = inner
             .symmetric_broadcast(hash)
             .await
-            .map_err(BroadcastVerificationError::Other)?;
+            .map_err(BroadcastVerificationError::Broadcast)?;
 
         // 3. Hash the hashes together and broadcast that
         event!(Level::INFO, "Broadcast sum of all commits");
@@ -169,7 +162,7 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
         let sum_all: Vec<Box<[u8]>> = inner
             .symmetric_broadcast(sum)
             .await
-            .map_err(BroadcastVerificationError::Other)?;
+            .map_err(BroadcastVerificationError::Broadcast)?;
 
         let check = sum_all.iter().all_equal();
         if !check {
@@ -183,7 +176,7 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
         let messages = inner
             .symmetric_broadcast(msg)
             .await
-            .map_err(BroadcastVerificationError::Other)?;
+            .map_err(BroadcastVerificationError::Broadcast)?;
 
         event!(Level::INFO, "Verifiying commitments");
         for (msg, hash) in messages.iter().zip(msg_hashes) {
@@ -209,15 +202,19 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn broadcast<T>(&mut self, msg: &T)
+    pub async fn broadcast<T>(
+        &mut self,
+        msg: &T,
+    ) -> Result<(), BroadcastVerificationError<<B as Broadcast>::Error, <B as Tuneable>::Error>>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + AsRef<[u8]>,
+        T: serde::Serialize
     {
         let inner = &mut self.0;
+        let msg = bincode::serialize(msg).unwrap();
 
         event!(Level::INFO, "Sending commit by hashed message");
         let mut digest = D::new();
-        digest.update(msg);
+        digest.update(&msg);
         let hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
         inner.broadcast(&hash).await.unwrap();
 
@@ -226,26 +223,27 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
         inner.symmetric_broadcast(hash).await.unwrap();
 
         event!(Level::INFO, "Broadcasting payload");
-        inner.broadcast(msg).await.unwrap();
+        inner.broadcast(&msg).await.unwrap();
 
         // hope!
         event!(Level::INFO, "Broadcasting agreement to the message");
         let _ = inner.symmetric_broadcast(true).await.unwrap();
+        Ok(())
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn recv_from<T: serde::de::DeserializeOwned + AsRef<[u8]>>(
+    pub async fn recv_from<T>(
         &mut self,
         party: usize,
-    ) -> Result<T, BroadcastVerificationError<<B as Tuneable>::Error>>
+    ) -> Result<T, BroadcastVerificationError<<B as Broadcast>::Error, <B as Tuneable>::Error>>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned,
+        T: serde::de::DeserializeOwned
     {
         let inner = &mut self.0;
         let hash: Box<[u8]> = inner
             .recv_from(party)
             .await
-            .map_err(BroadcastVerificationError::Other)?;
+            .map_err(BroadcastVerificationError::Single)?;
 
         // todo; exclude the broadcaster.
         event!(Level::INFO, "Broadcasting received hash");
@@ -254,10 +252,10 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
             return Err(BroadcastVerificationError::VerificationFailure);
         }
 
-        let msg: T = inner
+        let msg: Vec<u8> = inner
             .recv_from(party)
             .await
-            .map_err(BroadcastVerificationError::Other)?;
+            .map_err(BroadcastVerificationError::Single)?;
         let mut digest = D::new();
         digest.update(&msg);
         let new_hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
@@ -277,36 +275,47 @@ impl<B: Broadcast + Tuneable, D: Digest> VerifiedBroadcast<B, D> {
                 event!(Level::ERROR, "Disagreement about broadcasted message.");
                 return Err(BroadcastVerificationError::VerificationFailure);
             }
+
+            let buf = std::io::Cursor::new(msg);
+            let msg = bincode::deserialize_from(buf)
+                .map_err(|_| BroadcastVerificationError::Malformed)?;
+
             Ok(msg)
         }
     }
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum BroadcastVerificationError<E> {
+pub enum BroadcastVerificationError<E1, E2> {
     #[error("Could not verify broadcast")]
     VerificationFailure,
+    #[error("Could not deserialize object")]
+    Malformed,
     #[error(transparent)]
-    Other(E), // TODO: Handle the possible two kinds of errors.
+    Broadcast(E1), // TODO: Handle the possible two kinds of errors.
+    #[error(transparent)]
+    Single(E2), // TODO: Handle the possible two kinds of errors.
 }
 
 impl<B: Broadcast + Tuneable, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
-    type Error = BroadcastVerificationError<<B as Broadcast>::Error>;
+    type Error = BroadcastVerificationError<<B as Broadcast>::Error, <B as Tuneable>::Error>;
 
-    async fn broadcast(&mut self, _msg: &impl serde::Serialize) -> Result<(), Self::Error> {
-        todo!("Lower trait constraints")
+    async fn broadcast(&mut self, msg: &impl serde::Serialize) -> Result<(), Self::Error> {
+        self.broadcast(msg).await
     }
 
-    async fn symmetric_broadcast<T>(&mut self, _msg: T) -> Result<Vec<T>, Self::Error>
+    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::Error>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        todo!("Lower trait constraints")
+        self.symmetric_broadcast(msg).await
     }
 
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
-        todo!("Lower trait constraints")
+        todo!("This should not be part of broadcast")
     }
+
+    /* TODO: Add recv_from */
 }
 
 mod test {
