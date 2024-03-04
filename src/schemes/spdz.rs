@@ -23,7 +23,7 @@ pub struct Share<F: PrimeField> {
     // This field is nice and I like it
     pub val: F,
     // This field is scary and I don't know how it should be handled
-    mac: F,
+    pub mac: F,
 }
 
 impl<F: PrimeField> Share<F> {
@@ -138,7 +138,7 @@ pub struct SpdzContext<F: PrimeField> {
     closed_values: Vec<Share<F>>,
     alpha: F,
     // dbgr supplier (det. random bit generator)
-    // Need value that tells whether it is party 1.
+    pub is_party_zero: bool,
 }
 
 // TODO: Convert to associated function?
