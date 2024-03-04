@@ -18,9 +18,11 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::{net::agency::Broadcast, protocols::cointoss::CoinToss};
 
 // Should we allow Field or use PrimeField?
-#[derive(Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign)]
+#[derive(Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign, serde::Serialize, serde::Deserialize)]
 pub struct Share<F: PrimeField> {
-    val: F,
+    // This field is nice and I like it
+    pub val: F,
+    // This field is scary and I don't know how it should be handled
     mac: F,
 }
 
@@ -55,6 +57,11 @@ impl<F: PrimeField> Share<F> {
     }
 }
 
+pub fn make_random_share<F: PrimeField>(val: F, mac: F) -> Share<F> {
+    //Share{val: F::random(&mut rng), mac: F::random(&mut rng)}
+    Share{val: val, mac: mac}
+}
+
 /// Mutliplication between a share and a public value
 ///
 /// This operation is symmetric
@@ -83,9 +90,9 @@ impl<F: PrimeField> std::ops::Add<F> for Share<F> {
     }
 }
 
-struct SpdzParams<F: PrimeField> {
-    key: F,
-}
+//struct SpdzParams<F: PrimeField> {
+//    key: F,
+//}
 
 // TODO: Implement multiplication between shares.
 
@@ -131,6 +138,7 @@ pub struct SpdzContext<F: PrimeField> {
     closed_values: Vec<Share<F>>,
     alpha: F,
     // dbgr supplier (det. random bit generator)
+    // Need value that tells whether it is party 1.
 }
 
 // TODO: Convert to associated function?
