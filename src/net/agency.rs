@@ -293,11 +293,11 @@ pub enum BroadcastVerificationError<E> {
 impl<B: Broadcast + Tuneable, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
     type Error = BroadcastVerificationError<<B as Broadcast>::Error>;
 
-    async fn broadcast(&mut self, msg: &impl serde::Serialize) -> Result<(), Self::Error> {
+    async fn broadcast(&mut self, _msg: &impl serde::Serialize) -> Result<(), Self::Error> {
         todo!("Lower trait constraints")
     }
 
-    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::Error>
+    async fn symmetric_broadcast<T>(&mut self, _msg: T) -> Result<Vec<T>, Self::Error>
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -311,7 +311,9 @@ impl<B: Broadcast + Tuneable, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
 
 mod test {
 
-    use crate::net::{agency::BroadcastVerificationError, Tuneable};
+    #[allow(unused_imports)]
+    use super::*;
+
     #[allow(unused_imports)]
     use crate::net::{agency::VerifiedBroadcast, network::InMemoryNetwork};
 

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 
-use futures::future::{self, join_all};
+use futures::future::join_all;
 use futures::prelude::*;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
@@ -12,7 +12,6 @@ use tokio::{
 use crate::net::{
     agency::{Broadcast, Unicast},
     connection::{Connection, ConnectionError},
-    Tuneable,
 };
 
 /// Peer-2-peer network

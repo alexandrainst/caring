@@ -1,4 +1,4 @@
-use std::{error::Error, ops::Index};
+use std::error::Error;
 
 use futures::Future;
 

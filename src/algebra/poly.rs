@@ -1,7 +1,7 @@
 use ff::Field;
 use std::ops::{self};
 
-use itertools::{self, Itertools};
+use itertools::Itertools;
 use rand::RngCore;
 
 use crate::algebra::math::Vector;
