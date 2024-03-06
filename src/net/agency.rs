@@ -46,9 +46,8 @@ pub trait Broadcast {
 
     /// Broadcast a message to all other parties.
     ///
-    /// Asymmetric, non-waiting
-    ///
     /// * `msg`: Message to send
+    /// Returns: an error if there were problems broadcasting the message.
     fn broadcast(
         &mut self,
         msg: &impl serde::Serialize,
@@ -56,6 +55,9 @@ pub trait Broadcast {
 
     /// Broadcast a message to all parties and await their messages
     /// Messages are ordered by their index.
+    ///
+    /// This function is symmetric, and as such it is expected that all other parties
+    /// call this function concurrently.
     ///
     /// * `msg`: message to send and receive
     fn symmetric_broadcast<T>(
@@ -67,11 +69,15 @@ pub trait Broadcast {
 
     /// Receive a message from a party
     ///
-    /// Returns: a message
+    /// Returns: a message from the given party or an error
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
     ) -> impl Future<Output = Result<T, Self::Error>>;
+
+
+    /// Size of the broadcasting network
+    fn size(&self) -> usize;
 }
 
 pub trait Unicast {
@@ -110,6 +116,10 @@ pub trait Unicast {
     fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>;
+
+
+    /// Size of the unicasting network
+    fn size(&self) -> usize;
 }
 
 use digest::Digest;
@@ -149,7 +159,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
         let msg_hashes = inner
             .symmetric_broadcast(hash)
             .await
-            .map_err(BroadcastVerificationError::Broadcast)?;
+            .map_err(BroadcastVerificationError::Other)?;
 
         // 3. Hash the hashes together and broadcast that
         event!(Level::INFO, "Broadcast sum of all commits");
@@ -161,7 +171,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
         let sum_all: Vec<Box<[u8]>> = inner
             .symmetric_broadcast(sum)
             .await
-            .map_err(BroadcastVerificationError::Broadcast)?;
+            .map_err(BroadcastVerificationError::Other)?;
 
         let check = sum_all.iter().all_equal();
         if !check {
@@ -175,7 +185,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
         let messages = inner
             .symmetric_broadcast(msg)
             .await
-            .map_err(BroadcastVerificationError::Broadcast)?;
+            .map_err(BroadcastVerificationError::Other)?;
 
         event!(Level::INFO, "Verifiying commitments");
         for (msg, hash) in messages.iter().zip(msg_hashes) {
@@ -242,7 +252,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
         let hash: Box<[u8]> = inner
             .recv_from(party)
             .await
-            .map_err(BroadcastVerificationError::Broadcast)?;
+            .map_err(BroadcastVerificationError::Other)?;
 
         // todo; exclude the broadcaster.
         event!(Level::INFO, "Broadcasting received hash");
@@ -254,7 +264,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
         let msg: Vec<u8> = inner
             .recv_from(party)
             .await
-            .map_err(BroadcastVerificationError::Broadcast)?;
+            .map_err(BroadcastVerificationError::Other)?;
         let mut digest = D::new();
         digest.update(&msg);
         let new_hash: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();
@@ -291,7 +301,7 @@ pub enum BroadcastVerificationError<E> {
     #[error("Could not deserialize object")]
     Malformed,
     #[error(transparent)]
-    Broadcast(E), // TODO: Handle the possible two kinds of errors.
+    Other(E),
 }
 
 impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
@@ -315,6 +325,12 @@ impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
     ) -> impl Future<Output = Result<T, Self::Error>> {
         self.recv_from(idx)
     }
+
+    fn size(&self) -> usize {
+        self.0.size()
+    }
+
+
 
 }
 

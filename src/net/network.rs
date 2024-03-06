@@ -86,7 +86,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         let my_id = self.index;
         let outgoing = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let id = if i < my_id { i } else { i + 1 } as u32;
-            conn.send_async(&msg)
+            conn.send(&msg)
                 .map_err(move |e| NetworkError { source: e, id })
         });
         future::try_join_all(outgoing).await?;
@@ -110,7 +110,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
             .enumerate()
             .map(|(i, (conn, msg))| {
                 let id = if i < my_id { i } else { i + 1 } as u32;
-                conn.send_async(msg)
+                conn.send(msg)
                     .map_err(move |e| NetworkError { source: e, id })
             });
         future::try_join_all(outgoing).await?;
@@ -317,6 +317,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
         self.receive_all().await
     }
+
+    fn size(&self) -> usize {
+        self.connections.len()
+    }
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
@@ -341,6 +345,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
     ) -> impl Future<Output = Result<T, Self::Error>> {
             Tuneable::recv_from(self, idx)
                 .map_err(move |e| NetworkError{id: idx as u32, source: e})
+    }
+
+    fn size(&self) -> usize {
+        self.connections.len()
     }
 }
 

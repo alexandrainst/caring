@@ -37,7 +37,7 @@ impl<
     type Error = ConnectionError;
 
     async fn send<T: serde::Serialize>(&mut self, _msg: &T) -> Result<(), Self::Error> {
-        self.send_async(_msg).await
+        self.send(_msg).await
     }
 
     fn recv<T: serde::de::DeserializeOwned>(
@@ -90,6 +90,6 @@ impl<
         idx: usize,
         msg: &T,
     ) -> Result<(), Self::Error> {
-        self[idx].send_async(msg).await
+        self[idx].send(msg).await
     }
 }

@@ -1,27 +1,24 @@
 //! This module documents various tools which can be used to test or benchmark schemes.
 use std::future::Future;
-
 use tokio::task::JoinError;
-
 use crate::net::network::InMemoryNetwork;
 
 pub struct Cluster<Arg = ()> {
-    //players: Vec<Arc<RefCell<InMemoryNetwork>>>
     players: Vec<InMemoryNetwork>, //players: tokio::task::JoinSet<InMemoryNetwork>,
-    args: Option<Vec<Arg>>,
+    args: Vec<Arg>,
 }
 impl Cluster {
     pub fn new(size: usize) -> Self {
         let players = InMemoryNetwork::in_memory(size);
         Self {
+            args: vec![(); size],
             players,
-            args: None,
         }
     }
 
     pub fn with_args<A>(self, args: impl Into<Vec<A>>) -> Cluster<A> {
         Cluster {
-            args: Some(args.into()),
+            args: args.into(),
             players: self.players,
         }
     }
@@ -36,7 +33,7 @@ impl Cluster {
     }
 }
 
-impl<Arg> Cluster<Arg> {
+impl<Arg: Clone> Cluster<Arg> {
     pub async fn run_with_args<T, P, F>(self, prg: P) -> Result<Vec<T>, JoinError>
     where
         T: Send + 'static,
@@ -46,12 +43,13 @@ impl<Arg> Cluster<Arg> {
         let futures: Vec<_> = self
             .players
             .into_iter()
-            .zip(self.args.into_iter().flatten())
+            .zip(self.args.into_iter())
             .map(|(p, arg)| {
                 let fut = prg(p, arg);
                 tokio::spawn(fut)
             })
             .collect();
+
         futures::future::join_all(futures)
             .await
             .into_iter()
@@ -68,7 +66,7 @@ mod test {
         // Yes this is a problem.
         // We really need scoped async tasks, but those don't really exist.
 
-        Cluster::new(32)
+        let c : u32 = Cluster::new(32)
             .run(|mut network| async move {
                 let msg = "Joy to the world!".to_owned();
                 network.broadcast(&msg).await.unwrap();
@@ -76,8 +74,10 @@ mod test {
                 for package in post {
                     assert_eq!(package, "Joy to the world!");
                 }
+                1 // to check that we actually run
             })
             .await
-            .unwrap();
+            .unwrap().iter().sum();
+        assert_eq!(c, 32);
     }
 }

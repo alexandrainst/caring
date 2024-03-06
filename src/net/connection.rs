@@ -81,7 +81,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Send a message, waiting until receival
     ///
     /// * `msg`: Message to send
-    pub async fn send_async(&mut self, msg: &impl serde::Serialize) -> Result<(), ConnectionError> {
+    pub async fn send(&mut self, msg: &impl serde::Serialize) -> Result<(), ConnectionError> {
         let msg = bincode::serialize(msg).unwrap();
         self.writer
             .send(msg.into())
@@ -197,9 +197,9 @@ mod test {
         let (conn1, conn2) = DuplexConnection::in_memory();
         let h1 = async move {
             let mut conn = conn1;
-            conn.send_async(&"Hello").await.unwrap();
+            conn.send(&"Hello").await.unwrap();
             println!("[1] Message sent");
-            conn.send_async(&"Buddy").await.unwrap();
+            conn.send(&"Buddy").await.unwrap();
             println!("[1] Message sent");
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[1] Message received");
@@ -213,7 +213,7 @@ mod test {
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Buddy".into());
-            conn.send_async(&"Greetings friend").await.unwrap();
+            conn.send(&"Greetings friend").await.unwrap();
             println!("[2] Message sent");
         };
 
@@ -227,9 +227,9 @@ mod test {
         let h1 = async move {
             let stream = TcpStream::connect(addr).await.unwrap();
             let mut conn = Connection::from_tcp(stream);
-            conn.send_async(&"Hello").await.unwrap();
+            conn.send(&"Hello").await.unwrap();
             println!("[1] Message sent");
-            conn.send_async(&"Buddy").await.unwrap();
+            conn.send(&"Buddy").await.unwrap();
             println!("[1] Message sent");
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[1] Message received");
@@ -244,7 +244,7 @@ mod test {
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Buddy".into());
-            conn.send_async(&"Greetings friend").await.unwrap();
+            conn.send(&"Greetings friend").await.unwrap();
             println!("[2] Message sent");
         };
 
