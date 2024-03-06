@@ -7,13 +7,19 @@ pub async fn pick_random<C, F, S>(
     ctx: &C,
     rng: &mut impl Rng,
     cx: &mut impl Unicast,
-    upper: u64,
+    upper: u64, /* should be `F` */
 ) -> S
 where
-    F: From<u64>,
+    F: From<u64>, /* <-- not nice */
     F: Field,
     S: Shared<F, Context = C> + std::iter::Sum,
 {
+    // Currently there are no enforcement that the random value be in the given range
+    // or even being random at all.
+    //
+    // Assuming the range requirement is upheld, a malicious party can simply choose the
+    // largest or smallest value, and they will know that it lies thus lies closer to either
+    // the top or bottom.
     let parties = cx.size() as u64;
     let num = rng.gen_range(0..(upper/parties)); // NOTE: This might not be a good idea.
     assert!(num * parties <= upper, "{num} * {parties} <= {upper}");
@@ -55,8 +61,6 @@ mod test {
                     let num : Share = pick_random(&ctx, &mut rng, &mut net, upper).await;
                     let shares = net.symmetric_broadcast(num).await.unwrap();
                     let num = Share::recombine(&ctx, &shares).unwrap();
-                    // let num = num.as_bytes()[..8].try_into().unwrap();
-                    // let num = u64::from_le_bytes(num);
                     let num : u64 = num.into();
 
                     println!("{i}: {num}");
