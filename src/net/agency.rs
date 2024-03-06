@@ -76,7 +76,8 @@ pub trait Broadcast {
     ) -> impl Future<Output = Result<T, Self::Error>>;
 
 
-    /// Size of the broadcasting network
+    /// Size of the broadcasting network including yourself,
+    /// as such there is n-1 outgoing connections
     fn size(&self) -> usize;
 }
 
@@ -118,7 +119,8 @@ pub trait Unicast {
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>;
 
 
-    /// Size of the unicasting network
+    /// Size of the unicasting network including yourself,
+    /// as such there is n-1 outgoing connections
     fn size(&self) -> usize;
 }
 

@@ -319,7 +319,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     }
 
     fn size(&self) -> usize {
-        self.connections.len()
+        self.connections.len() + 1
     }
 }
 
@@ -348,7 +348,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
     }
 
     fn size(&self) -> usize {
-        self.connections.len()
+        self.connections.len() + 1
     }
 }
 

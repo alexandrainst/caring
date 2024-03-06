@@ -39,9 +39,31 @@ impl From<u32> for Element32 {
 
 impl From<Element32> for u64 {
     fn from(val: Element32) -> Self {
-        val.0[0]
+        u64::from_le_bytes(val.to_repr().0)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::algebra::element::Element32;
+
+    #[test]
+    fn from_into_u64() {
+        let n0 : u64 = 7;
+        let e = Element32::from(n0);
+        let n1 : u64 = e.into();
+        assert_eq!(n0, n1);
+    }
+
+    #[test]
+    fn from_into_u32() {
+        let n0 : u32 = 7;
+        let e = Element32::from(n0);
+        let n1 : u32 = e.into();
+        assert_eq!(n0, n1);
+    }
+}
+
 
 use derive_more::{Product, Sum};
 
