@@ -19,7 +19,6 @@ use rayon::prelude::*;
 // TODO: Consider smallvec or tinyvec
 // TODO: Make parallel version it's own type switch on them using cfg..
 
-
 /// Represention of a mathematical vector of type `F`.
 ///
 /// This provides implementations for addition, subtraction and multiplication

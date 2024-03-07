@@ -12,11 +12,13 @@
 //! when receiving a share, parallel to everything else, and just 'awaited' before sending
 //! anything based on that.
 //!
-use std::{borrow::Borrow, iter, ops::{self, Mul}};
-
-use crate::{
-    algebra::{math::Vector, poly}, net::agency::Unicast, schemes::shamir
+use std::{
+    borrow::Borrow,
+    iter,
+    ops::{self, Mul},
 };
+
+use crate::{algebra::math::Vector, net::agency::Unicast, schemes::shamir};
 use crate::{algebra::poly::Polynomial, schemes::shamir::ShamirParams};
 
 use ff::Field;
@@ -85,7 +87,7 @@ pub async fn interactive_mult<F, G>(
 ) -> VerifiableShare<F, G>
 where
     F: Field + Send + Sync + Serialize + DeserializeOwned,
-    G: Group + Send + Sync + Mul<G, Output=G> + Zero,
+    G: Group + Send + Sync + Mul<G, Output = G> + Zero,
 {
     // HACK: This is all very ad-hoc and might not even be 'secure'.
     let c_share = a.share * b.share; // 2t
@@ -95,7 +97,10 @@ where
 
     // TODO: Degree reduction of polynomial.
 
-    VerifiableShare { share: c_share, poly: c_poly }
+    VerifiableShare {
+        share: c_share,
+        poly: c_poly,
+    }
 }
 
 // TODO: Distribution protocol.
@@ -391,7 +396,7 @@ mod test {
             .map(|(s1, s2)| s1 + s2)
             .collect();
 
-        for (share,x) in shares.iter().zip(ctx.ids.iter()) {
+        for (share, x) in shares.iter().zip(ctx.ids.iter()) {
             assert!(share.verify(*x));
         }
 
@@ -473,10 +478,10 @@ mod test {
         let shares1 = share::<Scalar, RistrettoPoint>(v1, &ctx.ids, 2, &mut rng);
         let shares2 = share::<Scalar, RistrettoPoint>(v2, &ctx.ids, 2, &mut rng);
 
-        for (share,x) in shares1.iter().zip(ctx.ids.iter()) {
+        for (share, x) in shares1.iter().zip(ctx.ids.iter()) {
             assert!(share.verify(*x));
         }
-        for (share,x) in shares2.iter().zip(ctx.ids.iter()) {
+        for (share, x) in shares2.iter().zip(ctx.ids.iter()) {
             assert!(share.verify(*x));
         }
 
@@ -486,7 +491,7 @@ mod test {
             .map(|(s1, s2)| s1 + s2)
             .collect();
 
-        for (share,x) in shares.iter().zip(ctx.ids.iter()) {
+        for (share, x) in shares.iter().zip(ctx.ids.iter()) {
             assert!(share.verify(*x));
         }
 

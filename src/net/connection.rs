@@ -26,21 +26,19 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
-    sync::mpsc::Sender,
     time::error::Elapsed,
 };
 
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tokio_util::
+    codec::{FramedRead, FramedWrite, LengthDelimitedCodec}
+;
 
 pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
-    input: tokio::sync::mpsc::Sender<Box<[u8]>>,
     reader: FramedRead<R, LengthDelimitedCodec>,
-    sending: tokio::task::JoinHandle<FramedWrite<W, LengthDelimitedCodec>>,
-    flush: tokio::sync::mpsc::Sender<()>,
-    did_flush: tokio::sync::mpsc::Receiver<()>,
+    writer: FramedWrite<W, LengthDelimitedCodec>,
 }
 
-impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'static>
+impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send >
     Connection<R, W>
 {
     /// Construct a new connection from a reader and writer
@@ -51,71 +49,19 @@ impl<R: AsyncRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'stat
     pub fn new(reader: R, writer: W) -> Self {
         let codec = LengthDelimitedCodec::new();
         let reader = FramedRead::new(reader, codec.clone());
-        let mut writer = FramedWrite::new(writer, codec);
+        let writer = FramedWrite::new(writer, codec);
 
-        let (flush, mut should_flush) = tokio::sync::mpsc::channel(1);
-        let (flushed, did_flush) = tokio::sync::mpsc::channel(1);
-
-        let (input, mut outgoing): (Sender<Box<[u8]>>, _) = tokio::sync::mpsc::channel(8);
-        let sending = tokio::spawn(async move {
-            // This self-drops after the sender is gone.
-            loop {
-                tokio::select! {
-                    Some(()) = should_flush.recv() => {
-                        // HACK: This really should be guaranteed from the writer's `send` itself.
-                        writer.flush().await.unwrap();
-                        flushed.send(()).await.unwrap();
-                    },
-                    Some(msg) = outgoing.recv() => {
-                        writer
-                            .send(msg.into())
-                            .await
-                            .expect("Something went wrong sending a message");
-                    },
-                    else => {
-                        break writer
-                    }
-                };
-            }
-        });
-
-        Connection {
-            input,
-            reader,
-            sending,
-            flush,
-            did_flush,
-        }
+        Connection { reader, writer }
     }
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Destroy the connection, returning the internal reader and writer.
     pub async fn destroy(self) -> Result<(R, W), ConnectionError> {
-        let Self {
-            input,
-            reader,
-            sending,
-            ..
-        } = self;
-        drop(input);
+        let Self { reader, writer } = self;
         // Should not wait much here since we drop input
         // it is really only unsent packages holding us back
-        let writer = sending
-            .await
-            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?
-            .into_inner();
-        let reader = reader.into_inner();
-        Ok((reader, writer))
-    }
-
-    pub async fn flush(&mut self) -> Result<(), ConnectionError> {
-        self.flush
-            .send(())
-            .await
-            .map_err(|_| ConnectionError::Closed)?;
-        self.did_flush.recv().await;
-        Ok(())
+        Ok((reader.into_inner(), writer.into_inner()))
     }
 }
 
@@ -132,20 +78,17 @@ pub enum ConnectionError {
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
-    /// Send a message without waiting
-    ///
-    /// The message is queued, if the queue is too full it panics.
+    /// Send a message, waiting until receival
     ///
     /// * `msg`: Message to send
-    pub fn send(&self, msg: &impl serde::Serialize) {
+    pub async fn send(&mut self, msg: &impl serde::Serialize) -> Result<(), ConnectionError> {
         let msg = bincode::serialize(msg).unwrap();
-        self.input.try_send(msg.into()).unwrap();
+        self.writer
+            .send(msg.into())
+            .await
+            .map_err(|_| ConnectionError::Closed)
     }
 
-    pub async fn send_async(&self, msg: &impl serde::Serialize) -> Result<(), ConnectionError>{
-        let msg = bincode::serialize(msg).unwrap();
-        self.input.send(msg.into()).await.map_err(|_| ConnectionError::Closed)
-    }
 
     /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
@@ -158,6 +101,36 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
             .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
         let buf = std::io::Cursor::new(buf);
         bincode::deserialize_from(buf).map_err(ConnectionError::MalformedMessage)
+    }
+
+    pub fn split(&mut self) -> (Receiving<R>, Sending<W>) {
+        (Receiving(&mut self.reader), Sending(&mut self.writer))
+    }
+}
+
+pub struct Receiving<'a, R: AsyncRead>(&'a mut FramedRead<R, LengthDelimitedCodec>);
+pub struct Sending<'a, W: AsyncWrite>(&'a mut FramedWrite<W, LengthDelimitedCodec>);
+
+impl<'a, R: AsyncRead + Unpin> Receiving<'a, R> {
+    pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
+        let buf = self
+            .0
+            .next()
+            .await
+            .ok_or(ConnectionError::Closed)?
+            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
+        let buf = std::io::Cursor::new(buf);
+        bincode::deserialize_from(buf).map_err(ConnectionError::MalformedMessage)
+    }
+}
+
+impl<'a, W: AsyncWrite + Unpin> Sending<'a, W> {
+    pub async fn send_async(&mut self, msg: &impl serde::Serialize) -> Result<(), ConnectionError> {
+        let msg = bincode::serialize(msg).unwrap();
+        self.0
+            .send(msg.into())
+            .await
+            .map_err(|_| ConnectionError::Closed)
     }
 }
 
@@ -215,7 +188,7 @@ mod test {
 
     use std::net::SocketAddrV4;
 
-    use tokio::net::{TcpListener, TcpStream};
+    use tokio::net::TcpListener;
 
     use super::*;
 
@@ -224,9 +197,9 @@ mod test {
         let (conn1, conn2) = DuplexConnection::in_memory();
         let h1 = async move {
             let mut conn = conn1;
-            conn.send(&"Hello");
+            conn.send(&"Hello").await.unwrap();
             println!("[1] Message sent");
-            conn.send(&"Buddy");
+            conn.send(&"Buddy").await.unwrap();
             println!("[1] Message sent");
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[1] Message received");
@@ -240,7 +213,7 @@ mod test {
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Buddy".into());
-            conn.send(&"Greetings friend");
+            conn.send(&"Greetings friend").await.unwrap();
             println!("[2] Message sent");
         };
 
@@ -254,9 +227,9 @@ mod test {
         let h1 = async move {
             let stream = TcpStream::connect(addr).await.unwrap();
             let mut conn = Connection::from_tcp(stream);
-            conn.send(&"Hello");
+            conn.send(&"Hello").await.unwrap();
             println!("[1] Message sent");
-            conn.send(&"Buddy");
+            conn.send(&"Buddy").await.unwrap();
             println!("[1] Message sent");
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[1] Message received");
@@ -271,7 +244,7 @@ mod test {
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Buddy".into());
-            conn.send(&"Greetings friend");
+            conn.send(&"Greetings friend").await.unwrap();
             println!("[2] Message sent");
         };
 

@@ -9,7 +9,7 @@
 //! The spdz(2k) scheme is actually not that difficult in the online phase,
 //! however it requres some heavy machinery in the offline phase.
 //!
-use ff::{Field, PrimeField};
+use ff::PrimeField;
 
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 use rand::{thread_rng, RngCore, SeedableRng};

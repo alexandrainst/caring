@@ -32,7 +32,7 @@ pub trait ObliviousSend<C: Channel> {
     fn send<T: serde::Serialize>(
         pkg0: &T,
         pkg1: &T,
-        channel: &C,
+        channel: &mut C,
     ) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
@@ -64,7 +64,11 @@ struct MockOTSender();
 impl<C: Channel> ObliviousSend<C> for MockOTSender {
     type Error = C::Error;
 
-    async fn send<T: serde::Serialize>(pkg0: &T, pkg1: &T, channel: &C) -> Result<(), Self::Error> {
+    async fn send<T: serde::Serialize>(
+        pkg0: &T,
+        pkg1: &T,
+        channel: &mut C,
+    ) -> Result<(), Self::Error> {
         channel.send(&(pkg0, pkg1)).await?;
         Ok(())
     }
