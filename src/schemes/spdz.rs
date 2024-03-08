@@ -20,17 +20,21 @@ use crate::{net::agency::Broadcast, protocols::cointoss::CoinToss};
 // Should we allow Field or use PrimeField?
 #[derive(Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign)]
 pub struct Share<F: PrimeField> {
-    // This field is nice and I like it
     val: F,
-    // This field is scary and I don't know how it should be handled
     mac: F,
 }
 
 impl<F: PrimeField> Share<F> {
+    // This function is not fully implmented, it needs to take care of the max. This is however fairly easy. 
+    // However It has to be done for all parties so the trick with defining val to zero for a party that is not party one, will not fly. 
+    // But - we need a share of the mac-key to do it. 
+    // The share of the mac key is the same for the hole computation, and is only revield in the end. 
+    // Therefor it is probably appropriate to place it in the context - that might alredy be the case as there is a field named alfa.
     pub fn add_public(self, val: F, chosen_one: bool) -> Self {
-        let val = if chosen_one { val } else { F::ZERO };
+        let val_val = if chosen_one { val } else { F::ZERO };
         Share {
-            val: self.val + val,
+            val: self.val + val_val,
+            //mac: self.mac + 
             ..self
         }
     }
