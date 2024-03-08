@@ -27,29 +27,29 @@ pub struct Share<F: PrimeField> {
 }
 
 impl<F: PrimeField> Share<F> {
-    // This function is not fully implmented, it needs to take care of the max. This is however fairly easy. 
-    // However It has to be done for all parties so the trick with defining val to zero for a party that is not party one, will not fly. 
-    // But - we need a share of the mac-key to do it. 
     // The share of the mac key is the same for the hole computation, and is only revield in the end. 
     // Therefor it is probably appropriate to place it in the context - that might alredy be the case as there is a field named alfa.
-    pub fn add_public(self, val: F, chosen_one: bool) -> Self {
-        let val_val = if chosen_one { val } else { F::ZERO };
+    pub fn add_public(self, val: F, is_chosen_party: bool, mac_key_share: F) -> Self {
+        let val_val = if is_chosen_party { val } else { F::ZERO };
         Share {
             val: self.val + val_val,
-            //mac: self.mac + 
+            mac: self.mac + val_val * mac_key_share,
             ..self
         }
     }
 
-    pub fn sub_public(self, val: F, chosen_one: bool) -> Self {
-        let val = if chosen_one { val } else { F::ZERO };
+    pub fn sub_public(self, val: F, chosen_one: bool, mac_key_share: F) -> Self {
+        let val_val = if chosen_one { val } else { F::ZERO };
         Share {
-            val: self.val - val,
+            val: self.val - val_val,
+            mac: self.mac - val_val * mac_key_share,
             ..self
         }
     }
 }
-
+// Will validation actually ever be done like this - is it not too expensive? 
+// (haing a key for each share?)
+// Why not do the validation is bulk?
 impl<F: PrimeField> Share<F> {
     pub fn validate(&self, key: F) -> bool {
         let Share { val, mac } = *self;
@@ -57,6 +57,9 @@ impl<F: PrimeField> Share<F> {
     }
 }
 
+// Bad nameing change to "make_share_from_field_element" or something like that.
+// This needs to be changed. If We use only one mac_key, the mac needs to add up. 
+// (remember that this is used for preprosessing, so it can't need prepros'ed values)
 pub fn make_random_share<F: PrimeField>(val: F, mac: F) -> Share<F> {
     //Share{val: F::random(&mut rng), mac: F::random(&mut rng)}
     Share{val: val, mac: mac}
@@ -76,34 +79,24 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
     }
 }
 
-/// Mutliplication between a share and a public value
-///
-/// This operation is asymmetric
-impl<F: PrimeField> std::ops::Add<F> for Share<F> {
-    type Output = Share<F>;
-
-    fn add(self, rhs: F) -> Self::Output {
-        Share {
-            val: self.val + rhs,
-            mac: self.mac + rhs,
-        }
-    }
-}
 
 //struct SpdzParams<F: PrimeField> {
 //    key: F,
 //}
 
-// TODO: Implement multiplication between shares.
+// TODO: Implement multiplication between shares. Use triplets.
 
 pub fn share<F: PrimeField>(val: F, n: usize, key: F, mut rng: &mut impl RngCore) -> Vec<Share<F>> {
-    // HACK: This is really not secure at all.
+    // HACK: This is really not secure at all. - why not, because of the way the random values are chosen or is there something else?
     let mut shares: Vec<_> = (0..n).map(|_| F::random(&mut rng)).collect();
 
     let sum: F = shares.iter().sum();
     shares[0] -= sum - val;
-    // In Fresco, this is all very interactive
 
+    // This is only possible if the party doing the sharing knows the hole key.
+        // Maybe it is a possiblity if we go for [[x]] instead of [x]. 
+        // But then all parties who resives a share has to be able multiply it with there mac_key, 
+        // and thats not really possible as they only know a share of x. 
     shares
         .into_iter()
         .map(|x| Share {
@@ -113,6 +106,7 @@ pub fn share<F: PrimeField>(val: F, n: usize, key: F, mut rng: &mut impl RngCore
         .collect()
 }
 
+// Sharing using prepros'ed values
 pub fn input<F: PrimeField>(_val: F, _n: usize) -> Vec<Share<F>> {
     // 1. Everyone sends party `i` their share (partial opening)
     // 2. Party `i` then broadcasts `x^i - r`.
@@ -123,6 +117,7 @@ pub fn input<F: PrimeField>(_val: F, _n: usize) -> Vec<Share<F>> {
     todo!("Implement the function")
 }
 
+// when shares are reconstructed, the mac probably also needs to be reconstructed. 
 pub fn reconstruct<F: PrimeField>(shares: &[Share<F>]) -> F {
     shares.iter().map(|x| x.val).sum()
 }
@@ -132,13 +127,16 @@ pub fn reconstruct<F: PrimeField>(shares: &[Share<F>]) -> F {
 // Okay hear me out, since we 'have' to check the opened values at some point
 // during the computation, it somehow acts as sort of 'release of a resource'.
 // As such would it be apt to have the SpdzContext be some sort of manual garbage collector?
+    // Well that actually depends on what kind of SPDZ we use. 
+    // The kind I was imagining only does the checking in the end, 
+    // therefor the keys last until the end.
 #[derive(Debug)]
 pub struct SpdzContext<F: PrimeField> {
     opened_values: Vec<F>,
     closed_values: Vec<Share<F>>,
-    alpha: F,
+    alpha: F, // I want to change the name to mac_key_share - if that is infact what it is.
     // dbgr supplier (det. random bit generator)
-    pub is_party_zero: bool,
+    is_chosen_party: bool,
 }
 
 // TODO: Convert to associated function?

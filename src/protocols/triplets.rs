@@ -25,7 +25,9 @@ impl< F: PrimeField + serde::Serialize + serde::de::DeserializeOwned> Multiplica
     /// This is based om beaver.rs fake beaver triples. 
     /// I it suppose to produces 3n shares corresponding to a beaver triple shared amoung n parties,
     ///
-    pub async fn makeTriplet(mut rng: &mut impl RngCore, agent: &mut impl Broadcast, context: SpdzContext<F>) -> Self {      //Consider taking context as an argument. 
+    
+    // We change here from using the context, to only askring for the specific information that we need.
+    pub async fn makeTriplet(mut rng: &mut impl RngCore, agent: &mut impl Broadcast, is_chosen_party: bool) -> Self { 
         let ai = spdz::make_random_share(F::random(&mut rng), F::random(&mut rng));
         let bi = spdz::make_random_share(F::random(&mut rng), F::random(&mut rng));
         let mut ci = spdz::make_random_share(F::random(&mut rng), F::random(&mut rng));
@@ -52,11 +54,10 @@ impl< F: PrimeField + serde::Serialize + serde::de::DeserializeOwned> Multiplica
         // TODO: All parties except party 1 saves the random elemetes they picked
         // TODO: Party one saves a1 b1 and c_1 + Delta
 
-        if context.is_party_zero {
-            ci.val =  ci.val;
+        if is_chosen_party {
+            ci.val =  ci.val - delta;
         } 
         let ci = ci;
-        //Now how does we find out what party we are? - To do that we need the context. 
 
         Self{
             shares: (ai,bi,ci),
