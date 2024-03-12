@@ -14,7 +14,7 @@ pub mod network;
 // TODO: Serde trait bounds on `T`
 // TODO: Properly use this trait for other things (Connection/Agency etc.)
 pub trait Channel {
-    type Error: Error;
+    type Error: Error + 'static;
 
     /// Send a message over the channel
     ///

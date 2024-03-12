@@ -165,7 +165,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
 
         let outgoing = tx.iter_mut().enumerate().map(|(id, conn)| {
             let id = if id < my_id { id } else { id + 1 } as u32;
-            conn.send_async(&msg)
+            conn.send(&msg)
                 .map_err(move |e| NetworkError { source: e, id })
         });
 
@@ -221,7 +221,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
             .enumerate()
             .map(|(id, (conn, msg))| {
                 let id = id as u32;
-                conn.send_async(msg)
+                conn.send(msg)
                     .map_err(move |e| NetworkError { source: e, id })
             });
 

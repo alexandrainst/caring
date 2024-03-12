@@ -125,7 +125,7 @@ impl<'a, R: AsyncRead + Unpin> Receiving<'a, R> {
 }
 
 impl<'a, W: AsyncWrite + Unpin> Sending<'a, W> {
-    pub async fn send_async(&mut self, msg: &impl serde::Serialize) -> Result<(), ConnectionError> {
+    pub async fn send(&mut self, msg: &impl serde::Serialize) -> Result<(), ConnectionError> {
         let msg = bincode::serialize(msg).unwrap();
         self.0
             .send(msg.into())
