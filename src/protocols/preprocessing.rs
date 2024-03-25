@@ -16,6 +16,23 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub struct PreprocessedValues<F: PrimeField> {
+    pub triplets: Vec<MultiplicationTriple<F>>,
+    pub rand_known_to_i: RandomKnownToPi<F>, // consider boxed slices for the outer vec
+    pub rand_known_to_me: RandomKnownToMe<F>,
+}
+
+#[derive(Debug)]
 pub struct MultiplicationTriple<F: PrimeField> {
     pub shares: (spdz::Share<F>, spdz::Share<F>, spdz::Share<F>),
+}
+
+#[derive(Debug)]
+pub struct RandomKnownToPi<F: PrimeField>{
+    pub shares: Vec<Vec<spdz::Share<F>>>,
+}
+
+#[derive(Debug)]
+pub struct RandomKnownToMe<F: PrimeField>{
+    pub shares_and_vals: Vec<(spdz::Share<F>, F)>,
 }
