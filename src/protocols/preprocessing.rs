@@ -15,6 +15,7 @@ use crate::{
     schemes::spdz::{self, SpdzContext}
 };
 
+#[derive(Debug)]
 pub struct MultiplicationTriple<F: PrimeField> {
     pub shares: (spdz::Share<F>, spdz::Share<F>, spdz::Share<F>),
 }

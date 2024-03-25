@@ -48,7 +48,7 @@ impl<F: PrimeField> Share<F> {
         }
     }
 
-    
+   // TODO: make add function - adding shared value and public value 
 }
 // Will validation actually ever be done like this - is it not too expensive? 
 // (haing a key for each share?)
@@ -71,6 +71,7 @@ pub fn make_random_share<F: PrimeField>(val: F, mac: F) -> Share<F> {
 /// Mutliplication between a share and a public value - the nameing is trublesome, how is that handled elsewhere?
 ///
 /// This operation is symmetric
+// TODO: Spørg Mikkel hvad dette er
 impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
     type Output = Share<F>;
 
@@ -140,10 +141,12 @@ pub struct SpdzContext<F: PrimeField> {
     closed_values: Vec<Share<F>>,
     mac_key_share: F, 
     // dbgr supplier (det. random bit generator)
-    who_am_I: usize,
+    who_am_i: usize,
+    preprocessed_values: PreprocessedValues<F>,
 }
 // TODO: Properties the constant part of the context 
-struct preprocessed_values<F: PrimeField> {
+#[derive(Debug)]
+struct PreprocessedValues<F: PrimeField> {
     //triplets: Vec<(Share<F>, Share<F>, Share<F>)>,
     triplets: Vec<preprocessing::MultiplicationTriple<F>>,
     rand_known_to_i: Vec<Vec<Share<F>>>, // consider boxed slices for the outer vec
@@ -212,11 +215,14 @@ mod test {
 
     use super::*;
 
-    // Make a siple test with bogus preprosessing 
-    #[test]
-    fn sharing() {
+    // Make a siple tests with bogus preprosessing 
+    struct SecretValues<F> {
+        mac_key: F,
+        secret_shared_elements: Vec<F>,
+    }
+    // setup
+    fn dummie_prepross() -> (SpdzContext<Element32>, SpdzContext<Element32>, SecretValues<Element32>){
         let mut rng = rand::rngs::mock::StepRng::new(42, 7);
-        // Test sharing
 
 
         // Secret values
@@ -227,6 +233,19 @@ mod test {
         let r_mac = r * mac_key;
         let s = F::random(&mut rng);
         let s_mac = s * mac_key;
+
+        let a = F::random(&mut rng);
+        let b = F::random(&mut rng);
+        let c = a*b;
+
+        let a_mac = a * mac_key;
+        let b_mac = b * mac_key;
+        let c_mac = c * mac_key;
+
+        let secret_values = SecretValues{
+            mac_key,
+            secret_shared_elements: vec![r,s,a,a_mac,b,b_mac,c,c_mac],
+        };
 
         // P1
         let mac_key_share_1 = F::random(&mut rng);
@@ -239,9 +258,35 @@ mod test {
         let s_mac_1 = F::random(&mut rng);
         let s1_share = Share{val:s1, mac:s_mac_1};
         
-        let mut rand_known_to_i_1 = vec![vec![r1_share],vec![s1_share]];
-        let mut rand_known_to_me_1= vec![(r1_share, r)];
+        let a1 = F::random(&mut rng);
+        let b1: Element32 = F::random(&mut rng);
+        let c1 = F::random(&mut rng);
 
+        let a_mac_1 = F::random(&mut rng);
+        let b_mac_1 = F::random(&mut rng);
+        let c_mac_1 = F::random(&mut rng);
+
+        let a1_share = Share{val:a1, mac:a_mac_1};
+        let b1_share = Share{val:b1, mac:b_mac_1};
+        let c1_share = Share{val:c1, mac:c_mac_1};
+
+        let a_triplet = preprocessing::MultiplicationTriple{shares:(a1_share, b1_share, c1_share)};
+        let triplets = vec![a_triplet];
+        
+        let rand_known_to_i = vec![vec![r1_share],vec![s1_share]];
+        let rand_known_to_me= vec![(r1_share, r)];
+        let p1_preprosvals = PreprocessedValues{
+            triplets,
+            rand_known_to_i,
+            rand_known_to_me,
+        };
+        let p1_context = SpdzContext{
+            opened_values: vec![],
+            closed_values: vec![],
+            mac_key_share: mac_key_share_1,
+            who_am_i: 0,
+            preprocessed_values: p1_preprosvals,
+        };
 
         // P2
         let mac_key_share_2 = mac_key - mac_key_share_1;
@@ -254,234 +299,116 @@ mod test {
         let s_mac_2 = s_mac - s_mac_1;
         let s2_share = Share{val:s2, mac:s_mac_2};
 
-        let mut rand_known_to_i_2 = vec![vec![r2_share], vec![s2_share]];
-        let mut rand_known_to_me_2 = vec![(s2_share, s)];
-        
-        // Okay lets go
+        let rand_known_to_i = vec![vec![r2_share], vec![s2_share]];
+        let rand_known_to_me = vec![(s2_share, s)]; 
+        let p2_preprosvals = PreprocessedValues{
+            triplets: vec![],
+            rand_known_to_i,
+            rand_known_to_me,
+        };
+        let p2_context = SpdzContext{
+            opened_values: vec![],
+            closed_values: vec![],
+            mac_key_share: mac_key_share_2,
+            who_am_i: 1,
+            preprocessed_values: p2_preprosvals,
+        };
+        (p1_context, p2_context, secret_values)
+    }
+
+    #[test]
+    fn sharing() {
+        type F = Element32;
+        let (p1_context, p2_context, secret_values) = dummie_prepross();
 
         // P1 shares an element
+        let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = send_share(elm1, &mut (rand_known_to_me_1), mac_key_share_1);
-        let elm1_2 = recive_share_from(correction, &mut rand_known_to_i_2, 0, mac_key_share_2);
+        let (elm1_1, correction) = send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.mac_key_share);
+        
+        let mut p2_prepros = p2_context.preprocessed_values;
+        let elm1_2 = recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.mac_key_share);
         assert!((elm1_1.val + elm1_2.val) == elm1);
-        assert!(elm1_1.mac + elm1_2.mac == elm1*mac_key);
+        assert!(elm1_1.mac + elm1_2.mac == elm1*secret_values.mac_key);
         
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = send_share(elm2, &mut (rand_known_to_me_2), mac_key_share_2);
-        let elm2_1 = recive_share_from(correction, &mut rand_known_to_i_1, 1, mac_key_share_1);
+        let (elm2_2, correction) = send_share(elm2, &mut (p2_prepros.rand_known_to_me), p2_context.mac_key_share);
+        
+        let elm2_1 = recive_share_from(correction, &mut p1_prepros.rand_known_to_i, 1, p1_context.mac_key_share);
         assert!((elm2_1.val + elm2_2.val) == elm2);
-        assert!(elm2_1.mac + elm2_2.mac == elm2*mac_key);
+        assert!(elm2_1.mac + elm2_2.mac == elm2*secret_values.mac_key);
     }
 
+    #[test]
     fn test_addition() { // TODO make test
-        //use crate::algebra::element::Element32;
-        let mut rng = rand::rngs::mock::StepRng::new(42, 7);
-        
-        // Secret values
         type F = Element32;
-        let a = F::random(&mut rng);
-        let b = F::random(&mut rng);
-        let c = a*b;
-        
-        let mac_key = F::random(&mut rng);
+        let (p1_context, p2_context, secret_values) = dummie_prepross();
 
-        let a_mac = a * mac_key;
-        let b_mac = b * mac_key;
-        let c_mac = c * mac_key;
-        
-        let r = F::random(&mut rng);
-        let r_mac = r * mac_key;
-
-        let s = F::random(&mut rng);
-        let s_mac = s * mac_key;
-
-
-        // P1
-        let a1 = F::random(&mut rng);
-        let b1: Element32 = F::random(&mut rng);
-        let c1 = F::random(&mut rng);
-
-        let a_mac_1 = F::random(&mut rng);
-        let b_mac_1 = F::random(&mut rng);
-        let c_mac_1 = F::random(&mut rng);
-
-        let mac_key_share_1 = F::random(&mut rng);
-                
-        let a1_share = Share{val:a1, mac:a_mac_1};
-        let b1_share = Share{val:b1, mac:b_mac_1};
-        let c1_share = Share{val:c1, mac:c_mac_1};
-
-        let a_triplet = preprocessing::MultiplicationTriple{shares:(a1_share, b1_share, c1_share)};
-        let triplets = vec![a_triplet];
-        
-        let r1 = F::random(&mut rng);
-        let r_mac_1 = F::random(&mut rng);
-        let r1_share = Share{val:r1, mac:r_mac_1};
-
-        let s1 = F::random(&mut rng);
-        let s_mac_1 = F::random(&mut rng);
-        let s1_share = Share{val:s1, mac:s_mac_1};
-        
-        let rand_known_to_i = vec![vec![r1_share],vec![s1_share]];
-        let rand_known_to_me = vec![(r1_share, r)];
-
-        //let mut A_context = 
-
-        let mut A_preprosvals = preprocessed_values{
-            triplets, 
-            rand_known_to_i,
-            rand_known_to_me,
-        };
-
-        // P2
-        let a2 = a - a1;
-        let b2 = b - b1;
-        let c2 = c - c1;
-        assert!(a1+a2 == a);
-
-        let a_mac_2 = a_mac - a_mac_1;
-        let b_mac_2 = b_mac - b_mac_1;
-        let c_mac_2 = c_mac - c_mac_1;
-        
-        let mac_key_share_2 = mac_key - mac_key_share_1;
-        
-        let a2_share = Share{val:a2, mac:a_mac_2};
-        let b2_share = Share{val:b2, mac:b_mac_2};
-        let c2_share = Share{val:c2, mac:c_mac_2};
-
-        let b_triplet = preprocessing::MultiplicationTriple{shares:(a2_share, b2_share, c2_share)};
-        let triplets = vec![b_triplet];
-
-        let r2 = r - r1;
-        let r_mac_2 = r_mac - r_mac_1;
-        let r2_share = Share{val:r2, mac:r_mac_2};
-        
-        let s2 = s - s1;
-        let s_mac_2 = s_mac - s_mac_1;
-        let s2_share = Share{val:s2, mac:s_mac_2};
-
-        let rand_known_to_i = vec![vec![r2_share], vec![s2_share]];
-        let rand_known_to_me = vec![(s2_share, s)];
-        let mut B_preprosvals = preprocessed_values{
-            triplets, 
-            rand_known_to_i,
-            rand_known_to_me,
-        };
-        assert!(B_preprosvals.rand_known_to_i[0][0].val + A_preprosvals.rand_known_to_i[0][0].val == r);
-        // Okay lets go
-
-        // P1 shares a value
+        // P1 shares an element
+        let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = send_share(elm1, &mut (A_preprosvals.rand_known_to_me), mac_key_share_1);
-        let elm1_2 = recive_share_from(correction, &mut (B_preprosvals.rand_known_to_i), 0, mac_key_share_1);
+        let (elm1_1, correction) = send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.mac_key_share);
+        
+        let mut p2_prepros = p2_context.preprocessed_values;
+        let elm1_2 = recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.mac_key_share);
         assert!((elm1_1.val + elm1_2.val) == elm1);
-        assert!(elm1_1.mac + elm1_2.mac == elm1*mac_key);
+        assert!(elm1_1.mac + elm1_2.mac == elm1*secret_values.mac_key);
+        
+        // P2 shares an element
+        let elm2 = F::from_u128(18u128);
+        let (elm2_2, correction) = send_share(elm2, &mut (p2_prepros.rand_known_to_me), p2_context.mac_key_share);
+        
+        let elm2_1 = recive_share_from(correction, &mut p1_prepros.rand_known_to_i, 1, p1_context.mac_key_share);
+        assert!((elm2_1.val + elm2_2.val) == elm2);
+        assert!(elm2_1.mac + elm2_2.mac == elm2*secret_values.mac_key);
+
+        // Adding ss-elements 
+        let elm3_1 = elm1_1 + elm2_1;
+
+        let elm3_2 = elm1_2 + elm2_2;
+        
+        assert!(elm1 + elm2 == elm3_1.val + elm3_2.val);
+        assert!(elm3_1.mac + elm3_2.mac == (elm1+elm2)*secret_values.mac_key);
     }
     
-    fn other_test() {
-        //use crate::algebra::element::Element32;
-        let mut rng = rand::rngs::mock::StepRng::new(42, 7);
-
-        // Secret values
+    #[test]
+    fn test_subtracting() { // TODO make test
         type F = Element32;
-        let a = F::random(&mut rng);
-        let b = F::random(&mut rng);
-        let c = a*b;
-        
-        let mac_key = F::random(&mut rng);
+        let (p1_context, p2_context, secret_values) = dummie_prepross();
 
-        let a_mac = a * mac_key;
-        let b_mac = b * mac_key;
-        let c_mac = c * mac_key;
-        
-        let r = F::random(&mut rng);
-        let r_mac = r * mac_key;
-
-        let s = F::random(&mut rng);
-        let s_mac = s * mac_key;
-
-
-        // P1
-        let a1 = F::random(&mut rng);
-        let b1: Element32 = F::random(&mut rng);
-        let c1 = F::random(&mut rng);
-
-        let a_mac_1 = F::random(&mut rng);
-        let b_mac_1 = F::random(&mut rng);
-        let c_mac_1 = F::random(&mut rng);
-
-        let mac_key_share_1 = F::random(&mut rng);
-                
-        let a1_share = Share{val:a1, mac:a_mac_1};
-        let b1_share = Share{val:b1, mac:b_mac_1};
-        let c1_share = Share{val:c1, mac:c_mac_1};
-
-        let a_triplet = preprocessing::MultiplicationTriple{shares:(a1_share, b1_share, c1_share)};
-        let triplets = vec![a_triplet];
-        
-        let r1 = F::random(&mut rng);
-        let r_mac_1 = F::random(&mut rng);
-        let r1_share = Share{val:r1, mac:r_mac_1};
-
-        let s1 = F::random(&mut rng);
-        let s_mac_1 = F::random(&mut rng);
-        let s1_share = Share{val:s1, mac:s_mac_1};
-        
-        let rand_known_to_i = vec![vec![r1_share],vec![s1_share]];
-        let rand_known_to_me = vec![(r1_share, r)];
-
-        //let mut A_context = 
-
-        let mut A_preprosvals = preprocessed_values{
-            triplets, 
-            rand_known_to_i,
-            rand_known_to_me,
-        };
-
-        // P2
-        let a2 = a - a1;
-        let b2 = b - b1;
-        let c2 = c - c1;
-        assert!(a1+a2 == a);
-
-        let a_mac_2 = a_mac - a_mac_1;
-        let b_mac_2 = b_mac - b_mac_1;
-        let c_mac_2 = c_mac - c_mac_1;
-        
-        let mac_key_share_2 = mac_key - mac_key_share_1;
-        
-        let a2_share = Share{val:a2, mac:a_mac_2};
-        let b2_share = Share{val:b2, mac:b_mac_2};
-        let c2_share = Share{val:c2, mac:c_mac_2};
-
-        let b_triplet = preprocessing::MultiplicationTriple{shares:(a2_share, b2_share, c2_share)};
-        let triplets = vec![b_triplet];
-
-        let r2 = r - r1;
-        let r_mac_2 = r_mac - r_mac_1;
-        let r2_share = Share{val:r2, mac:r_mac_2};
-        
-        let s2 = s - s1;
-        let s_mac_2 = s_mac - s_mac_1;
-        let s2_share = Share{val:s2, mac:s_mac_2};
-
-        let rand_known_to_i = vec![vec![r2_share], vec![s2_share]];
-        let rand_known_to_me = vec![(s2_share, s)];
-        let mut B_preprosvals = preprocessed_values{
-            triplets, 
-            rand_known_to_i,
-            rand_known_to_me,
-        };
-        assert!(B_preprosvals.rand_known_to_i[0][0].val + A_preprosvals.rand_known_to_i[0][0].val == r);
-        // Okay lets go
-
-        // P1 shares a value
+        // P1 shares an element
+        let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = send_share(elm1, &mut (A_preprosvals.rand_known_to_me), mac_key_share_1);
-        let elm1_2 = recive_share_from(correction, &mut (B_preprosvals.rand_known_to_i), 0, mac_key_share_1);
+        let (elm1_1, correction) = send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.mac_key_share);
+        
+        let mut p2_prepros = p2_context.preprocessed_values;
+        let elm1_2 = recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.mac_key_share);
         assert!((elm1_1.val + elm1_2.val) == elm1);
-        assert!(elm1_1.mac + elm1_2.mac == elm1*mac_key);
+        assert!(elm1_1.mac + elm1_2.mac == elm1*secret_values.mac_key);
+        
+        // P2 shares an element
+        let elm2 = F::from_u128(18u128);
+        let (elm2_2, correction) = send_share(elm2, &mut (p2_prepros.rand_known_to_me), p2_context.mac_key_share);
+        
+        let elm2_1 = recive_share_from(correction, &mut p1_prepros.rand_known_to_i, 1, p1_context.mac_key_share);
+        assert!((elm2_1.val + elm2_2.val) == elm2);
+        assert!(elm2_1.mac + elm2_2.mac == elm2*secret_values.mac_key);
+
+        // Subtracting ss-elements 
+        let elm3_1 = elm1_1 - elm2_1;
+
+        let elm3_2 = elm1_2 - elm2_2;
+        
+        assert!(elm1 - elm2 == elm3_1.val + elm3_2.val);
+        assert!(elm3_1.mac + elm3_2.mac == (elm1-elm2)*secret_values.mac_key);
     }
+
+    // TODO: test mult with known 
+    // TODO: test add with pub constant
+    // TODO: test mult ss with triplets
+    // TODO: test checking
+    // TODO: test opening
+    // TODO: test prepros 
 
 }
