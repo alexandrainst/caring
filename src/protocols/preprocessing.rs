@@ -24,7 +24,14 @@ pub struct PreprocessedValues<F: PrimeField> {
 
 #[derive(Debug)]
 pub struct MultiplicationTriple<F: PrimeField> {
-    pub shares: (spdz::Share<F>, spdz::Share<F>, spdz::Share<F>),
+    //pub shares: (spdz::Share<F>, spdz::Share<F>, spdz::Share<F>),
+    pub a: spdz::Share<F>,
+    pub b: spdz::Share<F>,
+    pub c: spdz::Share<F>,
+}
+
+pub fn make_multiplicationtriplet<F:PrimeField>(a: spdz::Share<F>, b: spdz::Share<F>, c: spdz::Share<F>) -> MultiplicationTriple<F>{
+    MultiplicationTriple{a,b,c}
 }
 
 #[derive(Debug)]
