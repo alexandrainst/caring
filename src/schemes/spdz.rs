@@ -19,7 +19,7 @@ use rand::{thread_rng, RngCore, SeedableRng};
 use serde::{de::DeserializeOwned, Serialize};
 use tracing_subscriber::field::debug;
 
-use crate::{net::{agency::Broadcast, network::{self, InMemoryNetwork}}, protocols::{cointoss::CoinToss, preprocessing::{self, RandomKnownToMe, RandomKnownToPi}}};
+use crate::{net::{agency::Broadcast, network::{self, InMemoryNetwork}}, protocols::{cointoss::CoinToss, preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, triplets}};
 
 // Should we allow Field or use PrimeField?
 #[derive(Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign, serde::Serialize, serde::Deserialize)]
@@ -48,14 +48,18 @@ impl<F: PrimeField> Share<F> {
     }
 }
 
-pub fn secret_mult<F:PrimeField>(s1: Share<F>, s2: Share<F>, context: &mut SpdzContext<F>) -> Share<F>{
+pub async fn secret_mult<F:PrimeField + serde::Serialize + serde::de::DeserializeOwned>(s1: Share<F>, s2: Share<F>, context: &mut SpdzContext<F>, network: &mut impl Broadcast ) -> Share<F>{
     // TODO: need to verify that there are atleast one priplets pair left, otherwise cast an error. 
     let triplet = context.preprocessed_values.triplets.pop().unwrap();
+    let is_chosen_party = context.params.who_am_i == 0;
+    let mac_key_share = context.params.mac_key_share;
 
     let e = s1 - triplet.a;
     let d = s2 - triplet.b;
     // here we need to make a broadcast to partially open the elements 
-    s1
+    let E = partial_opening_2(e.val, network).await;
+    let D = partial_opening_2(d.val, network).await;
+    (triplet.c + triplet.b*E + triplet.a*D).add_public(E*D, is_chosen_party, mac_key_share)
 }
 
 // Will validation actually ever be done like this - is it not too expensive? 
@@ -92,10 +96,6 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
 // The same can not be done for addition, unless we can give it access to the context some how. 
 // TODO: verify with Mikkel that that is not a possiblility.
 
-
-//struct SpdzParams<F: PrimeField> {
-//    key: F,
-//}
 
 // TODO: Implement multiplication between shares. Use triplets.
 
@@ -221,8 +221,6 @@ pub async fn mac_check<Rng: SeedableRng + RngCore, F: PrimeField + Serialize + D
     }
 }
 
-// TODO make a tokio-test
-
 #[cfg(test)]
 mod test {
 
@@ -319,10 +317,24 @@ mod test {
         let s_mac_2 = s_mac - s_mac_1;
         let s2_share = Share{val:s2, mac:s_mac_2};
 
+        let a2 = a-a1;
+        let b2: Element32 = b-b1;
+        let c2 = c-c1;
+
+        let a_mac_2 = a_mac - a_mac_1;
+        let b_mac_2 = b_mac - b_mac_1;
+        let c_mac_2 = c_mac - c_mac_1;
+
+        let a2_share = Share{val:a2, mac:a_mac_2};
+        let b2_share = Share{val:b2, mac:b_mac_2};
+        let c2_share = Share{val:c2, mac:c_mac_2};
+
+        let a_triplet = preprocessing::make_multiplicationtriplet(a2_share, b2_share, c2_share);
+        let triplets = vec![a_triplet];
         let rand_known_to_i = RandomKnownToPi{shares: vec![vec![r2_share], vec![s2_share]]};
         let rand_known_to_me = RandomKnownToMe{shares_and_vals: vec![(s2_share, s)]}; 
         let p2_preprosvals = preprocessing::PreprocessedValues{
-            triplets: vec![],
+            triplets,
             rand_known_to_i,
             rand_known_to_me,
         };
@@ -334,7 +346,17 @@ mod test {
         };
         (p1_context, p2_context, secret_values)
     }
-
+    #[test]
+    fn test_dummi_prepros(){
+        let (p1_context, p2_context, secret_values) = dummie_prepross();
+        let a = p1_context.preprocessed_values.triplets[0].a + p2_context.preprocessed_values.triplets[0].a;
+        let b = p1_context.preprocessed_values.triplets[0].b + p2_context.preprocessed_values.triplets[0].b;
+        let c = p1_context.preprocessed_values.triplets[0].c + p2_context.preprocessed_values.triplets[0].c;
+        assert!(a.val * b.val == c.val);
+        assert!(a.mac == a.val*secret_values.mac_key);
+        assert!(b.mac == b.val*secret_values.mac_key);
+        assert!(c.mac == c.val*secret_values.mac_key);
+    }
     #[test]
     fn test_sharing() {
         type F = Element32;
@@ -419,7 +441,7 @@ mod test {
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2*secret_values.mac_key);
 
-        // P1 opens elm1
+        // Parties opens elm1
         async fn do_mpc(
             network: InMemoryNetwork,
              elm: F,
@@ -531,7 +553,63 @@ mod test {
         assert!(elm1 * pub_constant == elm3_1.val + elm3_2.val);
         assert!(elm3_1.mac + elm3_2.mac == (elm1*pub_constant)*secret_values.mac_key);
     }
+    #[tokio::test]
+    async fn test_secret_shared_multipllication() {
+        type F = Element32;
+        let (mut p1_context, mut p2_context, secret_values) = dummie_prepross();
 
+        // P1 shares an element
+        let p1_prepros = &mut p1_context.preprocessed_values;
+        let elm1 = F::from_u128(56u128);
+        let (elm1_1, correction) = send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.params.mac_key_share);
+        
+        let p2_prepros = &mut p2_context.preprocessed_values;
+        let elm1_2 = recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.params.mac_key_share);
+        assert!((elm1_1.val + elm1_2.val) == elm1);
+        assert!(elm1_1.mac + elm1_2.mac == elm1*secret_values.mac_key);
+        
+        // P2 shares an element
+        let elm2 = F::from_u128(18u128);
+        let (elm2_2, correction) = send_share(elm2, &mut (p2_prepros.rand_known_to_me), p2_context.params.mac_key_share);
+        
+        let elm2_1 = recive_share_from(correction, &mut p1_prepros.rand_known_to_i, 1, p1_context.params.mac_key_share);
+        assert!((elm2_1.val + elm2_2.val) == elm2);
+        assert!(elm2_1.mac + elm2_2.mac == elm2*secret_values.mac_key);
+
+        let expected_res = Share{val: elm1*elm2, mac: elm1*elm2*secret_values.mac_key};
+        // Multiplicate
+        //let mut res_v = vec![]; 
+        async fn do_mpc(
+            network: InMemoryNetwork,
+             s1: Share<F>,
+             s2: Share<F>,
+             context: SpdzContext<F>,
+             expected_res: Share<F>,
+            ){
+            let mut context = context;
+            let mut network = network;
+            let res_share = secret_mult(s1, s2, &mut context, &mut network).await;
+            let res = partial_opening_2(res_share.val, &mut network).await;
+            assert!(expected_res.val == res);
+            // TODO: make an opening function - that checks the mac (but does not revieal it) (so a not partial one) - and use it to do the check here. 
+        }
+
+        let mut taskset = tokio::task::JoinSet::new();
+        let cluster = InMemoryNetwork::in_memory(2); //asuming two players
+        let elm1_v = vec![elm1_1, elm1_2];
+        let elm2_v = vec![elm2_1, elm2_2];
+        let mut context = vec![p1_context, p2_context];
+        let mut i = 0;
+        for network in cluster {
+            let context_here = context.pop().unwrap();
+            taskset.spawn(do_mpc(network, elm1_v[i], elm2_v[i], context_here, expected_res));
+            i += 1;
+        }
+        while let Some(res) = taskset.join_next().await {
+            res.unwrap();
+        }
+        
+    }
     #[test]
     fn test_add_with_public_constant() { 
         type F = Element32;
