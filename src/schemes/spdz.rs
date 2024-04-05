@@ -10,16 +10,13 @@
 //! however it requres some heavy machinery in the offline phase.
 //!
  
-// We will need commitments - for now we will make the cheapest version possible, a hash.
-// Okay we don't nessesarely need commitments, but for the simplest version of SPDZ we do.
 use ff::PrimeField;
 
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 use rand::{thread_rng, RngCore, SeedableRng};
 use serde::{de::DeserializeOwned, Serialize};
 use tracing_subscriber::field::debug;
-
-use crate::{net::{agency::Broadcast, network::{self, InMemoryNetwork}}, protocols::{cointoss::CoinToss, preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, triplets}};
+use crate::{net::{agency::Broadcast, network::{self, InMemoryNetwork}}, protocols::{cointoss::CoinToss, preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, commitments}};
 
 // Should we allow Field or use PrimeField?
 #[derive(Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign, serde::Serialize, serde::Deserialize)]
@@ -48,7 +45,15 @@ impl<F: PrimeField> Share<F> {
     }
 }
 
-pub async fn secret_mult<F:PrimeField + serde::Serialize + serde::de::DeserializeOwned>(s1: Share<F>, s2: Share<F>, context: &mut SpdzContext<F>, network: &mut impl Broadcast ) -> Share<F>{
+// TODO: consider also making this retun an option or result, such that it can return nothing if there are to few preprocessed values
+pub async fn secret_mult<F>(
+    s1: Share<F>, 
+    s2: Share<F>, 
+    context: &mut SpdzContext<F>, 
+    network: &mut impl Broadcast 
+) -> Share<F>
+where F: PrimeField + serde::Serialize + serde::de::DeserializeOwned 
+{
     // TODO: need to verify that there are atleast one priplets pair left, otherwise cast an error. 
     let triplet = context.preprocessed_values.triplets.pop().unwrap();
     let is_chosen_party = context.params.who_am_i == 0;
@@ -57,32 +62,13 @@ pub async fn secret_mult<F:PrimeField + serde::Serialize + serde::de::Deserializ
     let e = s1 - triplet.a;
     let d = s2 - triplet.b;
     // here we need to make a broadcast to partially open the elements 
-    let E = partial_opening_2(e.val, network).await;
-    let D = partial_opening_2(d.val, network).await;
-    (triplet.c + triplet.b*E + triplet.a*D).add_public(E*D, is_chosen_party, mac_key_share)
+    let e = partial_opening_2(e.val, network).await;
+    let d = partial_opening_2(d.val, network).await;
+    (triplet.c + triplet.b*e + triplet.a*d).add_public(e*d, is_chosen_party, mac_key_share)
 }
 
-// Will validation actually ever be done like this - is it not too expensive? 
-// (haing a key for each share?)
-// Why not do the validation is bulk?
-// impl<F: PrimeField> Share<F> {
-    // pub fn validate(&self, key: F) -> bool {
-        // let Share { val, mac } = *self;
-        // val * key == mac
-    // }
-// }
-
-// Bad nameing change to "make_share_from_field_element" or something like that.
-// This needs to be changed. If We use only one mac_key, the mac needs to add up. 
-// (remember that this is used for preprosessing, so it can't need prepros'ed values)
-pub fn make_random_share<F: PrimeField>(val: F, mac: F) -> Share<F> {
-    //Share{val: F::random(&mut rng), mac: F::random(&mut rng)}
-    Share{val: val, mac: mac}
-}
-
-/// Mutliplication between a share and a public value
-///
-/// This operation is symmetric
+// Mutliplication between a share and a public value
+// This operation is symmetric
 impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
     type Output = Share<F>;
 
@@ -96,8 +82,6 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
 // The same can not be done for addition, unless we can give it access to the context some how. 
 // TODO: verify with Mikkel that that is not a possiblility.
 
-
-// TODO: Implement multiplication between shares. Use triplets.
 
 // TODO: Write share and resive_share_from together to one function 
     // Need to find out How to broadcast frome one specific party to all others - and how to await for that.
@@ -137,25 +121,12 @@ pub fn partial_opening<F: PrimeField>(context: &mut SpdzContext<F>,candidate_val
     context.opened_values.push(s);
     s
 }
+// partiel opening that handles the broadcasting but not the pushing to opended values. We will get back to that if/when it becomes nessesary.
 pub async fn partial_opening_2<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(candidate_val: F, network: &mut impl Broadcast) -> F{
     let candidate_vals = network.symmetric_broadcast(candidate_val).await.unwrap();
     candidate_vals.iter().sum()
 }
-// TODO: We need an "open_result" - that either calls the "mac_check" itself or depends on it haveing been done already
 
-// We are going with opening instead.
-// // when shares are reconstructed, the mac probably also needs to be reconstructed. 
-// pub fn reconstruct<F: PrimeField>(shares: &[Share<F>]) -> F {
-    // shares.iter().map(|x| x.val).sum()
-// }
-
-// IDEA:
-//
-// Okay hear me out, since we 'have' to check the opened values at some point
-// during the computation, it somehow acts as sort of 'release of a resource'.
-// As such would it be apt to have the SpdzContext be some sort of manual garbage collector?
-    // Well that actually depends on what kind of SPDZ we use. 
-    // The kind I was imagining only does the checking in the end, 
 
 #[derive(Debug)]
 struct SpdzParams<F: PrimeField> {
@@ -173,10 +144,56 @@ pub struct SpdzContext<F: PrimeField> {
 }
 
 
+//TODO: change this to return an option instead, such that it does not return anything if it fails.
+pub async fn open_elm<F>(
+    share_to_open: Share<F>, 
+    network: &mut impl Broadcast, 
+    mac_key_share: &F
+) -> F
+where F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64> 
+{
+    let opened_val = partial_opening_2(share_to_open.val, network).await;
+    let this_went_well = check_one_elment(opened_val, network, &share_to_open.mac, mac_key_share).await;
+    if this_went_well {
+        println!("yes this went well");
+        opened_val
+    } else {
+        // Here we need to cast some err.
+        println!("The check did not go though!");
+        share_to_open.val
+    }
+
+}
+
+pub async fn check_one_elment<F>(
+    val_to_check: F, 
+    network: &mut impl Broadcast, 
+    share_of_mac_to_val: &F, 
+    mac_key_share: &F,
+) -> bool
+where F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>
+{
+    let d = *mac_key_share * val_to_check - share_of_mac_to_val;
+    let (c,s) = commitments::commit(d);
+    let cs = network.symmetric_broadcast((c,s)).await.unwrap();
+    let ds = network.symmetric_broadcast(d).await.unwrap();
+    let dcs = ds.iter().zip(cs.iter());
+    let mut this_went_well = true;
+    for (d,(c,s)) in dcs{
+        let t = commitments::verify_commit(d, c, s);
+        if !t {
+            this_went_well = false;
+        }
+    }
+
+    let ds_sum:F = ds.iter().sum();
+    (ds_sum == 0.into()) && this_went_well
+}
 
 
 // TODO: Change to SPDZ 2 style like the rest 
-    // TODO: Start by being able to check one element
+    // TODO: Start by being able to check one element - this is done in the open_elm function. 
+        // Just make a version that does not do the opening, but takes a partially opened elm.
     // TODO: Then check multiple elements 
 pub async fn mac_check<Rng: SeedableRng + RngCore, F: PrimeField + Serialize + DeserializeOwned>(
     ctx: &mut SpdzContext<F>,
@@ -225,18 +242,19 @@ pub async fn mac_check<Rng: SeedableRng + RngCore, F: PrimeField + Serialize + D
 mod test {
 
     use ff::Field;
-    use rayon::vec;
-    use tokio_util::context;
+    //use rayon::vec;
+    //use tokio_util::context;
 
     use crate::{algebra::element::Element32, net, protocols::preprocessing::{self, RandomKnownToMe, RandomKnownToPi}};
 
     use super::*;
 
-    // Make a siple tests with bogus preprosessing 
+    // All these tests use bogus preprosessing 
     struct SecretValues<F> {
         mac_key: F,
         secret_shared_elements: Vec<F>,
     }
+    // TODO: make a dealer function in the preprocessing module, that takes the 
     // setup
     fn dummie_prepross() -> (SpdzContext<Element32>, SpdzContext<Element32>, SecretValues<Element32>){
         let mut rng = rand::rngs::mock::StepRng::new(42, 7);
@@ -531,7 +549,7 @@ mod test {
     }
 
     #[test]
-    fn test_multiplication() { 
+    fn test_multiplication_with_pub_constant() { 
         type F = Element32;
         let (p1_context, p2_context, secret_values) = dummie_prepross();
         let pub_constant = F::from_u128(8711u128);
@@ -578,7 +596,6 @@ mod test {
 
         let expected_res = Share{val: elm1*elm2, mac: elm1*elm2*secret_values.mac_key};
         // Multiplicate
-        //let mut res_v = vec![]; 
         async fn do_mpc(
             network: InMemoryNetwork,
              s1: Share<F>,
@@ -591,7 +608,9 @@ mod test {
             let res_share = secret_mult(s1, s2, &mut context, &mut network).await;
             let res = partial_opening_2(res_share.val, &mut network).await;
             assert!(expected_res.val == res);
-            // TODO: make an opening function - that checks the mac (but does not revieal it) (so a not partial one) - and use it to do the check here. 
+
+            let res = open_elm(res_share, &mut network, &context.params.mac_key_share).await;
+            assert!(expected_res.val == res);
         }
 
         let mut taskset = tokio::task::JoinSet::new();
@@ -656,9 +675,6 @@ mod test {
         assert!(elm1 - pub_constant == elm3_1.val + elm3_2.val);
         assert!(elm3_1.mac + elm3_2.mac == (elm1-pub_constant)*secret_values.mac_key);
     }
-    // TODO: test mult ss with triplets
     // TODO: test checking
-    // TODO: test opening
-    // TODO: test prepros 
 
 }

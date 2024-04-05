@@ -28,9 +28,9 @@ impl< F: PrimeField + serde::Serialize + serde::de::DeserializeOwned> Multiplica
     
     // We change here from using the context, to only askring for the specific information that we need.
     pub async fn makeTriplet(mut rng: &mut impl RngCore, agent: &mut impl Broadcast, is_chosen_party: bool) -> Self { 
-        let ai = spdz::make_random_share(F::random(&mut rng), F::random(&mut rng));
-        let bi = spdz::make_random_share(F::random(&mut rng), F::random(&mut rng));
-        let mut ci = spdz::make_random_share(F::random(&mut rng), F::random(&mut rng));
+        let ai = spdz::Share{val: F::random(&mut rng), mac: F::random(&mut rng)};
+        let bi = spdz::Share{val: F::random(&mut rng), mac: F::random(&mut rng)};
+        let mut ci = spdz::Share{val: F::random(&mut rng), mac: F::random(&mut rng)};
         
         // TODO: Now the values are suppoed to be encrypted using a 1-D HE
         let ai_e = ai;
