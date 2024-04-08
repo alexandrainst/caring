@@ -34,14 +34,14 @@ pub struct VerifiableShare<F: Field, G: Group> {
     poly: Polynomial<G>,
 }
 
-pub fn share<F: Field, G: Group>(
+pub fn share<F, G>(
     val: F,
     ids: &[F],
     threshold: u64,
     rng: &mut impl RngCore,
 ) -> Vec<VerifiableShare<F, G>>
 where
-    G: std::ops::Mul<F, Output = G>,
+    G: std::ops::Mul<F, Output = G>, F: Field, G: Group
 {
     // 1. We need to get the polynomial.
     // 2. We then need to do commitments to it.
@@ -115,7 +115,7 @@ where
 // We can rely on the verified broadcast operation to some extent, however it might
 // need some rework, such that is threshold-safe.
 
-pub fn reconstruct<F: Field, G: Group>(
+pub fn reconstruct<F: Field, G>(
     ctx: &ShamirParams<F>,
     shares: &[VerifiableShare<F, G>],
 ) -> Option<F>
@@ -137,9 +137,10 @@ where
 impl<
         F: ff::Field + serde::Serialize + serde::de::DeserializeOwned,
         G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>,
-    > super::Shared<F> for VerifiableShare<F, G>
+    > super::Shared for VerifiableShare<F, G>
 {
     type Context = ShamirParams<F>;
+    type Value = F;
 
     fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
         share::<F, G>(secret, &ctx.ids, ctx.threshold, rng)

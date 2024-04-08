@@ -12,7 +12,7 @@ pub async fn pick_random<C, F, S>(
 where
     F: From<u64>, /* <-- not nice */
     F: Field,
-    S: Shared<F, Context = C> + std::iter::Sum,
+    S: Shared<Value = F, Context = C> + std::iter::Sum,
 {
     // Currently there are no enforcement that the random value be in the given range
     // or even being random at all.

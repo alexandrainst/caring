@@ -28,13 +28,16 @@ use rayon::prelude::*;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Vector<F: Send + Sync>(Box<[F]>);
 
+
 impl<F: Send + Sync> Vector<F> {
-    pub fn from_boxed_slice(slice: Box<[F]>) -> Self {
+    pub const fn from_boxed_slice(slice: Box<[F]>) -> Self {
         Self(slice)
     }
+
     pub fn from_vec(v: Vec<F>) -> Self {
         Self(v.into_boxed_slice())
     }
+
     pub fn from_array<const N: usize>(v: [F; N]) -> Self {
         Self(Box::new(v))
     }

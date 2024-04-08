@@ -10,3 +10,4 @@ pub mod schemes;
 
 #[cfg(test)]
 mod testing;
+mod help;

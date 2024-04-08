@@ -3,6 +3,7 @@
 use std::{borrow::Borrow, error::Error};
 
 use ff::{derive::rand_core::RngCore, Field};
+use serde::Serialize;
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
@@ -34,8 +35,9 @@ pub struct ShamirParams<F> {
 }
 
 // TODO: Collapse Field with Ser-De since we always require that combo?
-impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> super::Shared<F> for Share<F> {
+impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> super::Shared for Share<F> {
     type Context = ShamirParams<F>;
+    type Value = F;
 
     fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
         share(secret, &ctx.ids, ctx.threshold, rng)
@@ -46,7 +48,7 @@ impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> super::Shared<F>
     }
 }
 
-impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> InteractiveMult<F> for Share<F> {
+impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> InteractiveMult for Share<F> {
     async fn interactive_mult<U: Unicast>(
         ctx: &Self::Context,
         net: &mut U,
@@ -339,13 +341,25 @@ pub struct VecShare<F: Field> {
     pub(crate) ys: Vector<F>,
 }
 
+impl<F: Field + Serialize + serde::de::DeserializeOwned> super::Shared for VecShare<F> {
+    type Context = ShamirParams<F>;
+
+    type Value = Vec<F>;
+
+    fn share(ctx: &Self::Context, secret: Self::Value, rng: &mut impl RngCore) -> Vec<Self> {
+        share_many(&secret, &ctx.ids, ctx.threshold, rng)
+    }
+
+    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<Self::Value> {
+        Some(reconstruct_many(ctx, shares))
+    }
+}
+
 impl<F: Field> std::ops::Add for VecShare<F> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        // debug_assert_eq!(self.x, rhs.x);
         Self {
-            // x: self.x,
             ys: self.ys + rhs.ys,
         }
     }
@@ -359,6 +373,28 @@ impl<F: Field> std::ops::Add<&Self> for VecShare<F> {
         let a = self.ys;
         let b = &rhs.ys;
         let ys: Vector<_> = a + b;
+        VecShare { ys }
+    }
+}
+
+impl<F: Field> std::ops::Sub for VecShare<F> {
+    type Output = VecShare<F>;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            ys: self.ys - rhs.ys,
+        }
+    }
+}
+
+impl<F: Field> std::ops::Sub<&Self> for VecShare<F> {
+    type Output = VecShare<F>;
+
+    fn sub(self, rhs: &Self) -> Self::Output {
+        // debug_assert_eq!(self.x, rhs.x);
+        let a = self.ys;
+        let b = &rhs.ys;
+        let ys: Vector<_> = a - b;
         VecShare { ys }
     }
 }
