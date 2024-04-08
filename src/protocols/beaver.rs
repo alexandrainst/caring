@@ -202,6 +202,8 @@ pub async fn beaver_square<
 mod test {
     
 
+    use itertools::Itertools;
+
     use super::*;
     use crate::{
         algebra::element::Element32,
@@ -258,20 +260,13 @@ mod test {
     async fn beaver_mult_vec() {
         type F = Element32;
         type S = shamir::Share<F>;
-        //type S = crate::testing::mock::Share<F>;
         let mut rng = rand::rngs::mock::StepRng::new(0, 7);
         let threshold = 2;
         let ids: Vec<Element32> = (1..=3u32).map(Element32::from).collect();
         let ctx = ShamirParams { threshold, ids };
-        //let ctx = mock::Context{all_parties: ids.len(), me: 0};
-        let mut triples = BeaverTriple::<S>::fake_many(&ctx, &mut rng, 2);
-        let t3 = triples.pop().unwrap();
-        let t2 = triples.pop().unwrap();
-        let t1 = triples.pop().unwrap();
+        let triples = BeaverTriple::<S>::fake_many(&ctx, &mut rng, 2);
 
-        // mock::assert_holded_by(t1.iter().map(|t| t.shares.0), 0);
-        // mock::assert_holded_by(t2.iter().map(|t| t.shares.0), 1);
-        // mock::assert_holded_by(t3.iter().map(|t| t.shares.0), 2);
+        let (t1,t2,t3) = triples.into_iter().collect_tuple().unwrap();
 
         crate::testing::Cluster::new(3)
             .with_args([([5, 2], t1), ([7, 3], t2), ([0, 0u32], t3)])
@@ -283,11 +278,10 @@ mod test {
                 let x: Vec<_> = arg.into_iter().map(F::from).collect();
                 let shares = S::share_many(&ctx, &x, &mut rng);
 
-                let mut shares: Vec<_> = network.symmetric_unicast(shares).await.unwrap();
+                let shares: Vec<_> = network.symmetric_unicast(shares).await.unwrap();
 
-                let _ = shares.pop().unwrap();
-                let b = shares.pop().unwrap();
-                let a = shares.pop().unwrap();
+                let (a,b,_) = shares.into_iter().collect_tuple().unwrap();
+
 
                 let c = beaver_multiply_many(&ctx, &a, &b, &triple, &mut network)
                     .await
