@@ -41,7 +41,9 @@ pub fn share<F, G>(
     rng: &mut impl RngCore,
 ) -> Vec<VerifiableShare<F, G>>
 where
-    G: std::ops::Mul<F, Output = G>, F: Field, G: Group
+    G: std::ops::Mul<F, Output = G>,
+    F: Field,
+    G: Group,
 {
     // 1. We need to get the polynomial.
     // 2. We then need to do commitments to it.

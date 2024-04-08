@@ -8,6 +8,6 @@ pub mod ot;
 mod protocols;
 pub mod schemes;
 
+mod help;
 #[cfg(test)]
 mod testing;
-mod help;

@@ -37,19 +37,21 @@ use std::{
     ops::{Add, Sub},
 };
 
-use digest::Output;
 use futures::Future;
 
 use rand::RngCore;
 
-use crate::{help::run_for_each, net::{
+use crate::net::{
     agency::{Broadcast, Unicast},
     Tuneable,
-}};
+};
 
 /// Currently unused trait, but might be a better way to represent that a share
 /// can be multiplied by a const, however, it could also just be baked into 'Shared' directly.
-trait MulByConst<A>: Shared<Value=A> + std::ops::Mul<A, Output = Self> + std::ops::MulAssign<A> {}
+trait MulByConst<A>:
+    Shared<Value = A> + std::ops::Mul<A, Output = Self> + std::ops::MulAssign<A>
+{
+}
 
 /// For a value of type `F` the value is secret-shared
 ///
@@ -58,7 +60,7 @@ trait MulByConst<A>: Shared<Value=A> + std::ops::Mul<A, Output = Self> + std::op
 /// such as beaver triple multiplication.
 ///
 /// (Maybe rename to SecretShared?)
-pub trait Shared<F>:
+pub trait Shared:
     Sized
     + Add<Output = Self>
     + Sub<Output = Self>
@@ -87,12 +89,16 @@ pub trait Shared<F>:
     fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<Self::Value>;
     // TODO: Should be Result<F, impl Error> with some generic Secret-sharing error
 
-
     // These vecs of vecs are pretty annoying
-    fn share_many(ctx: &Self::Context, secrets: &[Self::Value], rng: &mut impl RngCore) -> Vec<Vec<Self>> {
-        let shares : Vec<_> = secrets.iter().map(|secret| {
-            Self::share(ctx, secret.clone(), rng)
-        }).collect();
+    fn share_many(
+        ctx: &Self::Context,
+        secrets: &[Self::Value],
+        rng: &mut impl RngCore,
+    ) -> Vec<Vec<Self>> {
+        let shares: Vec<_> = secrets
+            .iter()
+            .map(|secret| Self::share(ctx, secret.clone(), rng))
+            .collect();
         crate::help::transpose(shares)
     }
 
@@ -119,15 +125,19 @@ pub trait Shared<F>:
 }
 
 pub trait SharedVec:
-    Sized + Add<Output = Self> + Sub<Output = Self> + serde::Serialize + serde::de::DeserializeOwned + Clone
+    Sized
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + serde::Serialize
+    + serde::de::DeserializeOwned
+    + Clone
 {
     type Value;
     type Context: Send + Clone;
-    
+
     fn share(ctx: &Self::Context, secrets: &[Self::Value], rng: &mut impl RngCore) -> Self;
     fn recombine(ctx: &Self::Context, shares: &[Self], rng: &mut impl RngCore) -> Vec<Self::Value>;
 }
-
 
 /// Support for multiplication of two shares for producing a share.
 ///

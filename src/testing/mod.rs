@@ -57,9 +57,6 @@ impl<Arg: Clone> Cluster<Arg> {
     }
 }
 
-
-
-
 #[cfg(test)]
 mod test {
     use crate::testing::Cluster;

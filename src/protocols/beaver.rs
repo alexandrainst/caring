@@ -1,9 +1,13 @@
-use std::{iter, marker::PhantomData};
+use std::{iter};
 
-use itertools::{izip, multiunzip, MultiUnzip};
+use itertools::{izip, multiunzip};
 use rand::RngCore;
 
-use crate::{algebra::field::Field, help::run_for_each, net::agency::Broadcast, schemes::{Shared, SharedVec}};
+use crate::{
+    algebra::field::Field,
+    net::agency::Broadcast,
+    schemes::{Shared, SharedVec},
+};
 
 /// Beaver (Multiplication) Triple
 #[derive(Clone)]
@@ -35,21 +39,19 @@ impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
         let b = S::share(ctx, b, rng);
         let c = S::share(ctx, c, rng);
         itertools::izip!(a, b, c)
-            .map(|(a, b, c)| Self {
-                shares: (a, b, c),
-            })
+            .map(|(a, b, c)| Self { shares: (a, b, c) })
             .collect()
     }
-
 
     pub fn fake_many(ctx: &C, mut rng: &mut impl RngCore, count: usize) -> Vec<Vec<Self>> {
         let zipped = iter::from_fn(|| {
             let a = F::random(&mut rng);
-            let b= F::random(&mut rng);
+            let b = F::random(&mut rng);
             let c = a * b;
-            Some((a,b,c))
-        }).take(count);
-        let (a,b,c) : (Vec<_>, Vec<_>, Vec<_>) = multiunzip(zipped);
+            Some((a, b, c))
+        })
+        .take(count);
+        let (a, b, c): (Vec<_>, Vec<_>, Vec<_>) = multiunzip(zipped);
         // Share (preproccess)
         let a = S::share_many(ctx, &a, rng);
         let b = S::share_many(ctx, &b, rng);
@@ -58,8 +60,8 @@ impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
         itertools::izip!(a, b, c)
             .map(|(a, b, c)| {
                 let mut triples = Vec::new();
-                for shares in izip!(a,b,c) {
-                    triples.push(Self {shares})
+                for shares in izip!(a, b, c) {
+                    triples.push(Self { shares })
                 }
                 triples
             })
@@ -72,9 +74,7 @@ impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
     /// for the underlying field `F`, otherwise they are
     /// considered malformed.
     pub fn from_foreign(a: S, b: S, c: S) -> Self {
-        Self {
-            shares: (a, b, c),
-        }
+        Self { shares: (a, b, c) }
     }
 }
 
@@ -88,7 +88,7 @@ impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
 pub async fn beaver_multiply<
     C,
     F: Field,
-    S: Shared<Value = F , Context = C> + Copy + std::ops::Mul<S::Value, Output = S>,
+    S: Shared<Value = F, Context = C> + Copy + std::ops::Mul<S::Value, Output = S>,
 >(
     ctx: &C,
     x: S,
@@ -97,9 +97,7 @@ pub async fn beaver_multiply<
     agent: &mut impl Broadcast,
 ) -> Option<S> {
     // TODO: Better error handling.
-    let BeaverTriple {
-        shares: (a, b, c),
-    } = triple;
+    let BeaverTriple { shares: (a, b, c) } = triple;
     let ax: S = a + x;
     let by: S = b + y;
 
@@ -113,11 +111,10 @@ pub async fn beaver_multiply<
     Some(y * ax + a * (-by) + c)
 }
 
-
 pub async fn beaver_multiply_many<
     C,
     F: Field,
-    S: Shared<Value = F , Context = C> + Copy + std::ops::Mul<S::Value, Output = S>,
+    S: Shared<Value = F, Context = C> + Copy + std::ops::Mul<S::Value, Output = S>,
 >(
     ctx: &C,
     xs: &[S],
@@ -128,9 +125,7 @@ pub async fn beaver_multiply_many<
     let mut zs = Vec::new();
     // TODO: Better error handling.
     for (triple, &x, &y) in izip!(triples, xs, ys) {
-        let BeaverTriple {
-            shares: (a, b, c),
-        } = triple;
+        let BeaverTriple { shares: (a, b, c) } = triple;
         let ax: S = *a + x;
         let by: S = *b + y;
         // Very sad. Very inefficient.
@@ -145,14 +140,13 @@ pub async fn beaver_multiply_many<
     Some(zs)
 }
 
-
 #[derive(Clone)]
 pub struct BeaverSquare<S: Shared> {
     val: S,
     val_squared: S,
 }
 
-impl<F: Field, C, S: Shared<Value=F, Context = C>> BeaverSquare<S> {
+impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverSquare<S> {
     pub fn fake(ctx: &C, mut rng: &mut impl RngCore) -> Vec<Self> {
         let a = F::random(&mut rng);
         let c: F = a * a;
@@ -173,10 +167,7 @@ impl<F: Field, C, S: Shared<Value=F, Context = C>> BeaverSquare<S> {
     /// for the underlying field `F`, otherwise they are
     /// considered malformed.
     pub fn from_foreign(val: S, val_squared: S) -> Self {
-        Self {
-            val,
-            val_squared,
-        }
+        Self { val, val_squared }
     }
 }
 
@@ -197,10 +188,7 @@ pub async fn beaver_square<
     agent: &mut impl Broadcast,
 ) -> Option<S> {
     // TODO: Better error handling.
-    let BeaverSquare {
-        val,
-        val_squared,
-    } = triple;
+    let BeaverSquare { val, val_squared } = triple;
     let ax: S = val + x;
 
     // Sending both at once it more efficient.
@@ -212,13 +200,16 @@ pub async fn beaver_square<
 
 #[cfg(test)]
 mod test {
-    use itertools::Itertools;
+    
 
     use super::*;
     use crate::{
         algebra::element::Element32,
-        net::{agency::Unicast, network::{self, InMemoryNetwork}},
-        schemes::shamir::{self, ShamirParams, VecShare}, testing::mock,
+        net::{
+            agency::Unicast,
+            network::{InMemoryNetwork},
+        },
+        schemes::shamir::{self, ShamirParams},
     };
 
     #[tokio::test]
@@ -263,7 +254,6 @@ mod test {
         }
     }
 
-
     #[tokio::test]
     async fn beaver_mult_vec() {
         type F = Element32;
@@ -284,29 +274,30 @@ mod test {
         // mock::assert_holded_by(t3.iter().map(|t| t.shares.0), 2);
 
         crate::testing::Cluster::new(3)
-            .with_args([([5, 2], t1), ([7, 3], t2), ([0,0u32], t3)])
+            .with_args([([5, 2], t1), ([7, 3], t2), ([0, 0u32], t3)])
             .run_with_args(|mut network, (arg, triple)| async move {
                 let ids: Vec<Element32> = (1..=3u32).map(Element32::from).collect();
                 //let ctx = mock::Context{all_parties: ids.len(), me: network.index};
                 let ctx = ShamirParams { threshold, ids };
                 let mut rng = rand::rngs::mock::StepRng::new(1, 7);
-                let x : Vec<_> = arg.into_iter().map(F::from).collect();
+                let x: Vec<_> = arg.into_iter().map(F::from).collect();
                 let shares = S::share_many(&ctx, &x, &mut rng);
 
-                let mut shares : Vec<_> = network.symmetric_unicast(shares).await.unwrap();
+                let mut shares: Vec<_> = network.symmetric_unicast(shares).await.unwrap();
 
                 let _ = shares.pop().unwrap();
                 let b = shares.pop().unwrap();
                 let a = shares.pop().unwrap();
 
-                
-                let c = beaver_multiply_many(&ctx, &a, &b, &triple, &mut network).await.unwrap();
+                let c = beaver_multiply_many(&ctx, &a, &b, &triple, &mut network)
+                    .await
+                    .unwrap();
 
-                let shares : Vec<_> = network.symmetric_broadcast(c).await.unwrap();
-                let res : Option<_> = S::recombine_many(&ctx, &shares).into_iter().collect();
-                let res : Vec<_> = res.unwrap();
-                let res : Vec<_> = res.into_iter().map(u32::from).collect();
-                assert_eq!(res, [5*7, 2*3]);
+                let shares: Vec<_> = network.symmetric_broadcast(c).await.unwrap();
+                let res: Option<_> = S::recombine_many(&ctx, &shares).into_iter().collect();
+                let res: Vec<_> = res.unwrap();
+                let res: Vec<_> = res.into_iter().map(u32::from).collect();
+                assert_eq!(res, [5 * 7, 2 * 3]);
             })
             .await
             .unwrap();

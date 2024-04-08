@@ -2,7 +2,6 @@
 use rand::RngCore;
 use std::ops::*;
 
-
 pub trait Field:
     Clone
     + Copy
@@ -32,5 +31,3 @@ impl<T: ff::Field> Field for T {
         ff::Field::pow_vartime(self, [exp])
     }
 }
-
-
