@@ -10,6 +10,7 @@ use crate::net::{
 pub mod agency;
 pub mod connection;
 pub mod network;
+pub mod mux;
 
 // TODO: Serde trait bounds on `T`
 // TODO: Properly use this trait for other things (Connection/Agency etc.)
@@ -19,25 +20,25 @@ pub trait Channel {
     /// Send a message over the channel
     ///
     /// * `msg`: message to serialize and send
-    fn send<T: serde::Serialize>(
+    fn send<T: serde::Serialize + Sync>(
         &mut self,
         msg: &T,
-    ) -> impl Future<Output = Result<(), Self::Error>>;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     fn recv<T: serde::de::DeserializeOwned>(
         &mut self,
-    ) -> impl Future<Output = Result<T, Self::Error>>;
+    ) -> impl Future<Output = Result<T, Self::Error>> + Send;
 }
 
 impl<
-        R: tokio::io::AsyncRead + std::marker::Unpin,
-        W: tokio::io::AsyncWrite + std::marker::Unpin,
+        R: tokio::io::AsyncRead + std::marker::Unpin + Send,
+        W: tokio::io::AsyncWrite + std::marker::Unpin + Send,
     > Channel for Connection<R, W>
 {
     type Error = ConnectionError;
 
-    async fn send<T: serde::Serialize>(&mut self, _msg: &T) -> Result<(), Self::Error> {
-        self.send(_msg).await
+    async fn send<T: serde::Serialize + Sync>(&mut self, msg: &T) -> Result<(), Self::Error> {
+        self.send(&msg).await
     }
 
     fn recv<T: serde::de::DeserializeOwned>(
@@ -50,7 +51,6 @@ impl<
 /// Tune to a specific channel
 pub trait Tuneable {
     type Error: Error + 'static;
-    type SubChannel: Channel;
 
     fn id(&self) -> usize;
 
@@ -72,7 +72,6 @@ impl<
     > Tuneable for Network<R, W>
 {
     type Error = ConnectionError;
-    type SubChannel = Connection<R, W>;
 
     fn id(&self) -> usize {
         self.index

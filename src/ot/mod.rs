@@ -29,7 +29,7 @@ pub trait ObliviousSend<C: Channel> {
     /// * `pkg0`: First package to transfer
     /// * `pkg1`: Second package to transfer
     /// * `channel`: Channel to communicate by
-    fn send<T: serde::Serialize>(
+    fn send<T: serde::Serialize + Sync>(
         pkg0: &T,
         pkg1: &T,
         channel: &mut C,
@@ -64,7 +64,7 @@ struct MockOTSender();
 impl<C: Channel> ObliviousSend<C> for MockOTSender {
     type Error = C::Error;
 
-    async fn send<T: serde::Serialize>(
+    async fn send<T: serde::Serialize + Sync>(
         pkg0: &T,
         pkg1: &T,
         channel: &mut C,

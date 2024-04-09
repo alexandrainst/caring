@@ -67,6 +67,7 @@ pub trait Shared:
     + serde::Serialize
     + serde::de::DeserializeOwned
     + Clone
+    + Sync
 {
     /// The context needed to use the scheme.
     /// This can be a struct containing the threshold, ids and other things.
