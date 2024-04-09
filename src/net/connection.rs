@@ -70,7 +70,7 @@ pub enum ConnectionError {
     #[error("No message to receive")]
     Closed,
     #[error("Unknown error")]
-    Unknown(#[from] Box<dyn Error + Send>),
+    Unknown(#[from] Box<dyn Error + Send + Sync + 'static>),
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
