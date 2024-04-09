@@ -190,7 +190,7 @@ where
 
             let send_out = async {
                 while let Some(msg) = gateway.inbox.next().await {
-                    sending.send_bytes(&msg).await.unwrap();
+                    sending.send(&msg).await.unwrap();
                 }
             }.fuse();
 
@@ -224,6 +224,14 @@ where
     }
 
 }
+// TODO: Multiplex generic channel
+// requires that Channels can be split (introduce splittable trait?)
+// probable needs to have a trait for sender and a trait for receiver.
+
+// TODO: Multiplex Network
+// Should be pretty easy, just do multiplexing for all the connections at once.
+//
+
 
 #[cfg(test)]
 mod test {

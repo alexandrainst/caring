@@ -14,6 +14,7 @@ pub mod mux;
 
 // TODO: Serde trait bounds on `T`
 // TODO: Properly use this trait for other things (Connection/Agency etc.)
+// TODO: Somehow redo the Tuneable, Unicast and Broadcast traits.
 pub trait Channel {
     type Error: Error + 'static;
 
