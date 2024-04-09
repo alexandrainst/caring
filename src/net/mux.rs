@@ -7,6 +7,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::net::{connection::ConnectionError, Channel};
 
+// TODO: Use tokio bytes instead?
 type Bytes = Vec<u8>;
 
 // TODO: Handle errors back in MuxConn
@@ -30,7 +31,7 @@ impl Channel for MuxConn {
     async fn send<T: serde::Serialize + Sync>(&mut self, msg: &T) -> Result<(), Self::Error> {
         futures::select! {
             res = &mut self.error => {
-                let err = res.expect("Should not be canceled");
+                let err = res.expect("Gateway should always be alive if MuxConn is alive");
                 Err(err)
             },
             default => {
@@ -87,7 +88,55 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    pub fn multiplex(net: super::connection::Connection<R, W>, n: usize) -> (Self, Vec<MuxConn>) {
+    /// Multiplex a connection to share it into `n` new connections.
+    ///
+    /// * `net`: Connection to use as a gateway for multiplexing
+    /// * `n`: Number of new connections to multiplex into
+    ///
+    /// Returns a gateway which the MuxConn communicate through, along with the MuxConn
+    ///
+    /// # Example
+    /// ```
+    /// # use caring::net::connection::Connection;
+    /// # use caring::net::mux::Gateway;
+    /// # use crate::caring::net::Channel;
+    /// # tokio_test::block_on(async {
+    /// # let (c1, c2) = Connection::in_memory();
+    /// # let first = async {
+    /// # let con = c1;
+    /// let (gateway, mut muxs) = Gateway::multiplex(con, 2);
+    /// let mut m1 = muxs.remove(1);
+    /// let mut m2 = muxs.remove(0);
+    /// let t1 = async move {
+    ///     m1.send(&String::from("Hello")).await.unwrap();
+    /// };
+    /// let t2 = async move {
+    ///     m2.send(&String::from("Friend")).await.unwrap();
+    /// };
+    /// futures::join!(t1, t2);
+    /// let con : Connection<_,_> = gateway.takedown().await;
+    /// # };
+    /// #
+    /// # let second = async {
+    /// # let con = c2;
+    /// # let (gateway, mut muxs) = Gateway::multiplex(con, 2);
+    /// # let mut m1 = muxs.remove(1);
+    /// # let mut m2 = muxs.remove(0);
+    /// # let t1 = async move {
+    /// #     let _ : String = m1.recv().await.unwrap();
+    /// # };
+    /// # let t2 = async move {
+    /// #     let _ : String = m2.recv().await.unwrap();
+    /// # };
+    /// # futures::join!(t1, t2);
+    /// # let con : Connection<_,_> = gateway.takedown().await;
+    /// # };
+    /// # futures::join!(first, second)
+    /// # });
+    /// 
+    /// ```
+    ///
+    pub fn multiplex(con: super::connection::Connection<R, W>, n: usize) -> (Self, Vec<MuxConn>) {
         let (gateway, inbox) = mpsc::unbounded();
 
         let (sends, channels, errors) = multiunzip((0..n)
@@ -108,7 +157,7 @@ where
         let gateway = GatewayInner {
             mailboxes: sends,
             inbox,
-            channel: net,
+            channel: con,
             errors,
         };
 
@@ -141,7 +190,7 @@ where
 
             let send_out = async {
                 while let Some(msg) = gateway.inbox.next().await {
-                    sending.send(&msg).await.unwrap();
+                    sending.send_bytes(&msg).await.unwrap();
                 }
             }.fuse();
 
@@ -163,7 +212,9 @@ where
                 err = recv_in => {
                     let err = Arc::new(err);
                     for c in gateway.errors.drain(..) {
-                        c.send(MuxError(err.clone())).unwrap();
+                        // ignore dropped connections,
+                        // they can't handle errors when they don't exist.
+                        let _ = c.send(MuxError(err.clone()));
                     }
                 },
             };
@@ -189,6 +240,8 @@ mod test {
         assert_eq!(text, resp);
         resp
     }
+
+    // TODO: Better names for tests.
 
     #[tokio::test]
     async fn sunshine() {

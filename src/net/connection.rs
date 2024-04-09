@@ -29,7 +29,7 @@ use tokio::{
     time::error::Elapsed,
 };
 
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tokio_util::{bytes::{Bytes, BytesMut}, codec::{FramedRead, FramedWrite, LengthDelimitedCodec}};
 
 pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     reader: FramedRead<R, LengthDelimitedCodec>,
@@ -98,6 +98,23 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
         bincode::deserialize_from(buf).map_err(ConnectionError::MalformedMessage)
     }
 
+
+    pub async fn recv_bytes(&mut self) -> Result<BytesMut, ConnectionError> {
+        let buf = self.reader
+            .next()
+            .await
+            .ok_or(ConnectionError::Closed)?
+            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
+        Ok(buf)
+    }
+
+    pub async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), ConnectionError> {
+        self.writer
+            .send(bytes)
+            .await
+            .map_err(|_| ConnectionError::Closed)
+    }
+
     pub fn split(&mut self) -> (Receiving<R>, Sending<W>) {
         (Receiving(&mut self.reader), Sending(&mut self.writer))
     }
@@ -117,6 +134,16 @@ impl<'a, R: AsyncRead + Unpin> Receiving<'a, R> {
         let buf = std::io::Cursor::new(buf);
         bincode::deserialize_from(buf).map_err(ConnectionError::MalformedMessage)
     }
+
+    pub async fn recv_bytes(&mut self) -> Result<BytesMut, ConnectionError> {
+        let buf = self
+            .0
+            .next()
+            .await
+            .ok_or(ConnectionError::Closed)?
+            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
+        Ok(buf)
+    }
 }
 
 impl<'a, W: AsyncWrite + Unpin> Sending<'a, W> {
@@ -124,6 +151,14 @@ impl<'a, W: AsyncWrite + Unpin> Sending<'a, W> {
         let msg = bincode::serialize(msg).unwrap();
         self.0
             .send(msg.into())
+            .await
+            .map_err(|_| ConnectionError::Closed)
+    }
+
+    // TODO: Limit error types
+    pub async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), ConnectionError> {
+        self.0
+            .send(bytes)
             .await
             .map_err(|_| ConnectionError::Closed)
     }
