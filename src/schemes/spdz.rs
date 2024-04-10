@@ -15,12 +15,10 @@
 use ff::PrimeField;
 
 use derive_more::{Add, AddAssign, Sub, SubAssign};
-//use rand::{thread_rng, RngCore, SeedableRng};
-//use serde::{de::DeserializeOwned, Serialize};
-//use tracing_subscriber::field::debug;
-//use std::io;
-//use crate::{net::{agency::Broadcast, network::{self, InMemoryNetwork}}, protocols::{cointoss::CoinToss, preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, commitments}};
-use crate::{net::agency::Broadcast, protocols::{ preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, commitments}};
+//use crate::{net::agency::Broadcast, protocols::{ preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, commitments}};
+use crate::{net::agency::Broadcast, protocols::commitments};
+
+pub mod preprocessing;
 
 // Should we allow Field or use PrimeField?
 #[derive(Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign, serde::Serialize, serde::Deserialize)]
@@ -89,9 +87,6 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
         }
     }
 }
-// The same can not be done for addition, unless we can give it access to the context some how. 
-// TODO: verify with Mikkel that that is not a possiblility.
-
 
 // TODO: Write share and resive_share_from together to one function 
     // Need to find out How to broadcast frome one specific party to all others - and how to await for that.
@@ -112,8 +107,8 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
 
 pub fn send_share<F: PrimeField>(
     val: F, 
-    rand_known_to_me: &mut RandomKnownToMe<F>, 
-    rand_known_to_i: &mut RandomKnownToPi<F>,
+    rand_known_to_me: &mut preprocessing::RandomKnownToMe<F>, 
+    rand_known_to_i: &mut preprocessing::RandomKnownToPi<F>,
     who_am_i: usize,
     mac_key_share: F
 ) -> Result<(Share<F>, F),()> {
@@ -141,7 +136,7 @@ pub fn send_share<F: PrimeField>(
 // When resiving a share, the party resiving it needs to know who send it.
 pub fn recive_share_from<F: PrimeField>(
     correction: F, 
-    rand_known_to_i: &mut RandomKnownToPi<F>, 
+    rand_known_to_i: &mut preprocessing::RandomKnownToPi<F>, 
     who:usize, 
     mac_key_share: F
 ) -> Result<Share<F>,()> {
@@ -171,25 +166,19 @@ pub async fn partial_opening_2<F: PrimeField + serde::Serialize + serde::de::Des
 }
 
 
-// Parms fields are public, so they can be used from preprocessing, 
-// but preprocessing is specified to SPDZ anyway and should therefor probably be a module here instead.
-// TODO: Therefor move preprocessing to be a module under SPDZ and make less stuff public :) 
 #[derive(Debug)]
-pub struct SpdzParams<F: PrimeField> {
-    pub mac_key_share: F,
-    pub who_am_i: usize,
+struct SpdzParams<F: PrimeField> {
+    mac_key_share: F,
+    who_am_i: usize,
 }
 
-// Context fields are public, so they can be used from preprocessing, 
-// but preprocessing is specified to SPDZ anyway and should therefor probably be a module here instead.
-// TODO: Therefor move preprocessing to be a module under SPDZ and make less stuff public :) 
 #[derive(Debug)]
-pub struct SpdzContext<F: PrimeField> {
-    pub opened_values: Vec<F>, 
-    pub closed_values: Vec<Share<F>>,
+struct SpdzContext<F: PrimeField> {
+    opened_values: Vec<F>, 
+    closed_values: Vec<Share<F>>,
     // dbgr supplier (det. random bit generator)
-    pub params: SpdzParams<F>,
-    pub preprocessed_values: preprocessing::PreprocessedValues<F>,
+    params: SpdzParams<F>,
+    preprocessed_values: preprocessing::PreprocessedValues<F>,
 }
 
 
@@ -247,7 +236,7 @@ mod test {
     //use rayon::vec;
     //use tokio_util::context;
 
-    use crate::{algebra::element::Element32, net::network::{InMemoryNetwork} , protocols::preprocessing};
+    use crate::{algebra::element::Element32, net::network::{InMemoryNetwork}};
 
     use super::*;
 
