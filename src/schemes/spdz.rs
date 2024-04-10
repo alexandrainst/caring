@@ -15,11 +15,12 @@
 use ff::PrimeField;
 
 use derive_more::{Add, AddAssign, Sub, SubAssign};
-use rand::{thread_rng, RngCore, SeedableRng};
-use serde::{de::DeserializeOwned, Serialize};
-use tracing_subscriber::field::debug;
-use std::io;
-use crate::{net::{agency::Broadcast, network::{self, InMemoryNetwork}}, protocols::{cointoss::CoinToss, preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, commitments}};
+//use rand::{thread_rng, RngCore, SeedableRng};
+//use serde::{de::DeserializeOwned, Serialize};
+//use tracing_subscriber::field::debug;
+//use std::io;
+//use crate::{net::{agency::Broadcast, network::{self, InMemoryNetwork}}, protocols::{cointoss::CoinToss, preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, commitments}};
+use crate::{net::agency::Broadcast, protocols::{ preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, commitments}};
 
 // Should we allow Field or use PrimeField?
 #[derive(Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign, serde::Serialize, serde::Deserialize)]
@@ -108,50 +109,23 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
     //}
 //}
 
-pub fn send_share<F: PrimeField>(
-    val: F, 
-    rand_known_to_me: &mut RandomKnownToMe<F>, 
-    mac_key_share: F
-) -> Result<(Share<F>, F),()> {
-    // ToDo: Throw a nice error if there is no more elements. Then we need more preprocessing.
-    let (rand_share, r) = match rand_known_to_me.shares_and_vals.pop(){
-        Some((r_share, r_elm)) => {
-            println!("send share went fine");
-            (r_share, r_elm)},
-        None => {
-            println!("The sharing is failing at send");
-            return Err(())},
-    };
-    let correction = val - r;
-    let share = rand_share.add_public(correction, true, mac_key_share);
-    Ok((share, correction))
-}
 
-pub fn send_share_v2<F: PrimeField>(
+pub fn send_share<F: PrimeField>(
     val: F, 
     rand_known_to_me: &mut RandomKnownToMe<F>, 
     rand_known_to_i: &mut RandomKnownToPi<F>,
     who_am_i: usize,
     mac_key_share: F
 ) -> Result<(Share<F>, F),()> {
-    // ToDo: Throw a nice error if there is no more elements. Then we need more preprocessing.
-    //let (rand_share, r) = match rand_known_to_me.shares_and_vals.pop(){
-        //Some((r_share, r_elm)) => {
-            //println!("send share went fine");
-            //(r_share, r_elm)},
-        //None => {
-            //println!("The sharing is failing at send");
-            //return Err(())},
-    //};
-    let r = match rand_known_to_me.shares_and_vals.pop(){
-        Some((_, r)) => {
+    let r = match rand_known_to_me.vals.pop(){
+        Some(r) => {
             println!("send share went fine");
             r},
         None => {
             println!("The sharing is failing at send");
             return Err(())},
     };
-    let (r_share) = match rand_known_to_i.shares[who_am_i].pop(){
+    let r_share = match rand_known_to_i.shares[who_am_i].pop(){
         Some(r_share) => {
             println!("send share went fine");
             r_share},
@@ -269,18 +243,18 @@ where F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::conv
 #[cfg(test)]
 mod test {
 
-    use ff::Field;
+    //use ff::Field;
     //use rayon::vec;
     //use tokio_util::context;
 
-    use crate::{algebra::element::Element32, net, protocols::preprocessing::{self, RandomKnownToMe, RandomKnownToPi, SecretValues}};
+    use crate::{algebra::element::Element32, net::network::{InMemoryNetwork} , protocols::preprocessing};
 
     use super::*;
 
     // All these tests use dealer preprosessing 
     // setup
     fn dummie_prepross() -> (SpdzContext<Element32>, SpdzContext<Element32>, preprocessing::SecretValues<Element32>){
-        let mut rng = rand::rngs::mock::StepRng::new(42, 7);
+        let rng = rand::rngs::mock::StepRng::new(42, 7);
         let known_to_each = vec![1,1];
         let number_of_triplets = 1;
         let number_of_parties = 2;
@@ -300,8 +274,8 @@ mod test {
         let p2_preprocessed = p2_context.preprocessed_values;
         let p1_known_to_pi = p1_preprocessed.rand_known_to_i.shares;
         let p2_known_to_pi = p2_preprocessed.rand_known_to_i.shares;
-        let p1_known_to_me = p1_preprocessed.rand_known_to_me.shares_and_vals;
-        let p2_known_to_me = p2_preprocessed.rand_known_to_me.shares_and_vals;
+        let p1_known_to_me = p1_preprocessed.rand_known_to_me.vals;
+        let p2_known_to_me = p2_preprocessed.rand_known_to_me.vals;
         let p1_triplets = p1_preprocessed.triplets;
         let p2_triplets = p2_preprocessed.triplets;
         let mac = secret_values.mac_key;
@@ -320,18 +294,14 @@ mod test {
         assert!(p2_who_am_i == 1);
         let r_val = p1_known_to_pi[0][0].val+p2_known_to_pi[0][0].val;
         let r_mac = p1_known_to_pi[0][0].mac+p2_known_to_pi[0][0].mac;
-        let r2: Element32 = p1_known_to_me[0].1;
+        let r2: Element32 = p1_known_to_me[0];
         assert!(r_val == r2);
         assert!(r_mac == r2*mac);
-        assert!(p1_known_to_me[0].0.val == p1_known_to_pi[0][0].val);
-        assert!(p1_known_to_me[0].0.mac == p1_known_to_pi[0][0].mac);
         let s_val = p1_known_to_pi[1][0].val+p2_known_to_pi[1][0].val;
         let s_mac = p1_known_to_pi[1][0].mac+p2_known_to_pi[1][0].mac;
-        let s2 = p2_known_to_me[0].1;
+        let s2 = p2_known_to_me[0];
         assert!(s_val == s2);
         assert!(s_mac == s2*mac);
-        assert!(p2_known_to_me[0].0.val == p2_known_to_pi[1][0].val);
-        assert!(p2_known_to_me[0].0.mac == p2_known_to_pi[1][0].mac);
     }
     #[test]
     fn test_dealer(){
@@ -351,8 +321,8 @@ mod test {
         let p2_preprocessed = p2_context.preprocessed_values;
         let p1_known_to_pi = p1_preprocessed.rand_known_to_i.shares;
         let p2_known_to_pi = p2_preprocessed.rand_known_to_i.shares;
-        let p1_known_to_me = p1_preprocessed.rand_known_to_me.shares_and_vals;
-        let p2_known_to_me = p2_preprocessed.rand_known_to_me.shares_and_vals;
+        let p1_known_to_me = p1_preprocessed.rand_known_to_me.vals;
+        let p2_known_to_me = p2_preprocessed.rand_known_to_me.vals;
         let p1_triplets = p1_preprocessed.triplets;
         let p2_triplets = p2_preprocessed.triplets;
 
@@ -360,17 +330,17 @@ mod test {
         assert!(p1_params.mac_key_share + p2_params.mac_key_share == mac);
 
         let r = p1_known_to_pi[0][0]+p2_known_to_pi[0][0];
-        let r2 = p1_known_to_me[0].1;
+        let r2 = p1_known_to_me[0];
         assert!(r.val == r2);
         assert!(r.mac == r2*mac);
 
         let s = p1_known_to_pi[1][0]+p2_known_to_pi[1][0];
-        let s2 = p2_known_to_me[0].1;
+        let s2 = p2_known_to_me[0];
         assert!(s.val == s2);
         assert!(s.mac == s2*mac);
 
         let s1 = p1_known_to_pi[1][1]+p2_known_to_pi[1][1];
-        let s3 = p2_known_to_me[1].1;
+        let s3 = p2_known_to_me[1];
         assert!(s1.val == s3);
         assert!(s1.mac == s3*mac);
 
@@ -401,9 +371,9 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share_v2(elm1, &mut (p1_prepros.rand_known_to_me), &mut p1_prepros.rand_known_to_i, p1_context.params.who_am_i, p1_context.params.mac_key_share){
+        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), &mut p1_prepros.rand_known_to_i, p1_context.params.who_am_i, p1_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -412,7 +382,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed_values;
         let elm1_2 = match recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -422,9 +392,9 @@ mod test {
         
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(elm2, &mut (p2_prepros.rand_known_to_me), p2_context.params.mac_key_share){
+        let (elm2_2, correction) = match send_share(elm2, &mut (p2_prepros.rand_known_to_me), &mut p2_prepros.rand_known_to_i, p2_context.params.who_am_i,p2_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -432,7 +402,7 @@ mod test {
         
         let elm2_1 = match recive_share_from(correction, &mut p1_prepros.rand_known_to_i, 1, p1_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -447,9 +417,9 @@ mod test {
 
         // P1 shares an element
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(elm1, &mut (p1_context.preprocessed_values.rand_known_to_me), p1_context.params.mac_key_share){
+        let (elm1_1, correction) = match send_share(elm1, &mut (p1_context.preprocessed_values.rand_known_to_me), &mut p1_context.preprocessed_values.rand_known_to_i, p1_context.params.who_am_i,p1_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -457,7 +427,7 @@ mod test {
         
         let elm1_2 = match recive_share_from(correction, &mut (p2_context.preprocessed_values.rand_known_to_i), 0, p2_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -467,9 +437,9 @@ mod test {
         
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(elm2, &mut (p2_context.preprocessed_values.rand_known_to_me), p2_context.params.mac_key_share){
+        let (elm2_2, correction) = match send_share(elm2, &mut (p2_context.preprocessed_values.rand_known_to_me), &mut p2_context.preprocessed_values.rand_known_to_i, p2_context.params.who_am_i,p2_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -477,7 +447,7 @@ mod test {
         
         let elm2_1 = match recive_share_from(correction, &mut p1_context.preprocessed_values.rand_known_to_i, 1, p1_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -506,9 +476,9 @@ mod test {
 
         // P1 shares an element
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(elm1, &mut (p1_context.preprocessed_values.rand_known_to_me), p1_context.params.mac_key_share){
+        let (elm1_1, correction) = match send_share(elm1, &mut (p1_context.preprocessed_values.rand_known_to_me), &mut p1_context.preprocessed_values.rand_known_to_i, p1_context.params.who_am_i, p1_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -517,7 +487,7 @@ mod test {
         //let mut p2_prepros = p2_context.preprocessed_values;
         let elm1_2 = match recive_share_from(correction, &mut (p2_context.preprocessed_values.rand_known_to_i), 0, p2_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -527,9 +497,9 @@ mod test {
         
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(elm2, &mut (p2_context.preprocessed_values.rand_known_to_me), p2_context.params.mac_key_share){
+        let (elm2_2, correction) = match send_share(elm2, &mut (p2_context.preprocessed_values.rand_known_to_me), &mut p2_context.preprocessed_values.rand_known_to_i, p2_context.params.who_am_i, p2_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -537,7 +507,7 @@ mod test {
         
         let elm2_1 = match recive_share_from(correction, &mut p1_context.preprocessed_values.rand_known_to_i, 1, p1_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -578,9 +548,9 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.params.mac_key_share){
+        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), &mut p1_prepros.rand_known_to_i, p1_context.params.who_am_i, p1_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -589,7 +559,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed_values;
         let elm1_2 = match recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -599,9 +569,9 @@ mod test {
         
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(elm2, &mut (p2_prepros.rand_known_to_me), p2_context.params.mac_key_share){
+        let (elm2_2, correction) = match send_share(elm2, &mut (p2_prepros.rand_known_to_me), &mut p2_prepros.rand_known_to_i, p2_context.params.who_am_i, p2_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -609,7 +579,7 @@ mod test {
         
         let elm2_1 = match recive_share_from(correction, &mut p1_prepros.rand_known_to_i, 1, p1_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -634,9 +604,9 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.params.mac_key_share){
+        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), &mut p1_prepros.rand_known_to_i, p1_context.params.who_am_i, p1_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -645,7 +615,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed_values;
         let elm1_2 = match recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -655,9 +625,9 @@ mod test {
         
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(elm2, &mut (p2_prepros.rand_known_to_me), p2_context.params.mac_key_share){
+        let (elm2_2, correction) = match send_share(elm2, &mut (p2_prepros.rand_known_to_me), &mut p2_prepros.rand_known_to_i, p2_context.params.who_am_i, p2_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -665,7 +635,7 @@ mod test {
         
         let elm2_1 = match recive_share_from(correction, &mut p1_prepros.rand_known_to_i, 1, p1_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -690,9 +660,9 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.params.mac_key_share){
+        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), &mut p1_prepros.rand_known_to_i, p1_context.params.who_am_i, p1_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -701,7 +671,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed_values;
         let elm1_2 = match recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -725,9 +695,9 @@ mod test {
         // P1 shares an element
         let p1_prepros = &mut p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.params.mac_key_share){
+        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), &mut p1_prepros.rand_known_to_i, p1_context.params.who_am_i, p1_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -736,7 +706,7 @@ mod test {
         let p2_prepros = &mut p2_context.preprocessed_values;
         let elm1_2 = match recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -746,9 +716,9 @@ mod test {
         
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(elm2, &mut (p2_prepros.rand_known_to_me), p2_context.params.mac_key_share){
+        let (elm2_2, correction) = match send_share(elm2, &mut (p2_prepros.rand_known_to_me), &mut p2_prepros.rand_known_to_i, p2_context.params.who_am_i, p2_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -756,7 +726,7 @@ mod test {
         
         let elm2_1 = match recive_share_from(correction, &mut p1_prepros.rand_known_to_i, 1, p1_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -778,7 +748,7 @@ mod test {
             let res_share_result = secret_mult(s1, s2, &mut context, &mut network).await;
             let res_share = match res_share_result {
                 Ok(share) => share,
-                Err(error) => {
+                Err(_) => {
                     assert!(false); // TODO: do we want it to panic? - we do want it to run the rest of the tests, even when this one fails.
                     Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
                 }
@@ -814,9 +784,9 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.params.mac_key_share){
+        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), &mut p1_prepros.rand_known_to_i, p1_context.params.who_am_i, p1_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -825,7 +795,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed_values;
         let elm1_2 = match recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }
@@ -849,9 +819,9 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), p1_context.params.mac_key_share){
+        let (elm1_1, correction) = match send_share(elm1, &mut (p1_prepros.rand_known_to_me), &mut p1_prepros.rand_known_to_i, p1_context.params.who_am_i, p1_context.params.mac_key_share){
             Ok((e,c)) => (e,c),
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 (Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}, F::from_u128(0u128))
             }
@@ -860,7 +830,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed_values;
         let elm1_2 = match recive_share_from(correction, &mut p2_prepros.rand_known_to_i, 0, p2_context.params.mac_key_share){
             Ok(s) => s,
-            Err(e) => {
+            Err(_) => {
                 assert!(false);
                 Share{val:F::from_u128(0u128), mac:F::from_u128(0u128)}
             }

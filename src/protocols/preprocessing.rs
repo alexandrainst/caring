@@ -41,7 +41,7 @@ pub struct RandomKnownToPi<F: PrimeField>{
 
 #[derive(Debug)]
 pub struct RandomKnownToMe<F: PrimeField>{
-    pub shares_and_vals: Vec<(spdz::Share<F>, F)>,
+    pub vals: Vec<F>,
 }
 
 pub struct SecretValues<F> {
@@ -61,7 +61,7 @@ pub fn dealer_prepross<F:PrimeField>(mut rng: rand::rngs::mock::StepRng, known_t
     let mut contexts: Vec<SpdzContext<F>> = vec![];
     for i in 0..number_of_parties{
         let rand_known_to_i = RandomKnownToPi{shares: vec![vec![];number_of_parties]};
-        let rand_known_to_me= RandomKnownToMe{shares_and_vals: vec![]};
+        let rand_known_to_me= RandomKnownToMe{vals: vec![]};
         let triplets = vec![];
         let p_preprosvals = PreprocessedValues{
             triplets,
@@ -96,7 +96,7 @@ pub fn dealer_prepross<F:PrimeField>(mut rng: rand::rngs::mock::StepRng, known_t
                 let ri_share = spdz::Share{val:ri, mac:r_mac_i};
                 contexts[i].preprocessed_values.rand_known_to_i.shares[me].push(ri_share);
                 if me == i {
-                    contexts[me].preprocessed_values.rand_known_to_me.shares_and_vals.push((ri_share, r));
+                    contexts[me].preprocessed_values.rand_known_to_me.vals.push(r);
                 }
             }
             let r2 = ri_rest;
@@ -104,7 +104,7 @@ pub fn dealer_prepross<F:PrimeField>(mut rng: rand::rngs::mock::StepRng, known_t
             let r2_share = spdz::Share{val:r2, mac:r_mac};
             contexts[number_of_parties-1].preprocessed_values.rand_known_to_i.shares[me].push(r2_share);
             if me == number_of_parties-1 {
-                contexts[me].preprocessed_values.rand_known_to_me.shares_and_vals.push((r2_share, r));
+                contexts[me].preprocessed_values.rand_known_to_me.vals.push(r);
             }
         }
         me += 1;
