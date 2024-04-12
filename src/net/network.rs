@@ -212,7 +212,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// * `msg`: message to send and receive
     pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Result<Vec<T>, NetworkError>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned,
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
         let my_id = self.index;
         let my_own_msg = msgs.remove(my_id);
@@ -313,7 +313,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     #[tracing::instrument(skip_all)]
     async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, Self::Error>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned,
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
         self.symmetric_unicast(msgs).await
     }

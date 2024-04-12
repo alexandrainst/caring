@@ -19,6 +19,7 @@
 use std::error::Error;
 
 use futures::{SinkExt, StreamExt};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, DuplexStream, ReadHalf, WriteHalf},
@@ -34,35 +35,11 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
 
-pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
-    reader: FramedRead<R, LengthDelimitedCodec>,
-    writer: FramedWrite<W, LengthDelimitedCodec>,
+pub struct Connection<R: AsyncRead, W: AsyncWrite> {
+    sender: Sending<W>,
+    receiver: Receiving<R>,
 }
 
-impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Connection<R, W> {
-    /// Construct a new connection from a reader and writer
-    /// Messages are serialized with bincode and length delimated.
-    ///
-    /// * `reader`: Reader to receive messages from
-    /// * `writer`: Writer to send messages to
-    pub fn new(reader: R, writer: W) -> Self {
-        let codec = LengthDelimitedCodec::new();
-        let reader = FramedRead::new(reader, codec.clone());
-        let writer = FramedWrite::new(writer, codec);
-
-        Connection { reader, writer }
-    }
-}
-
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
-    /// Destroy the connection, returning the internal reader and writer.
-    pub async fn destroy(self) -> Result<(R, W), ConnectionError> {
-        let Self { reader, writer } = self;
-        // Should not wait much here since we drop input
-        // it is really only unsent packages holding us back
-        Ok((reader.into_inner(), writer.into_inner()))
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum ConnectionError {
@@ -76,96 +53,126 @@ pub enum ConnectionError {
     Unknown(#[from] Box<dyn Error + Send + Sync + 'static>),
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
+impl<R: AsyncRead, W: AsyncWrite> Connection<R,W> {
+    /// Construct a new connection from a reader and writer
+    /// Messages are serialized with bincode and length delimated.
+    ///
+    /// * `reader`: Reader to receive messages from
+    /// * `writer`: Writer to send messages to
+    pub fn new(reader: R, writer: W) -> Self {
+        let codec = LengthDelimitedCodec::new();
+        let reader = FramedRead::new(reader, codec.clone());
+        let writer = FramedWrite::new(writer, codec);
+
+        let sender = Sending(writer);
+        let receiver = Receiving(reader);
+        Connection { sender, receiver }
+    }
+
+    /// Destroy the connection, returning the internal reader and writer.
+    pub async fn destroy(self) -> Result<(R, W), ConnectionError> {
+        let Self { sender , receiver } = self;
+        // Should not wait much here since we drop input
+        // it is really only unsent packages holding us back
+        Ok((receiver.0.into_inner(), sender.0.into_inner()))
+    }
+}
+
+trait SendBytes {
+    type SendError: Error + Send;
+
+    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), Self::SendError>;
+
+    async fn send_thing<T: Serialize>(&mut self, msg: &T) -> Result<(), Self::SendError> {
+        let msg = bincode::serialize(msg).unwrap();
+        self.send_bytes(msg.into()).await
+    }
+}
+
+impl<W: AsyncWrite + Unpin> SendBytes for FramedWrite<W, LengthDelimitedCodec> {
+    type SendError = ConnectionError;
+    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), Self::SendError> {
+        self.send(bytes)
+            .await
+            .map_err(|_| ConnectionError::Closed)
+
+    }
+
+}
+
+trait RecvBytes {
+    type RecvError: Error + Send;
+    async fn recv_bytes(&mut self) -> Result<BytesMut, Self::RecvError>;
+
+    async fn recv_thing<T: DeserializeOwned>(&mut self) -> Result<T, Self::RecvError> {
+        let msg = self.recv_bytes().await?;
+        Ok(bincode::deserialize(&msg).unwrap())
+    }
+}
+
+impl<R: AsyncRead + Unpin> RecvBytes for FramedRead<R, LengthDelimitedCodec> {
+    type RecvError = ConnectionError;
+    async fn recv_bytes(&mut self) -> Result<BytesMut, Self::RecvError> {
+        self
+            .next()
+            .await
+            .ok_or(ConnectionError::Closed)?
+            .map_err(|e| ConnectionError::Unknown(Box::new(e)))
+    }
+}
+
+pub struct Sending<W: AsyncWrite>(FramedWrite<W, LengthDelimitedCodec>);
+pub struct Receiving<R: AsyncRead>(FramedRead<R, LengthDelimitedCodec>);
+
+
+impl<R: AsyncRead + Unpin> Receiving<R> {
+    pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
+        self.0.recv_thing().await
+    }
+
+    pub async fn recv_bytes(&mut self) -> Result<BytesMut, ConnectionError> {
+        self.0.recv_bytes().await
+    }
+}
+
+impl<W: AsyncWrite + Unpin> Sending<W> {
+    pub async fn send(&mut self, msg: &(impl Serialize + Sync)) -> Result<(), ConnectionError> {
+        self.0.send_thing(msg).await
+    }
+
+    pub async fn send_bytes(&mut self, msg: Bytes) -> Result<(), ConnectionError> {
+        self.0.send_bytes(msg).await
+    }
+}
+
+
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R,W> {
     /// Send a message, waiting until receival
     ///
     /// * `msg`: Message to send
-    pub async fn send(&mut self, msg: &impl serde::Serialize) -> Result<(), ConnectionError> {
-        let msg = bincode::serialize(msg).unwrap();
-        self.writer
-            .send(msg.into())
-            .await
-            .map_err(|_| ConnectionError::Closed)
+    pub async fn send(&mut self, msg: &(impl serde::Serialize + Sync)) -> Result<(), ConnectionError> {
+        self.sender.send(msg).await
     }
 
     /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
-        // TODO: Handle timeouts?
-        let buf = self
-            .reader
-            .next()
-            .await
-            .ok_or(ConnectionError::Closed)?
-            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
-        let buf = std::io::Cursor::new(buf);
-        bincode::deserialize_from(buf).map_err(ConnectionError::MalformedMessage)
+        self.receiver.recv().await
     }
 
     pub async fn recv_bytes(&mut self) -> Result<BytesMut, ConnectionError> {
-        let buf = self
-            .reader
-            .next()
-            .await
-            .ok_or(ConnectionError::Closed)?
-            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
-        Ok(buf)
+        self.receiver.recv_bytes().await
     }
 
     pub async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), ConnectionError> {
-        self.writer
-            .send(bytes)
-            .await
-            .map_err(|_| ConnectionError::Closed)
+        self.sender.send_bytes(bytes).await
     }
 
-    pub fn split(&mut self) -> (Receiving<R>, Sending<W>) {
-        (Receiving(&mut self.reader), Sending(&mut self.writer))
+    pub fn split(&mut self) -> (&mut Receiving<R>, &mut Sending<W>) {
+        (&mut self.receiver, &mut self.sender)
     }
 }
 
-pub struct Receiving<'a, R: AsyncRead>(&'a mut FramedRead<R, LengthDelimitedCodec>);
-pub struct Sending<'a, W: AsyncWrite>(&'a mut FramedWrite<W, LengthDelimitedCodec>);
 
-impl<'a, R: AsyncRead + Unpin> Receiving<'a, R> {
-    pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
-        let buf = self
-            .0
-            .next()
-            .await
-            .ok_or(ConnectionError::Closed)?
-            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
-        let buf = std::io::Cursor::new(buf);
-        bincode::deserialize_from(buf).map_err(ConnectionError::MalformedMessage)
-    }
-
-    pub async fn recv_bytes(&mut self) -> Result<BytesMut, ConnectionError> {
-        let buf = self
-            .0
-            .next()
-            .await
-            .ok_or(ConnectionError::Closed)?
-            .map_err(|e| ConnectionError::Unknown(Box::new(e)))?;
-        Ok(buf)
-    }
-}
-
-impl<'a, W: AsyncWrite + Unpin> Sending<'a, W> {
-    pub async fn send(&mut self, msg: &impl serde::Serialize) -> Result<(), ConnectionError> {
-        let msg = bincode::serialize(msg).unwrap();
-        self.0
-            .send(msg.into())
-            .await
-            .map_err(|_| ConnectionError::Closed)
-    }
-
-    // TODO: Limit error types
-    pub async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), ConnectionError> {
-        self.0
-            .send(bytes)
-            .await
-            .map_err(|_| ConnectionError::Closed)
-    }
-}
 
 pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;
 impl TcpConnection {
