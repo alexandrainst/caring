@@ -1,6 +1,4 @@
 //! This module documents various tools which can be used to test or benchmark schemes.
-pub mod mock;
-
 use crate::net::network::InMemoryNetwork;
 use std::future::Future;
 use tokio::task::JoinError;
