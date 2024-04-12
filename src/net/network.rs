@@ -26,7 +26,7 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
     // NOTE:
     // We could also insert a 'fake' Connection into the set for the representation of ourselves.
     // However that is probably a less efficient, if nicer, abstraction.
-    connections: Vec<Connection<R, W>>,
+    pub(super) connections: Vec<Connection<R, W>>,
     pub index: usize,
 }
 
@@ -62,6 +62,7 @@ pub struct NetworkError {
 }
 
 // TODO: Do timeouts?
+// PERFORMANCE: serialize in network once when broadcasting.
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     fn id_to_index(&self, index: usize) -> usize {
         let n = self.connections.len() + 1;
