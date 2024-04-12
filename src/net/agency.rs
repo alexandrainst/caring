@@ -41,7 +41,7 @@ use itertools::Itertools;
 // which gives the current network size. However I am not sure if this will be relevant?
 
 pub trait Broadcast {
-    type Error : Error + 'static;
+    type Error: Error + 'static;
     // type Error: Error + 'static;
 
     /// Broadcast a message to all other parties.
@@ -74,7 +74,6 @@ pub trait Broadcast {
         &mut self,
         idx: usize,
     ) -> impl Future<Output = Result<T, Self::Error>>;
-
 
     /// Size of the broadcasting network including yourself,
     /// as such there is n-1 outgoing connections
@@ -118,7 +117,6 @@ pub trait Unicast {
         &mut self,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>;
 
-
     /// Size of the unicasting network including yourself,
     /// as such there is n-1 outgoing connections
     fn size(&self) -> usize;
@@ -126,7 +124,6 @@ pub trait Unicast {
 
 use digest::Digest;
 use tracing::{event, Level};
-
 
 pub struct VerifiedBroadcast<B: Broadcast, D: Digest>(B, PhantomData<D>);
 
@@ -138,7 +135,6 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
     pub fn new(broadcast: B) -> Self {
         Self(broadcast, PhantomData)
     }
-
 
     #[tracing::instrument(skip_all)]
     pub async fn symmetric_broadcast<T>(
@@ -218,7 +214,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
         msg: &T,
     ) -> Result<(), BroadcastVerificationError<B::Error>>
     where
-        T: serde::Serialize
+        T: serde::Serialize,
     {
         let inner = &mut self.0;
         let msg = bincode::serialize(msg).unwrap();
@@ -248,7 +244,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
         party: usize,
     ) -> Result<T, BroadcastVerificationError<B::Error>>
     where
-        T: serde::de::DeserializeOwned
+        T: serde::de::DeserializeOwned,
     {
         let inner = &mut self.0;
         let hash: Box<[u8]> = inner
@@ -320,7 +316,6 @@ impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
         self.symmetric_broadcast(msg).await
     }
 
-
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
@@ -331,9 +326,6 @@ impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
     fn size(&self) -> usize {
         self.0.size()
     }
-
-
-
 }
 
 mod test {
@@ -401,7 +393,9 @@ mod test {
 
         let t1 = async {
             let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n1);
-            vb.broadcast(&String::from("Hello everyone!")).await.unwrap();
+            vb.broadcast(&String::from("Hello everyone!"))
+                .await
+                .unwrap();
         };
 
         let t2 = async {

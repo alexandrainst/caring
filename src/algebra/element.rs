@@ -49,21 +49,20 @@ mod test {
 
     #[test]
     fn from_into_u64() {
-        let n0 : u64 = 7;
+        let n0: u64 = 7;
         let e = Element32::from(n0);
-        let n1 : u64 = e.into();
+        let n1: u64 = e.into();
         assert_eq!(n0, n1);
     }
 
     #[test]
     fn from_into_u32() {
-        let n0 : u32 = 7;
+        let n0: u32 = 7;
         let e = Element32::from(n0);
-        let n1 : u32 = e.into();
+        let n1: u32 = e.into();
         assert_eq!(n0, n1);
     }
 }
-
 
 use derive_more::{Product, Sum};
 

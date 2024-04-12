@@ -11,7 +11,8 @@ use tokio::{
 
 use crate::net::{
     agency::{Broadcast, Unicast},
-    connection::{Connection, ConnectionError}, Tuneable,
+    connection::{Connection, ConnectionError},
+    Tuneable,
 };
 
 /// Peer-2-peer network
@@ -135,7 +136,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         let messages = future::join_all(messages).await;
         // Maybe we should pass the id with it?
         // Idk, it doesn't seem like there is a single good way for this.
-        let messages : Vec<_> = messages
+        let messages: Vec<_> = messages
             .into_iter()
             .map(|(id, m)| match m {
                 Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
@@ -144,11 +145,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
                     source: ConnectionError::TimeOut(duration),
                 }),
             })
-            .collect::<Result<_,_>>()?;
+            .collect::<Result<_, _>>()?;
 
-            assert!(messages.len() == self.connections.len(), "Too few messages received");
+        assert!(
+            messages.len() == self.connections.len(),
+            "Too few messages received"
+        );
 
-            Ok(messages)
+        Ok(messages)
     }
 
     /// Broadcast a message to all parties and await their messages
@@ -182,7 +186,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         // Maybe we should pass the id with it?
         // Idk, it doesn't seem like there is a single good way for this.
         // messages.sort_unstable_by_key(|(i, _)| *i);
-        let mut messages : Vec<_> = messages
+        let mut messages: Vec<_> = messages
             .into_iter()
             .map(|(i, m)| {
                 let id = i;
@@ -194,7 +198,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
                     }),
                 }
             })
-            .collect::<Result<_,_>>()?;
+            .collect::<Result<_, _>>()?;
 
         messages.insert(self.index, msg);
         Ok(messages)
@@ -238,7 +242,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
         // Maybe we should pass the id with it?
         // Idk, it doesn't seem like there is a single good way for this.
         // messages.sort_unstable_by_key(|(i, _)| *i);
-        let mut messages : Vec<_> = messages
+        let mut messages: Vec<_> = messages
             .into_iter()
             .map(|(id, m)| match m {
                 Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
@@ -247,7 +251,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
                     source: ConnectionError::TimeOut(duration),
                 }),
             })
-            .collect::<Result<_,_>>()?;
+            .collect::<Result<_, _>>()?;
 
         messages.insert(self.index, my_own_msg);
         Ok(messages)
@@ -343,8 +347,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
         &mut self,
         idx: usize,
     ) -> impl Future<Output = Result<T, Self::Error>> {
-            Tuneable::recv_from(self, idx)
-                .map_err(move |e| NetworkError{id: idx as u32, source: e})
+        Tuneable::recv_from(self, idx).map_err(move |e| NetworkError {
+            id: idx as u32,
+            source: e,
+        })
     }
 
     fn size(&self) -> usize {
@@ -496,12 +502,12 @@ mod test {
         }
     }
 
-
     #[tokio::test]
     async fn broadcasting() {
-        const N : usize = 3;
+        const N: usize = 3;
         let players = Network::in_memory(N);
-        let mut messages : VecDeque<_> = vec!["Over".to_string(), "And".to_string(), "Out".to_string()].into();
+        let mut messages: VecDeque<_> =
+            vec!["Over".to_string(), "And".to_string(), "Out".to_string()].into();
 
         let mut tasks = Vec::new();
         for p in players {
@@ -520,12 +526,11 @@ mod test {
         res.unwrap();
     }
 
-
     #[tokio::test]
     async fn unicasting() {
-        const N : usize = 3;
+        const N: usize = 3;
         let players = Network::in_memory(N);
-        let mut messages : VecDeque<_> = vec![[0,1,2], [0,1,2], [0,1,2]].into();
+        let mut messages: VecDeque<_> = vec![[0, 1, 2], [0, 1, 2], [0, 1, 2]].into();
         // Each party sends each other party a message.
         // To test this we send each party their id as the message.
         let mut tasks = Vec::new();

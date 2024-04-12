@@ -29,18 +29,14 @@ use tokio::{
     time::error::Elapsed,
 };
 
-use tokio_util::
-    codec::{FramedRead, FramedWrite, LengthDelimitedCodec}
-;
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     reader: FramedRead<R, LengthDelimitedCodec>,
     writer: FramedWrite<W, LengthDelimitedCodec>,
 }
 
-impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send >
-    Connection<R, W>
-{
+impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Connection<R, W> {
     /// Construct a new connection from a reader and writer
     /// Messages are serialized with bincode and length delimated.
     ///
@@ -88,7 +84,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
             .await
             .map_err(|_| ConnectionError::Closed)
     }
-
 
     /// Receive a message waiting for arrival
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {

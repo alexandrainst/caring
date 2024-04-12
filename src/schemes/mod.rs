@@ -58,7 +58,12 @@ trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output = Self> + std::ops::Mul
 ///
 /// (Maybe rename to SecretShared?)
 pub trait Shared<F>:
-    Sized + Add<Output = Self> + Sub<Output = Self> + serde::Serialize + serde::de::DeserializeOwned + Clone
+    Sized
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + serde::Serialize
+    + serde::de::DeserializeOwned
+    + Clone
 {
     /// The context needed to use the scheme.
     /// This can be a struct containing the threshold, ids and other things.
@@ -85,10 +90,7 @@ pub trait Shared<F>:
     ///
     /// * `ctx`: scheme and instance specific context
     /// * `many_shares`: shares by each party to be recombined.
-    fn recombine_many(
-        ctx: &Self::Context,
-        many_shares: &[impl AsRef<[Self]>],
-    ) -> Vec<Option<F>> {
+    fn recombine_many(ctx: &Self::Context, many_shares: &[impl AsRef<[Self]>]) -> Vec<Option<F>> {
         // This is ugly and a bit inefficient.
         let n = many_shares[0].as_ref().len();
         let m = many_shares.len();
@@ -100,13 +102,9 @@ pub trait Shared<F>:
             }
             let res = Self::recombine(ctx, &buf);
             output.push(res);
-
         }
         output
-
     }
-
-
 }
 
 /// Support for multiplication of two shares for producing a share.

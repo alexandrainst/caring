@@ -1,7 +1,7 @@
 //! This module documents various tools which can be used to test or benchmark schemes.
+use crate::net::network::InMemoryNetwork;
 use std::future::Future;
 use tokio::task::JoinError;
-use crate::net::network::InMemoryNetwork;
 
 pub struct Cluster<Arg = ()> {
     players: Vec<InMemoryNetwork>, //players: tokio::task::JoinSet<InMemoryNetwork>,
@@ -66,7 +66,7 @@ mod test {
         // Yes this is a problem.
         // We really need scoped async tasks, but those don't really exist.
 
-        let c : u32 = Cluster::new(32)
+        let c: u32 = Cluster::new(32)
             .run(|mut network| async move {
                 let msg = "Joy to the world!".to_owned();
                 network.broadcast(&msg).await.unwrap();
@@ -77,7 +77,9 @@ mod test {
                 1 // to check that we actually run
             })
             .await
-            .unwrap().iter().sum();
+            .unwrap()
+            .iter()
+            .sum();
         assert_eq!(c, 32);
     }
 }
