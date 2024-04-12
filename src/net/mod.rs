@@ -9,8 +9,8 @@ use crate::net::{
 
 pub mod agency;
 pub mod connection;
-pub mod network;
 pub mod mux;
+pub mod network;
 
 // TODO: Serde trait bounds on `T`
 // TODO: Properly use this trait for other things (Connection/Agency etc.)
@@ -60,7 +60,7 @@ pub trait Tuneable {
         idx: usize,
     ) -> impl Future<Output = Result<T, Self::Error>>;
 
-    fn send_to<T: serde::Serialize>(
+    fn send_to<T: serde::Serialize + Sync>(
         &mut self,
         idx: usize,
         msg: &T,
@@ -85,7 +85,7 @@ impl<
         self[idx].recv().await
     }
 
-    async fn send_to<T: serde::Serialize>(
+    async fn send_to<T: serde::Serialize + Sync>(
         &mut self,
         idx: usize,
         msg: &T,

@@ -29,7 +29,10 @@ use tokio::{
     time::error::Elapsed,
 };
 
-use tokio_util::{bytes::{Bytes, BytesMut}, codec::{FramedRead, FramedWrite, LengthDelimitedCodec}};
+use tokio_util::{
+    bytes::{Bytes, BytesMut},
+    codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
+};
 
 pub struct Connection<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     reader: FramedRead<R, LengthDelimitedCodec>,
@@ -98,9 +101,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
         bincode::deserialize_from(buf).map_err(ConnectionError::MalformedMessage)
     }
 
-
     pub async fn recv_bytes(&mut self) -> Result<BytesMut, ConnectionError> {
-        let buf = self.reader
+        let buf = self
+            .reader
             .next()
             .await
             .ok_or(ConnectionError::Closed)?

@@ -50,7 +50,7 @@ pub trait Broadcast {
     /// Returns: an error if there were problems broadcasting the message.
     fn broadcast(
         &mut self,
-        msg: &impl serde::Serialize,
+        msg: &(impl serde::Serialize + Sync),
     ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 
     /// Broadcast a message to all parties and await their messages
@@ -65,7 +65,7 @@ pub trait Broadcast {
         msg: T,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned;
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync;
 
     /// Receive a message from a party
     ///
@@ -93,7 +93,7 @@ pub trait Unicast {
     /// * `msgs`: Messages to send
     fn unicast(
         &mut self,
-        msgs: &[impl serde::Serialize],
+        msgs: &[impl serde::Serialize + Sync],
     ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 
     /// Unicast a message to each party and await their messages
@@ -106,7 +106,7 @@ pub trait Unicast {
         msgs: Vec<T>,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned;
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync;
 
     /// Receive a message for each party.
     ///

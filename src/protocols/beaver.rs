@@ -1,4 +1,4 @@
-use std::{iter};
+use std::iter;
 
 use itertools::{izip, multiunzip};
 use rand::RngCore;
@@ -200,17 +200,13 @@ pub async fn beaver_square<
 
 #[cfg(test)]
 mod test {
-    
 
     use itertools::Itertools;
 
     use super::*;
     use crate::{
         algebra::element::Element32,
-        net::{
-            agency::Unicast,
-            network::{InMemoryNetwork},
-        },
+        net::{agency::Unicast, network::InMemoryNetwork},
         schemes::shamir::{self, ShamirParams},
     };
 
@@ -266,7 +262,7 @@ mod test {
         let ctx = ShamirParams { threshold, ids };
         let triples = BeaverTriple::<S>::fake_many(&ctx, &mut rng, 2);
 
-        let (t1,t2,t3) = triples.into_iter().collect_tuple().unwrap();
+        let (t1, t2, t3) = triples.into_iter().collect_tuple().unwrap();
 
         crate::testing::Cluster::new(3)
             .with_args([([5, 2], t1), ([7, 3], t2), ([0, 0u32], t3)])
@@ -280,8 +276,7 @@ mod test {
 
                 let shares: Vec<_> = network.symmetric_unicast(shares).await.unwrap();
 
-                let (a,b,_) = shares.into_iter().collect_tuple().unwrap();
-
+                let (a, b, _) = shares.into_iter().collect_tuple().unwrap();
 
                 let c = beaver_multiply_many(&ctx, &a, &b, &triple, &mut network)
                     .await

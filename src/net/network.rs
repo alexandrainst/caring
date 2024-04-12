@@ -84,7 +84,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// Asymmetric, non-waiting
     ///
     /// * `msg`: Message to send
-    pub async fn broadcast(&mut self, msg: &impl serde::Serialize) -> Result<(), NetworkError> {
+    pub async fn broadcast(&mut self, msg: &(impl serde::Serialize + Sync)) -> Result<(), NetworkError> {
         let my_id = self.index;
         let outgoing = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let id = if i < my_id { i } else { i + 1 } as u32;
@@ -103,7 +103,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// Asymmetric, non-waiting
     ///
     /// * `msgs`: Messages to send
-    pub async fn unicast(&mut self, msgs: &[impl serde::Serialize]) -> Result<(), NetworkError> {
+    pub async fn unicast(&mut self, msgs: &[impl serde::Serialize + Sync]) -> Result<(), NetworkError> {
         let my_id = self.index;
         let outgoing = self
             .connections
@@ -162,7 +162,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     /// * `msg`: message to send and receive
     pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, NetworkError>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned,
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
         let my_id = self.index;
         let (mut rx, mut tx): (Vec<_>, Vec<_>) =
@@ -306,7 +306,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     type Error = NetworkError;
 
     #[tracing::instrument(skip_all)]
-    async fn unicast(&mut self, msgs: &[impl serde::Serialize]) -> Result<(), Self::Error> {
+    async fn unicast(&mut self, msgs: &[impl serde::Serialize + Sync]) -> Result<(), Self::Error> {
         self.unicast(msgs).await
     }
 
@@ -332,14 +332,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
     type Error = NetworkError;
 
     #[tracing::instrument(skip_all)]
-    async fn broadcast(&mut self, msg: &impl serde::Serialize) -> Result<(), Self::Error> {
+    async fn broadcast(&mut self, msg: &(impl serde::Serialize + Sync)) -> Result<(), Self::Error> {
         self.broadcast(msg).await
     }
 
     #[tracing::instrument(skip_all)]
     async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::Error>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned,
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
         self.symmetric_broadcast(msg).await
     }

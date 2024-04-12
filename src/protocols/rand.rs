@@ -1,5 +1,5 @@
 use ff::Field;
-use rand::{Rng};
+use rand::Rng;
 
 use crate::{net::agency::Unicast, schemes::Shared};
 
