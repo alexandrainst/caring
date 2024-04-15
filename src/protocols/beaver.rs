@@ -5,7 +5,7 @@ use rand::RngCore;
 
 use crate::{
     algebra::field::Field,
-    net::{agency::Broadcast, connection::DuplexConnection},
+    net::{agency::Broadcast},
     schemes::{Shared, SharedVec},
 };
 

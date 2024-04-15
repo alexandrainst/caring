@@ -5,12 +5,12 @@ use futures::future::join_all;
 use futures::prelude::*;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
-use tokio::
-    io::AsyncWriteExt
-;
+use tokio::io::AsyncWriteExt;
 
 use crate::net::{
-    agency::{Broadcast, Unicast}, connection::{Connection, ConnectionError, DuplexConnection, SendBytes, TcpConnection}, Channel, SplitChannel, Tuneable
+    agency::{Broadcast, Unicast},
+    connection::{Connection, ConnectionError, DuplexConnection, SendBytes, TcpConnection},
+    Channel, SplitChannel, Tuneable,
 };
 
 /// Peer-2-peer network
@@ -27,7 +27,6 @@ pub struct Network<C: SplitChannel> {
     pub(super) connections: Vec<C>,
     pub index: usize,
 }
-
 
 #[derive(thiserror::Error, Debug)]
 #[error("Error communicating with {id}: {source}")]
@@ -59,7 +58,10 @@ impl<C: SplitChannel> Network<C> {
     /// Asymmetric, non-waiting
     ///
     /// * `msg`: Message to send
-    pub async fn broadcast(&mut self, msg: &(impl serde::Serialize + Sync)) -> Result<(), NetworkError<C::Error>> {
+    pub async fn broadcast(
+        &mut self,
+        msg: &(impl serde::Serialize + Sync),
+    ) -> Result<(), NetworkError<C::Error>> {
         let my_id = self.index;
         let outgoing = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let id = if i < my_id { i } else { i + 1 } as u32;
@@ -78,7 +80,10 @@ impl<C: SplitChannel> Network<C> {
     /// Asymmetric, non-waiting
     ///
     /// * `msgs`: Messages to send
-    pub async fn unicast(&mut self, msgs: &[impl serde::Serialize + Sync]) -> Result<(), NetworkError<C::Error>> {
+    pub async fn unicast(
+        &mut self,
+        msgs: &[impl serde::Serialize + Sync],
+    ) -> Result<(), NetworkError<C::Error>> {
         let my_id = self.index;
         let outgoing = self
             .connections
@@ -171,7 +176,7 @@ impl<C: SplitChannel> Network<C> {
                         //id,
                         //source: ConnectionError::TimeOut(duration),
                         //})
-                    },
+                    }
                 }
             })
             .collect::<Result<_, _>>()?;
@@ -185,7 +190,10 @@ impl<C: SplitChannel> Network<C> {
     /// will be send to party `i`.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Result<Vec<T>, NetworkError<C::Error>>
+    pub async fn symmetric_unicast<T>(
+        &mut self,
+        mut msgs: Vec<T>,
+    ) -> Result<Vec<T>, NetworkError<C::Error>>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
@@ -224,11 +232,11 @@ impl<C: SplitChannel> Network<C> {
                 Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
                 Err(duration) => {
                     todo!("handle it")
-                //    Err(NetworkError {
-                //    id,
-                //    source: ConnectionError::TimeOut(duration),
-                //})
-                },
+                    //    Err(NetworkError {
+                    //    id,
+                    //    source: ConnectionError::TimeOut(duration),
+                    //})
+                }
             })
             .collect::<Result<_, _>>()?;
 
@@ -390,7 +398,10 @@ impl TcpNetwork {
     ///
     /// * `me`: Socket address to open to
     /// * `peers`: Socket addresses of other peers
-    pub async fn connect(me: SocketAddr, peers: &[SocketAddr]) -> Result<Self, NetworkError<ConnectionError>> {
+    pub async fn connect(
+        me: SocketAddr,
+        peers: &[SocketAddr],
+    ) -> Result<Self, NetworkError<ConnectionError>> {
         let n = peers.len();
 
         // Connecting to parties

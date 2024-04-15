@@ -49,7 +49,7 @@ impl<
     }
 }
 
-pub trait SplitChannel : Channel {
+pub trait SplitChannel: Channel {
     type Sender: SendBytes<SendError = Self::Error> + Send;
     type Receiver: RecvBytes<RecvError = Self::Error> + Send;
     fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver);
@@ -73,8 +73,7 @@ pub trait Tuneable {
     ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 }
 
-impl<C: SplitChannel> Tuneable for Network<C>
-{
+impl<C: SplitChannel> Tuneable for Network<C> {
     type Error = C::Error;
 
     fn id(&self) -> usize {

@@ -1,9 +1,10 @@
-use std::sync::Arc;
 use std::error::Error;
+use std::sync::Arc;
 
 use futures::{
     channel::{mpsc, oneshot},
-    future::join_all, FutureExt, SinkExt, StreamExt,
+    future::join_all,
+    FutureExt, SinkExt, StreamExt,
 };
 use itertools::multiunzip;
 use thiserror::Error;
@@ -16,9 +17,6 @@ use crate::{
         Channel, SplitChannel,
     },
 };
-
-// TODO: Handle errors back in MuxConn
-// TODO: Make it work over arbitrary Channel instead of Connection.
 
 #[derive(Debug, Error)]
 #[error(transparent)]
@@ -130,14 +128,11 @@ where
     errors: Vec<[oneshot::Sender<MuxError>; 2]>,
 }
 
-pub struct Gateway<C: SplitChannel>
-{
+pub struct Gateway<C: SplitChannel> {
     handle: tokio::task::JoinHandle<GatewayInner<C>>,
 }
 
-impl<C: SplitChannel + Send + 'static> Gateway<C>
-where
-{
+impl<C: SplitChannel + Send + 'static> Gateway<C> {
     /// Multiplex a connection to share it into `n` new connections.
     ///
     /// * `net`: Connection to use as a gateway for multiplexing
@@ -224,8 +219,7 @@ where
     }
 }
 
-impl<C: SplitChannel + Send> GatewayInner<C>
-{
+impl<C: SplitChannel + Send> GatewayInner<C> {
     async fn run(self) -> Self {
         let mut gateway = self;
         {
@@ -271,9 +265,7 @@ impl<C: SplitChannel + Send> GatewayInner<C>
     }
 }
 
-struct NetworkGateway<C: SplitChannel>
-where
-{
+struct NetworkGateway<C: SplitChannel> {
     gateways: Vec<Gateway<C>>,
     index: usize,
 }
@@ -315,15 +307,17 @@ where
     }
 }
 
-
-
 #[cfg(test)]
 mod test {
     use std::time::Duration;
 
     use itertools::Itertools;
 
-    use crate::net::{connection::Connection, mux::{Gateway, NetworkGateway}, Channel};
+    use crate::net::{
+        connection::Connection,
+        mux::{Gateway, NetworkGateway},
+        Channel,
+    };
 
     async fn chat(c: &mut impl Channel, text: &'static str) -> String {
         let text = String::from(text);
@@ -404,24 +398,26 @@ mod test {
 
     #[tokio::test]
     async fn network() {
-        crate::testing::Cluster::new(3).run(|net| async {
-            let (gateway, mut muxed) = NetworkGateway::multiplex(net, 2);
-            let (m1, m2) = muxed.drain(..).collect_tuple().unwrap();
-            let h1= tokio::spawn(async move {
-                let mut m = m1;
-                let res = m.symmetric_broadcast(String::from("Hello")).await.unwrap();
-                assert_eq!(res, vec!["Hello"; 3]);
-
-            });
-            let h2= tokio::spawn(async move {
-                let mut m = m2;
-                let res = m.symmetric_broadcast(String::from("World")).await.unwrap();
-                assert_eq!(res, vec!["World"; 3]);
-            });
-            let (r1, r2) = futures::join!(h1, h2);
-            r1.unwrap();
-            r2.unwrap();
-            gateway.takedown().await;
-        }).await.unwrap();
+        crate::testing::Cluster::new(3)
+            .run(|net| async {
+                let (gateway, mut muxed) = NetworkGateway::multiplex(net, 2);
+                let (m1, m2) = muxed.drain(..).collect_tuple().unwrap();
+                let h1 = tokio::spawn(async move {
+                    let mut m = m1;
+                    let res = m.symmetric_broadcast(String::from("Hello")).await.unwrap();
+                    assert_eq!(res, vec!["Hello"; 3]);
+                });
+                let h2 = tokio::spawn(async move {
+                    let mut m = m2;
+                    let res = m.symmetric_broadcast(String::from("World")).await.unwrap();
+                    assert_eq!(res, vec!["World"; 3]);
+                });
+                let (r1, r2) = futures::join!(h1, h2);
+                r1.unwrap();
+                r2.unwrap();
+                gateway.takedown().await;
+            })
+            .await
+            .unwrap();
     }
 }
