@@ -78,7 +78,7 @@ impl<R: AsyncRead, W: AsyncWrite> Connection<R,W> {
     }
 }
 
-trait SendBytes {
+pub(super) trait SendBytes {
     type SendError: Error + Send;
 
     async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), Self::SendError>;
@@ -100,7 +100,7 @@ impl<W: AsyncWrite + Unpin> SendBytes for FramedWrite<W, LengthDelimitedCodec> {
 
 }
 
-trait RecvBytes {
+pub(crate) trait RecvBytes {
     type RecvError: Error + Send;
     async fn recv_bytes(&mut self) -> Result<BytesMut, Self::RecvError>;
 

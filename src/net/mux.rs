@@ -1,4 +1,4 @@
-use std::{future, pin::pin, sync::Arc};
+use std::sync::Arc;
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -8,29 +8,96 @@ use futures::{
 use itertools::multiunzip;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_rustls::rustls::internal::msgs;
 
 use crate::{
     help,
     net::{agency::{Broadcast, Unicast}, connection::ConnectionError, network::Network, Channel},
 };
 
-// TODO: Use tokio bytes instead?
-type Bytes = Vec<u8>;
 
 // TODO: Handle errors back in MuxConn
 // TODO: Make it work over arbitrary Channel instead of Connection.
 
+#[derive(Debug, Error)]
+#[error(transparent)]
+pub struct MuxError(Arc<ConnectionError>);
+
 pub struct MuxConn {
-    mailbox: mpsc::UnboundedReceiver<Bytes>,
+    mailbox: mpsc::UnboundedReceiver<BytesMut>,
     gateway: mpsc::UnboundedSender<MultiplexedMessage>,
     error: oneshot::Receiver<MuxError>,
     id: usize,
 }
 
-#[derive(Debug, Error)]
-#[error(transparent)]
-pub struct MuxError(Arc<ConnectionError>);
+struct MuxedSender {
+    id: usize,
+    gateway: mpsc::UnboundedSender<MultiplexedMessage>,
+    error: oneshot::Receiver<MuxError>,
+}
+
+struct MuxedReceiver {
+    id: usize,
+    mailbox: mpsc::UnboundedReceiver<BytesMut>,
+    error: oneshot::Receiver<MuxError>,
+}
+
+
+struct MultiplexedMessage(Bytes, usize);
+
+impl MultiplexedMessage {
+    fn from_bytes(mut bytes: BytesMut) -> Self {
+        let id = bytes.get_u32() as usize;
+        MultiplexedMessage(bytes.freeze(), id)
+    }
+
+    fn to_bytes(self) -> Bytes {
+        let bytes = self.0;
+        let id = self.1;
+        let mut msg  = BytesMut::new();
+        msg.put_u32(id as u32);
+        msg.put(bytes);
+        msg.freeze()
+    }
+}
+
+impl super::connection::SendBytes for MuxedSender {
+    type SendError = MuxError;
+
+    async fn send_bytes(&mut self, bytes: tokio_util::bytes::Bytes) -> Result<(), Self::SendError> {
+        futures::select! {
+            res = &mut self.error => {
+                let err = res.expect("Gateway should always be alive if MuxConn is alive");
+                Err(err)
+            },
+            default => {
+                self.gateway
+                    .send(MultiplexedMessage(bytes, self.id))
+                    .await
+                    .unwrap();
+                Ok(())
+            },
+        }
+    }
+}
+
+
+use tokio_util::bytes::{Buf, BufMut, Bytes, BytesMut};
+impl super::connection::RecvBytes for MuxedReceiver {
+    type RecvError = MuxError;
+
+    async fn recv_bytes(&mut self) -> Result<tokio_util::bytes::BytesMut, Self::RecvError> {
+        futures::select! {
+            msg = self.mailbox.next() => {
+                let msg = msg.expect("Should not be empty");
+                Ok(msg)
+            },
+            res = &mut self.error => {
+                let err = res.expect("Should not be canceled");
+                Err(err)
+            }
+        }
+    }
+}
 
 impl Channel for MuxConn {
     type Error = MuxError;
@@ -42,7 +109,7 @@ impl Channel for MuxConn {
                 Err(err)
             },
             default => {
-                let msg = bincode::serialize(msg).unwrap();
+                let msg = bincode::serialize(msg).unwrap().into();
                 self.gateway
                     .send(MultiplexedMessage(msg, self.id))
                     .await
@@ -73,7 +140,7 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     channel: super::connection::Connection<R, W>,
-    mailboxes: Vec<mpsc::UnboundedSender<Bytes>>,
+    mailboxes: Vec<mpsc::UnboundedSender<BytesMut>>,
     inbox: mpsc::UnboundedReceiver<MultiplexedMessage>,
     errors: Vec<oneshot::Sender<MuxError>>,
 }
@@ -86,8 +153,6 @@ where
     handle: tokio::task::JoinHandle<GatewayInner<R, W>>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct MultiplexedMessage(Bytes, usize);
 
 impl<R, W> Gateway<R, W>
 where
@@ -187,20 +252,21 @@ where
     async fn run(self) -> Self {
         let mut gateway = self;
         {
-            let (mut recving, mut sending) = gateway.channel.split();
+            let (recving, sending) = gateway.channel.split();
 
             let send_out = async {
                 while let Some(msg) = gateway.inbox.next().await {
-                    sending.send(&msg).await.unwrap();
+                    sending.send_bytes(msg.to_bytes()).await.unwrap();
                 }
             }
             .fuse();
 
             let recv_in = async {
                 loop {
-                    match recving.recv().await {
-                        Ok(msg) => {
-                            let MultiplexedMessage(bytes, id) = msg;
+                    match recving.recv_bytes().await {
+                        Ok(mut msg) => {
+                            let id = msg.get_u32() as usize;
+                            let bytes = msg;
                             gateway.mailboxes[id].send(bytes).await.unwrap();
                         }
                         Err(e) => break e,
@@ -304,7 +370,7 @@ impl Broadcast for MuxNet {
             let mailbox = &mut c.mailbox;
             let gateway = &mut c.gateway;
             //let err = &mut c.error; // TODO: Handle errors
-            let msg = MultiplexedMessage(packet.clone(), c.id);
+            let msg = MultiplexedMessage(packet.clone().into(), c.id);
             let success = join!(gateway.send(msg), mailbox.next());
             success
         });
@@ -367,7 +433,7 @@ impl Unicast for MuxNet {
             let gateway = &mut c.gateway;
             //let err = &mut c.error; // TODO: Handle errors
             let packet = bincode::serialize(m).unwrap();
-            let msg = MultiplexedMessage(packet.clone(), c.id);
+            let msg = MultiplexedMessage(packet.clone().into(), c.id);
             let success = join!(gateway.send(msg), mailbox.next());
             success
         });
