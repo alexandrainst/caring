@@ -11,9 +11,13 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{
     help,
-    net::{agency::{Broadcast, Unicast}, connection::{ConnectionError, RecvBytes, SendBytes}, network::Network, Channel, SplitChannel},
+    net::{
+        agency::{Broadcast, Unicast},
+        connection::{ConnectionError, RecvBytes, SendBytes},
+        network::Network,
+        Channel, SplitChannel,
+    },
 };
-
 
 // TODO: Handle errors back in MuxConn
 // TODO: Make it work over arbitrary Channel instead of Connection.
@@ -34,7 +38,6 @@ pub struct MuxedReceiver {
     error: oneshot::Receiver<MuxError>,
 }
 
-
 struct MultiplexedMessage(Bytes, usize);
 
 impl MultiplexedMessage {
@@ -46,7 +49,7 @@ impl MultiplexedMessage {
     fn make_bytes(self) -> Bytes {
         let bytes = self.0;
         let id = self.1;
-        let mut msg  = BytesMut::new();
+        let mut msg = BytesMut::new();
         msg.put_u32(id as u32);
         msg.put(bytes);
         msg.freeze()
@@ -72,7 +75,6 @@ impl super::connection::SendBytes for MuxedSender {
         }
     }
 }
-
 
 use tokio_util::bytes::{Buf, BufMut, Bytes, BytesMut};
 impl super::connection::RecvBytes for MuxedReceiver {
@@ -113,15 +115,10 @@ impl Channel for MuxConn {
 
 impl SplitChannel for MuxConn {
     type Sender = MuxedSender;
-
     type Receiver = MuxedReceiver;
 
-    fn split(self) -> (Self::Sender, Self::Receiver) {
-        (self.0, self.1)
-    }
-
-    fn reform(s: Self::Sender, r: Self::Receiver) -> Self {
-        Self(s, r)
+    fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver) {
+        (&mut self.0, &mut self.1)
     }
 }
 
@@ -143,7 +140,6 @@ where
 {
     handle: tokio::task::JoinHandle<GatewayInner<R, W>>,
 }
-
 
 impl<R, W> Gateway<R, W>
 where
@@ -244,7 +240,7 @@ where
     async fn run(self) -> Self {
         let mut gateway = self;
         {
-            let (recving, sending) = gateway.channel.split();
+            let (sending, recving) = gateway.channel.split();
 
             let send_out = async {
                 while let Some(msg) = gateway.inbox.next().await {
@@ -358,7 +354,7 @@ impl Broadcast for MuxNet {
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        let packet : Bytes = bincode::serialize(&msg).unwrap().into();
+        let packet: Bytes = bincode::serialize(&msg).unwrap().into();
         let iter = self.mux_conn.iter_mut().map(|c| async {
             let send = &mut c.0;
             let recv = &mut c.1;
@@ -398,36 +394,33 @@ impl Broadcast for MuxNet {
 impl Unicast for MuxNet {
     type Error = MuxError;
 
-    async fn unicast(
-        &mut self,
-        msgs: &[impl serde::Serialize + Sync],
-    ) -> Result<(), Self::Error> {
+    async fn unicast(&mut self, msgs: &[impl serde::Serialize + Sync]) -> Result<(), Self::Error> {
         let outgoing = self
             .mux_conn
             .iter_mut()
             .zip(msgs.iter())
-            .map(|(conn, msg)| {
-                conn.send(msg)
-            });
+            .map(|(conn, msg)| conn.send(msg));
         try_join_all(outgoing).await?;
         Ok(())
     }
 
-    async fn symmetric_unicast<T>(
-        &mut self,
-        mut msgs: Vec<T>,
-    ) -> Result<Vec<T>, Self::Error>
+    async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> Result<Vec<T>, Self::Error>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync {
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
+    {
         let own = msgs.remove(self.index);
-        let iter = self.mux_conn.iter_mut().zip(msgs.iter()).map(|(c,m)| async {
-            let packet = bincode::serialize(m).unwrap().into();
-            let send = &mut c.0;
-            let recv = &mut c.1;
-            //let err = &mut c.error; // TODO: Handle errors
-            let success = join!(send.send_bytes(packet), recv.recv_bytes());
-            success
-        });
+        let iter = self
+            .mux_conn
+            .iter_mut()
+            .zip(msgs.iter())
+            .map(|(c, m)| async {
+                let packet = bincode::serialize(m).unwrap().into();
+                let send = &mut c.0;
+                let recv = &mut c.1;
+                //let err = &mut c.error; // TODO: Handle errors
+                let success = join!(send.send_bytes(packet), recv.recv_bytes());
+                success
+            });
         let resp: Result<Vec<T>, _> = join_all(iter)
             .await
             .into_iter()
@@ -444,9 +437,7 @@ impl Unicast for MuxNet {
         Ok(resp)
     }
 
-    async fn receive_all<T: serde::de::DeserializeOwned>(
-        &mut self,
-    ) -> Result<Vec<T>, Self::Error> {
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
         todo!()
     }
 
@@ -454,7 +445,6 @@ impl Unicast for MuxNet {
         todo!()
     }
 }
-
 
 #[cfg(test)]
 mod test {

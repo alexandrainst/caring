@@ -129,7 +129,6 @@ impl<R: AsyncRead + Unpin + Send> RecvBytes for FramedRead<R, LengthDelimitedCod
 pub struct Sending<W: AsyncWrite>(FramedWrite<W, LengthDelimitedCodec>);
 pub struct Receiving<R: AsyncRead>(FramedRead<R, LengthDelimitedCodec>);
 
-
 impl<R: AsyncRead + Unpin + Send> Receiving<R> {
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
         self.0.recv_thing().await
@@ -147,6 +146,22 @@ impl<W: AsyncWrite + Unpin + Send> Sending<W> {
 
     pub async fn send_bytes(&mut self, msg: Bytes) -> Result<(), ConnectionError> {
         self.0.send_bytes(msg).await
+    }
+}
+
+impl<W: AsyncWrite + Unpin + Send> SendBytes for Sending<W> {
+    type SendError = ConnectionError;
+
+    fn send_bytes(&mut self, bytes: Bytes) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send {
+        self.0.send_bytes(bytes)
+    }
+}
+
+impl<R: AsyncRead + Unpin + Send> RecvBytes for Receiving<R> {
+    type RecvError = ConnectionError;
+
+    fn recv_bytes(&mut self) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send {
+        self.0.recv_bytes()
     }
 }
 
@@ -171,9 +186,14 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Connection<R,W> 
     pub async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), ConnectionError> {
         self.sender.send_bytes(bytes).await
     }
+}
 
-    pub fn split(&mut self) -> (&mut Receiving<R>, &mut Sending<W>) {
-        (&mut self.receiver, &mut self.sender)
+impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> SplitChannel for Connection<R,W> {
+    type Sender = Sending<W>;
+    type Receiver = Receiving<R>;
+
+    fn split<'a>(&'a mut self) -> (&'a mut Self::Sender, &'a mut Self::Receiver) {
+        (&mut self.sender, &mut self.receiver)
     }
 }
 

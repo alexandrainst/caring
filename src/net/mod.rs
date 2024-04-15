@@ -52,8 +52,7 @@ impl<
 pub trait SplitChannel : Channel {
     type Sender: SendBytes + Send;
     type Receiver: RecvBytes + Send;
-    fn split(self) -> (Self::Sender, Self::Receiver);
-    fn reform(s: Self::Sender, r: Self::Receiver) -> Self;
+    fn split<'a>(&'a mut self) -> (&'a mut Self::Sender, &'a mut Self::Receiver);
 }
 
 /// Tune to a specific channel

@@ -13,6 +13,7 @@ use crate::net::{
     agency::{Broadcast, Unicast},
     connection::{Connection, ConnectionError},
     Tuneable,
+    SplitChannel,
 };
 
 /// Peer-2-peer network
@@ -142,7 +143,7 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Network<R, W> {
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
         let my_id = self.index;
-        let (mut rx, mut tx): (Vec<_>, Vec<_>) =
+        let (mut tx, mut rx): (Vec<_>, Vec<_>) =
             self.connections.iter_mut().map(|c| c.split()).unzip();
 
         let outgoing = tx.iter_mut().enumerate().map(|(id, conn)| {
@@ -194,7 +195,7 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Network<R, W> {
         let my_id = self.index;
         let my_own_msg = msgs.remove(my_id);
 
-        let (mut rx, mut tx): (Vec<_>, Vec<_>) =
+        let (mut tx, mut rx): (Vec<_>, Vec<_>) =
             self.connections.iter_mut().map(|c| c.split()).unzip();
 
         let outgoing = tx
