@@ -441,7 +441,7 @@ mod test {
 
     use itertools::Itertools;
 
-    use crate::net::{connection::Connection, mux::Gateway, Channel};
+    use crate::net::{agency::Broadcast, connection::Connection, mux::{Gateway, NetworkGateway}, Channel};
 
     async fn chat(c: &mut impl Channel, text: &'static str) -> String {
         let text = String::from(text);
@@ -518,5 +518,28 @@ mod test {
         };
 
         let (_, _) = futures::join!(p1, p2);
+    }
+
+    #[tokio::test]
+    async fn network() {
+        crate::testing::Cluster::new(3).run(|net| async {
+            let (gateway, mut muxed) = NetworkGateway::multiplex(net, 2);
+            let (m1, m2) = muxed.drain(..).collect_tuple().unwrap();
+            let h1= tokio::spawn(async move {
+                let mut m = m1;
+                let res = m.symmetric_broadcast(String::from("Hello")).await.unwrap();
+                assert_eq!(res, vec!["Hello"; 3]);
+
+            });
+            let h2= tokio::spawn(async move {
+                let mut m = m2;
+                let res = m.symmetric_broadcast(String::from("World")).await.unwrap();
+                assert_eq!(res, vec!["World"; 3]);
+            });
+            let (r1, r2) = futures::join!(h1, h2);
+            r1.unwrap();
+            r2.unwrap();
+            gateway.takedown().await;
+        }).await.unwrap();
     }
 }
