@@ -13,9 +13,8 @@
 // TODO: make costum errors.
 use ff::PrimeField;
 
-use derive_more::{Add, AddAssign, Sub, SubAssign};
-//use crate::{net::agency::Broadcast, protocols::{ preprocessing::{self, RandomKnownToMe, RandomKnownToPi}, commitments}};
 use crate::{net::agency::Broadcast, protocols::commitments};
+use derive_more::{Add, AddAssign, Sub, SubAssign};
 
 pub mod preprocessing;
 
@@ -47,7 +46,7 @@ impl<F: PrimeField> Share<F> {
         }
     }
 }
-
+// TODO: Do we need the hole context? - In any case, we do not need the hole context to be mutable.
 pub async fn secret_mult<F>(
     s1: Share<F>,
     s2: Share<F>,
@@ -70,7 +69,6 @@ where
 
     let e = s1 - triplet.a;
     let d = s2 - triplet.b;
-    // here we need to make a broadcast to partially open the elements
     let e = partial_opening_2(e.val, network).await;
     let d = partial_opening_2(d.val, network).await;
     let res = (triplet.c + triplet.b * e + triplet.a * d).add_public(
@@ -94,41 +92,64 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
     }
 }
 
-// TODO: Write share and resive_share_from together to one function
-// Need to find out How to broadcast frome one specific party to all others - and how to await for that.
-//pub async fn share<F: PrimeField>(op_val: Option<F>, rand_known_to_me: &mut Vec<(Share<F>, F)>, rand_known_to_i: &mut Vec<Vec<Share<F>>>, who_am_i: usize, who_is_sending: usize) -> Share<F> {
-//let is_chosen_one = who_am_i == who_is_sending;
-//if is_chosen_one{
-//let val = op_val.unwrap(); // Not a pretty solution
-//let (share, correction) = send_share(val, rand_known_to_me);
-//share
-//// TODO: broadcast correction value
-//} else {
-//// Resive correction value
-//recive_share_from(correction, rand_known_to_i, who_is_sending)
-
-//}
-//}
-
-pub fn send_share<F: PrimeField>(
+pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
+    op_val: Option<F>,
+    rand_known_to_me: &mut preprocessing::RandomKnownToMe<F>,
+    rand_known_to_i: &mut preprocessing::RandomKnownToPi<F>,
+    who_am_i: usize,
+    who_is_sending: usize,
+    mac_key_share: F, //TODO: should this be a share insted? So it dosen't take ownership?
+    network: &mut impl Broadcast,
+) -> Result<Share<F>, ()> {
+    let is_chosen_one = who_am_i == who_is_sending;
+    if is_chosen_one {
+        // TODO: Here we need to make a match insted. If we try to send but there is no element either:
+        // Cast an error or send a defalut - I think we are going to go with casting an error, to avoid
+        // unexpected behaviour. If you get an error, you know something is not acting as you expect,
+        // and you have a desent chance to find out why.
+        let val = op_val.unwrap();
+        let res = send_share(
+            val,
+            rand_known_to_me,
+            rand_known_to_i,
+            who_am_i,
+            mac_key_share,
+        );
+        let (share, correction) = match res {
+            Ok((s, c)) => (s, c),
+            Err(e) => return Err(e),
+        };
+        // TODO: do some error handling with the possible broadcasting error. (we get an error or a Ok(()))
+        let res_b = network.broadcast(&correction).await;
+        Ok(share)
+    } else {
+        // TODO: Make nice errorhandling
+        let correction = network.recv_from(who_is_sending).await.unwrap();
+        let res = recive_share_from(correction, rand_known_to_i, who_is_sending, mac_key_share);
+        let share = match res {
+            Ok(s) => s,
+            Err(e) => return Err(e),
+        };
+        Ok(share)
+    }
+}
+// TODO: consider changing it so it is party 0 that uses the correction.
+// Reason: then it is always that party, which might make it easyer to reason about.
+fn send_share<F: PrimeField>(
     val: F,
     rand_known_to_me: &mut preprocessing::RandomKnownToMe<F>,
     rand_known_to_i: &mut preprocessing::RandomKnownToPi<F>,
     who_am_i: usize,
-    mac_key_share: F,
+    mac_key_share: F, //TODO: should this be a share insted? So it dosen't take ownership?
 ) -> Result<(Share<F>, F), ()> {
     let r = match rand_known_to_me.vals.pop() {
-        Some(r) => {
-            r
-        }
+        Some(r) => r,
         None => {
             return Err(());
         }
     };
     let r_share = match rand_known_to_i.shares[who_am_i].pop() {
-        Some(r_share) => {
-            r_share
-        }
+        Some(r_share) => r_share,
         None => {
             return Err(());
         }
@@ -139,7 +160,7 @@ pub fn send_share<F: PrimeField>(
 }
 
 // When resiving a share, the party resiving it needs to know who send it.
-pub fn recive_share_from<F: PrimeField>(
+fn recive_share_from<F: PrimeField>(
     correction: F,
     rand_known_to_i: &mut preprocessing::RandomKnownToPi<F>,
     who: usize,
@@ -147,9 +168,7 @@ pub fn recive_share_from<F: PrimeField>(
 ) -> Result<Share<F>, ()> {
     // ToDo: Throw an error if there is no more elements. Then we need more preprocessing.
     let rand_share = match rand_known_to_i.shares[who].pop() {
-        Some(s) => {
-            s
-        }
+        Some(s) => s,
         None => {
             return Err(());
         }
@@ -158,8 +177,9 @@ pub fn recive_share_from<F: PrimeField>(
     Ok(share)
 }
 
+// TODO: consider deleting the non interactive version of partial_opening - making making the interactive version (partial_opening_2) the only one.
 // The parties need to send the elemets to each other, and then use this partiel opening to combine them.
-pub fn partial_opening<F: PrimeField>(context: &mut SpdzContext<F>, candidate_vals: Vec<F>) -> F {
+fn partial_opening<F: PrimeField>(context: &mut SpdzContext<F>, candidate_vals: Vec<F>) -> F {
     let s: F = candidate_vals.iter().sum();
     context.opened_values.push(s);
     s
@@ -179,8 +199,10 @@ struct SpdzParams<F: PrimeField> {
     who_am_i: usize,
 }
 
+// The SPDZ context needs to be public atleast to some degree, as it is needed for many operations that we would like to call publicly.
+// If we do not want the context to be public, we should find another way to pass it on.
 #[derive(Debug)]
-struct SpdzContext<F: PrimeField> {
+pub struct SpdzContext<F: PrimeField> {
     opened_values: Vec<F>,
     closed_values: Vec<Share<F>>,
     // dbgr supplier (det. random bit generator)
@@ -238,10 +260,6 @@ where
 
 #[cfg(test)]
 mod test {
-
-    //use ff::Field;
-    //use rayon::vec;
-    //use tokio_util::context;
 
     use crate::{algebra::element::Element32, net::network::InMemoryNetwork};
 
@@ -389,16 +407,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
@@ -409,13 +418,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!((elm1_1.mac + elm1_2.mac) == (elm1 * secret_values.mac_key));
@@ -430,16 +433,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let elm2_1 = match recive_share_from(
@@ -449,17 +443,68 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
     }
+
+    #[tokio::test]
+    async fn test_sharing_2() {
+        type F = Element32;
+        use crate::net::network::InMemoryNetwork;
+        let rng = rand::rngs::mock::StepRng::new(42, 7);
+        let known_to_each = vec![1, 0];
+        let number_of_triplets = 0;
+        let number_of_parties = 2;
+        let (mut contexts, _) = preprocessing::dealer_prepross(
+            rng,
+            known_to_each,
+            number_of_triplets,
+            number_of_parties,
+        );
+        let value = F::from_u128(91u128);
+        let elms = [Some(value), None];
+        let values = [value, value];
+        async fn do_mpc(
+            mut network: InMemoryNetwork,
+            elm: Option<F>,
+            val: F,
+            mut context: SpdzContext<F>,
+        ) {
+            let element = share(
+                elm,
+                &mut (context.preprocessed_values.rand_known_to_me),
+                &mut context.preprocessed_values.rand_known_to_i,
+                context.params.who_am_i,
+                0,
+                context.params.mac_key_share,
+                &mut network,
+            )
+            .await;
+            let elm = match element {
+                Ok(e) => e,
+                Err(_) => panic!(),
+            };
+            let res = open_elm(elm, &mut network, &context.params.mac_key_share).await;
+            assert!(val == res);
+        }
+
+        let mut taskset = tokio::task::JoinSet::new();
+        let cluster = InMemoryNetwork::in_memory(number_of_parties); //asuming two players
+        let mut i = 0;
+
+        contexts.reverse();
+        for network in cluster {
+            taskset.spawn(do_mpc(network, elms[i], values[i], contexts.pop().unwrap()));
+            i += 1;
+        }
+
+        while let Some(res) = taskset.join_next().await {
+            res.unwrap();
+        }
+    }
+
     #[test]
     fn test_partial_opening() {
         type F = Element32;
@@ -475,16 +520,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let elm1_2 = match recive_share_from(
@@ -495,11 +531,7 @@ mod test {
         ) {
             Ok(s) => s,
             Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
+                panic!();
             }
         };
         assert!((elm1_1.val + elm1_2.val) == elm1);
@@ -515,16 +547,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let elm2_1 = match recive_share_from(
@@ -534,13 +557,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
@@ -574,16 +591,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         //let mut p2_prepros = p2_context.preprocessed_values;
@@ -594,13 +602,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
@@ -615,16 +617,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let elm2_1 = match recive_share_from(
@@ -634,13 +627,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
@@ -681,16 +668,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
@@ -701,13 +679,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
@@ -722,16 +694,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let elm2_1 = match recive_share_from(
@@ -741,13 +704,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
@@ -777,16 +734,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
@@ -797,13 +745,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
@@ -818,16 +760,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let elm2_1 = match recive_share_from(
@@ -837,13 +770,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
@@ -873,16 +800,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
@@ -893,13 +811,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
@@ -928,16 +840,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let p2_prepros = &mut p2_context.preprocessed_values;
@@ -948,13 +851,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
@@ -969,16 +866,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let elm2_1 = match recive_share_from(
@@ -988,13 +876,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
@@ -1016,13 +898,7 @@ mod test {
             let res_share_result = secret_mult(s1, s2, &mut context, &mut network).await;
             let res_share = match res_share_result {
                 Ok(share) => share,
-                Err(_) => {
-                    assert!(false); // TODO: do we want it to panic? - we do want it to run the rest of the tests, even when this one fails.
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    }
-                }
+                Err(_) => panic!(),
             };
             let res = partial_opening_2(res_share.val, &mut network).await;
             assert!(expected_res.val == res);
@@ -1068,16 +944,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
@@ -1088,13 +955,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
@@ -1131,16 +992,7 @@ mod test {
             p1_context.params.mac_key_share,
         ) {
             Ok((e, c)) => (e, c),
-            Err(_) => {
-                assert!(false);
-                (
-                    Share {
-                        val: F::from_u128(0u128),
-                        mac: F::from_u128(0u128),
-                    },
-                    F::from_u128(0u128),
-                )
-            }
+            Err(_) => panic!(),
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
@@ -1151,13 +1003,7 @@ mod test {
             p2_context.params.mac_key_share,
         ) {
             Ok(s) => s,
-            Err(_) => {
-                assert!(false);
-                Share {
-                    val: F::from_u128(0u128),
-                    mac: F::from_u128(0u128),
-                }
-            }
+            Err(_) => panic!(),
         };
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
@@ -1178,6 +1024,6 @@ mod test {
         assert!(elm1 - pub_constant == elm3_1.val + elm3_2.val);
         assert!(elm3_1.mac + elm3_2.mac == (elm1 - pub_constant) * secret_values.mac_key);
     }
-    // TODO: test checking
-    // TODO: test errors
+    // TODO: test checking - tjek that it can fail.
+    // TODO: test errors - in general test that stuff fails when it has to.
 }
