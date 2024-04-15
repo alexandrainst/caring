@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{
     help,
-    net::{agency::{Broadcast, Unicast}, connection::ConnectionError, network::Network, Channel},
+    net::{agency::{Broadcast, Unicast}, connection::{ConnectionError, RecvBytes, SendBytes}, network::Network, Channel},
 };
 
 
@@ -21,13 +21,6 @@ use crate::{
 #[derive(Debug, Error)]
 #[error(transparent)]
 pub struct MuxError(Arc<ConnectionError>);
-
-pub struct MuxConn {
-    mailbox: mpsc::UnboundedReceiver<BytesMut>,
-    gateway: mpsc::UnboundedSender<MultiplexedMessage>,
-    error: oneshot::Receiver<MuxError>,
-    id: usize,
-}
 
 struct MuxedSender {
     id: usize,
@@ -99,38 +92,22 @@ impl super::connection::RecvBytes for MuxedReceiver {
     }
 }
 
+pub struct MuxConn(MuxedSender, MuxedReceiver);
+
 impl Channel for MuxConn {
     type Error = MuxError;
 
-    async fn send<T: serde::Serialize + Sync>(&mut self, msg: &T) -> Result<(), Self::Error> {
-        futures::select! {
-            res = &mut self.error => {
-                let err = res.expect("Gateway should always be alive if MuxConn is alive");
-                Err(err)
-            },
-            default => {
-                let msg = bincode::serialize(msg).unwrap().into();
-                self.gateway
-                    .send(MultiplexedMessage(msg, self.id))
-                    .await
-                    .unwrap();
-                Ok(())
-            },
-        }
+    fn send<T: serde::Serialize + Sync>(
+        &mut self,
+        msg: &T,
+    ) -> impl futures::prelude::Future<Output = Result<(), Self::Error>> + Send {
+        self.0.send_thing(msg)
     }
 
-    async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, Self::Error> {
-        futures::select! {
-            msg = self.mailbox.next() => {
-                let buf = std::io::Cursor::new(msg.unwrap());
-                let msg: T = bincode::deserialize_from(buf).unwrap();
-                Ok(msg)
-            },
-            res = &mut self.error => {
-                let err = res.expect("Should not be canceled");
-                Err(err)
-            }
-        }
+    fn recv<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> impl futures::prelude::Future<Output = Result<T, Self::Error>> + Send {
+        self.1.recv_thing()
     }
 }
 
@@ -142,7 +119,7 @@ where
     channel: super::connection::Connection<R, W>,
     mailboxes: Vec<mpsc::UnboundedSender<BytesMut>>,
     inbox: mpsc::UnboundedReceiver<MultiplexedMessage>,
-    errors: Vec<oneshot::Sender<MuxError>>,
+    errors: Vec<[oneshot::Sender<MuxError>; 2]>,
 }
 
 pub struct Gateway<R, W>
@@ -213,15 +190,16 @@ where
         let (sends, channels, errors) = multiunzip((0..n).map(|id| {
             let (send, recv) = mpsc::unbounded();
             let gateway = gateway.clone();
-            let (error_coms, error) = oneshot::channel();
 
-            let chan = MuxConn {
-                mailbox: recv,
-                error,
-                gateway,
-                id,
-            };
-            (send, chan, error_coms)
+            let mailbox = recv;
+            let (error_coms1, error) = oneshot::channel();
+            let receiver = MuxedReceiver { id, mailbox, error };
+            let (error_coms2, error) = oneshot::channel();
+            let sender = MuxedSender { id, gateway, error };
+            let chan = MuxConn(sender, receiver);
+
+            //
+            (send, chan, [error_coms1, error_coms2])
         }));
 
         let gateway = GatewayInner {
@@ -280,10 +258,11 @@ where
                 () = send_out => {},
                 err = recv_in => {
                     let err = Arc::new(err);
-                    for c in gateway.errors.drain(..) {
+                    for [c1, c2] in gateway.errors.drain(..) {
                         // ignore dropped connections,
                         // they can't handle errors when they don't exist.
-                        let _ = c.send(MuxError(err.clone()));
+                        let _ = c1.send(MuxError(err.clone()));
+                        let _ = c2.send(MuxError(err.clone()));
                     }
                 },
             };
@@ -365,13 +344,12 @@ impl Broadcast for MuxNet {
     where
         T: serde::Serialize + serde::de::DeserializeOwned,
     {
-        let packet = bincode::serialize(&msg).unwrap();
+        let packet : Bytes = bincode::serialize(&msg).unwrap().into();
         let iter = self.mux_conn.iter_mut().map(|c| async {
-            let mailbox = &mut c.mailbox;
-            let gateway = &mut c.gateway;
+            let send = &mut c.0;
+            let recv = &mut c.1;
             //let err = &mut c.error; // TODO: Handle errors
-            let msg = MultiplexedMessage(packet.clone().into(), c.id);
-            let success = join!(gateway.send(msg), mailbox.next());
+            let success = join!(send.send_bytes(packet.clone()), recv.recv_bytes());
             success
         });
         let resp: Result<Vec<T>, _> = join_all(iter)
@@ -429,12 +407,11 @@ impl Unicast for MuxNet {
         T: serde::Serialize + serde::de::DeserializeOwned + Sync {
         let own = msgs.remove(self.index);
         let iter = self.mux_conn.iter_mut().zip(msgs.iter()).map(|(c,m)| async {
-            let mailbox = &mut c.mailbox;
-            let gateway = &mut c.gateway;
+            let packet = bincode::serialize(m).unwrap().into();
+            let send = &mut c.0;
+            let recv = &mut c.1;
             //let err = &mut c.error; // TODO: Handle errors
-            let packet = bincode::serialize(m).unwrap();
-            let msg = MultiplexedMessage(packet.clone().into(), c.id);
-            let success = join!(gateway.send(msg), mailbox.next());
+            let success = join!(send.send_bytes(packet), recv.recv_bytes());
             success
         });
         let resp: Result<Vec<T>, _> = join_all(iter)
