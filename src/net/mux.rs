@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
+use std::error::Error;
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -24,7 +25,7 @@ use crate::{
 
 #[derive(Debug, Error)]
 #[error(transparent)]
-pub struct MuxError(Arc<ConnectionError>);
+pub struct MuxError(Arc<dyn Error + Send + Sync + 'static>);
 
 pub struct MuxedSender {
     id: usize,
@@ -122,29 +123,23 @@ impl SplitChannel for MuxConn {
     }
 }
 
-pub struct GatewayInner<R, W>
+pub struct GatewayInner<C>
 where
-    R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + 'static,
+    C: SplitChannel,
 {
-    channel: super::connection::Connection<R, W>,
+    channel: C,
     mailboxes: Vec<mpsc::UnboundedSender<BytesMut>>,
     inbox: mpsc::UnboundedReceiver<MultiplexedMessage>,
     errors: Vec<[oneshot::Sender<MuxError>; 2]>,
 }
 
-pub struct Gateway<R, W>
-where
-    R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + 'static,
+pub struct Gateway<C: SplitChannel>
 {
-    handle: tokio::task::JoinHandle<GatewayInner<R, W>>,
+    handle: tokio::task::JoinHandle<GatewayInner<C>>,
 }
 
-impl<R, W> Gateway<R, W>
+impl<C: SplitChannel + Send + 'static> Gateway<C>
 where
-    R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + 'static,
 {
     /// Multiplex a connection to share it into `n` new connections.
     ///
@@ -194,7 +189,7 @@ where
     ///
     /// ```
     ///
-    pub fn multiplex(con: super::connection::Connection<R, W>, n: usize) -> (Self, Vec<MuxConn>) {
+    pub fn multiplex(con: C, n: usize) -> (Self, Vec<MuxConn>) {
         let (gateway, inbox) = mpsc::unbounded();
 
         let (sends, channels, errors) = multiunzip((0..n).map(|id| {
@@ -225,17 +220,14 @@ where
         (gateway, channels)
     }
 
-    pub async fn takedown(self) -> super::connection::Connection<R, W> {
+    pub async fn takedown(self) -> C {
         let gateway = self.handle.await.unwrap();
         let GatewayInner { channel, .. } = gateway;
         channel
     }
 }
 
-impl<R, W> GatewayInner<R, W>
-where
-    R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + 'static,
+impl<C: SplitChannel + Send> GatewayInner<C>
 {
     async fn run(self) -> Self {
         let mut gateway = self;
@@ -290,12 +282,10 @@ where
 
 // NOTE: We could also mux the AsyncWrite/AsyncRead streams themselves.
 
-struct NetworkGateway<R, W>
+struct NetworkGateway<C: SplitChannel>
 where
-    R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + 'static,
 {
-    gateways: Vec<Gateway<R, W>>,
+    gateways: Vec<Gateway<C>>,
     index: usize,
 }
 
@@ -304,12 +294,11 @@ struct MuxNet {
     index: usize,
 }
 
-impl<R, W> NetworkGateway<R, W>
+impl<C> NetworkGateway<C>
 where
-    R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + 'static,
+    C: SplitChannel + Send + 'static,
 {
-    pub fn multiplex(net: Network<R, W>, n: usize) -> (Self, Vec<MuxNet>) {
+    pub fn multiplex(net: Network<C>, n: usize) -> (Self, Vec<MuxNet>) {
         let mut gateways = Vec::new();
         let mut matrix = Vec::new();
         let index = net.index;
@@ -329,7 +318,7 @@ where
         (gateway, muxnets)
     }
 
-    pub async fn takedown(self) -> Network<R, W> {
+    pub async fn takedown(self) -> Network<C> {
         let index = self.index;
         let iter = self.gateways.into_iter().map(|g| g.takedown());
         let res = join_all(iter).await;

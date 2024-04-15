@@ -16,7 +16,7 @@ pub mod network;
 // TODO: Properly use this trait for other things (Connection/Agency etc.)
 // TODO: Somehow redo the Tuneable, Unicast and Broadcast traits.
 pub trait Channel {
-    type Error: Error + 'static;
+    type Error: Error + Send + Sync + 'static;
 
     /// Send a message over the channel
     ///
@@ -50,9 +50,9 @@ impl<
 }
 
 pub trait SplitChannel : Channel {
-    type Sender: SendBytes + Send;
-    type Receiver: RecvBytes + Send;
-    fn split<'a>(&'a mut self) -> (&'a mut Self::Sender, &'a mut Self::Receiver);
+    type Sender: SendBytes<SendError = Self::Error> + Send;
+    type Receiver: RecvBytes<RecvError = Self::Error> + Send;
+    fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver);
 }
 
 /// Tune to a specific channel
@@ -73,12 +73,9 @@ pub trait Tuneable {
     ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 }
 
-impl<
-        R: tokio::io::AsyncRead + std::marker::Unpin + Send,
-        W: tokio::io::AsyncWrite + std::marker::Unpin + Send,
-    > Tuneable for Network<R, W>
+impl<C: SplitChannel> Tuneable for Network<C>
 {
-    type Error = ConnectionError;
+    type Error = C::Error;
 
     fn id(&self) -> usize {
         self.index
