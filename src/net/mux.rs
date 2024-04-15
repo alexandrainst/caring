@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{
     help,
-    net::{agency::{Broadcast, Unicast}, connection::{ConnectionError, RecvBytes, SendBytes}, network::Network, Channel},
+    net::{agency::{Broadcast, Unicast}, connection::{ConnectionError, RecvBytes, SendBytes}, network::Network, Channel, SplitChannel},
 };
 
 
@@ -22,13 +22,13 @@ use crate::{
 #[error(transparent)]
 pub struct MuxError(Arc<ConnectionError>);
 
-struct MuxedSender {
+pub struct MuxedSender {
     id: usize,
     gateway: mpsc::UnboundedSender<MultiplexedMessage>,
     error: oneshot::Receiver<MuxError>,
 }
 
-struct MuxedReceiver {
+pub struct MuxedReceiver {
     id: usize,
     mailbox: mpsc::UnboundedReceiver<BytesMut>,
     error: oneshot::Receiver<MuxError>,
@@ -43,7 +43,7 @@ impl MultiplexedMessage {
         MultiplexedMessage(bytes.freeze(), id)
     }
 
-    fn to_bytes(self) -> Bytes {
+    fn make_bytes(self) -> Bytes {
         let bytes = self.0;
         let id = self.1;
         let mut msg  = BytesMut::new();
@@ -108,6 +108,20 @@ impl Channel for MuxConn {
         &mut self,
     ) -> impl futures::prelude::Future<Output = Result<T, Self::Error>> + Send {
         self.1.recv_thing()
+    }
+}
+
+impl SplitChannel for MuxConn {
+    type Sender = MuxedSender;
+
+    type Receiver = MuxedReceiver;
+
+    fn split(self) -> (Self::Sender, Self::Receiver) {
+        (self.0, self.1)
+    }
+
+    fn reform(s: Self::Sender, r: Self::Receiver) -> Self {
+        Self(s, r)
     }
 }
 
@@ -234,7 +248,7 @@ where
 
             let send_out = async {
                 while let Some(msg) = gateway.inbox.next().await {
-                    sending.send_bytes(msg.to_bytes()).await.unwrap();
+                    sending.send_bytes(msg.make_bytes()).await.unwrap();
                 }
             }
             .fuse();

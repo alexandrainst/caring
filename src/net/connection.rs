@@ -18,7 +18,7 @@
 
 use std::error::Error;
 
-use futures::{SinkExt, StreamExt};
+use futures::{Future, SinkExt, StreamExt};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
@@ -34,6 +34,8 @@ use tokio_util::{
     bytes::{Bytes, BytesMut},
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
+
+use crate::net::SplitChannel;
 
 pub struct Connection<R: AsyncRead, W: AsyncWrite> {
     sender: Sending<W>,
@@ -78,18 +80,20 @@ impl<R: AsyncRead, W: AsyncWrite> Connection<R,W> {
     }
 }
 
-pub(super) trait SendBytes {
+pub trait SendBytes: Send {
     type SendError: Error + Send;
 
-    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), Self::SendError>;
+    fn send_bytes(&mut self, bytes: Bytes) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send;
 
-    async fn send_thing<T: Serialize>(&mut self, msg: &T) -> Result<(), Self::SendError> {
-        let msg = bincode::serialize(msg).unwrap();
-        self.send_bytes(msg.into()).await
+    fn send_thing<T: Serialize + Sync>(&mut self, msg: &T) -> impl Future<Output = Result<(), Self::SendError>> + Send {
+        async {
+            let msg = bincode::serialize(msg).unwrap();
+            self.send_bytes(msg.into()).await
+        }
     }
 }
 
-impl<W: AsyncWrite + Unpin> SendBytes for FramedWrite<W, LengthDelimitedCodec> {
+impl<W: AsyncWrite + Unpin + Send> SendBytes for FramedWrite<W, LengthDelimitedCodec> {
     type SendError = ConnectionError;
     async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), Self::SendError> {
         self.send(bytes)
@@ -97,20 +101,21 @@ impl<W: AsyncWrite + Unpin> SendBytes for FramedWrite<W, LengthDelimitedCodec> {
             .map_err(|_| ConnectionError::Closed)
 
     }
-
 }
 
-pub(crate) trait RecvBytes {
+pub trait RecvBytes: Send {
     type RecvError: Error + Send;
-    async fn recv_bytes(&mut self) -> Result<BytesMut, Self::RecvError>;
+    fn recv_bytes(&mut self) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send;
 
-    async fn recv_thing<T: DeserializeOwned>(&mut self) -> Result<T, Self::RecvError> {
-        let msg = self.recv_bytes().await?;
-        Ok(bincode::deserialize(&msg).unwrap())
+    fn recv_thing<T: DeserializeOwned>(&mut self) -> impl Future<Output = Result<T, Self::RecvError>> + Send {
+        async {
+            let msg = self.recv_bytes().await?;
+            Ok(bincode::deserialize(&msg).unwrap())
+        }
     }
 }
 
-impl<R: AsyncRead + Unpin> RecvBytes for FramedRead<R, LengthDelimitedCodec> {
+impl<R: AsyncRead + Unpin + Send> RecvBytes for FramedRead<R, LengthDelimitedCodec> {
     type RecvError = ConnectionError;
     async fn recv_bytes(&mut self) -> Result<BytesMut, Self::RecvError> {
         self
@@ -125,7 +130,7 @@ pub struct Sending<W: AsyncWrite>(FramedWrite<W, LengthDelimitedCodec>);
 pub struct Receiving<R: AsyncRead>(FramedRead<R, LengthDelimitedCodec>);
 
 
-impl<R: AsyncRead + Unpin> Receiving<R> {
+impl<R: AsyncRead + Unpin + Send> Receiving<R> {
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
         self.0.recv_thing().await
     }
@@ -135,7 +140,7 @@ impl<R: AsyncRead + Unpin> Receiving<R> {
     }
 }
 
-impl<W: AsyncWrite + Unpin> Sending<W> {
+impl<W: AsyncWrite + Unpin + Send> Sending<W> {
     pub async fn send(&mut self, msg: &(impl Serialize + Sync)) -> Result<(), ConnectionError> {
         self.0.send_thing(msg).await
     }
@@ -146,7 +151,7 @@ impl<W: AsyncWrite + Unpin> Sending<W> {
 }
 
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R,W> {
+impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Connection<R,W> {
     /// Send a message, waiting until receival
     ///
     /// * `msg`: Message to send
@@ -171,7 +176,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R,W> {
         (&mut self.receiver, &mut self.sender)
     }
 }
-
 
 
 pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;

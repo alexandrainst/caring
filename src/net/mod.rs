@@ -3,7 +3,7 @@ use std::error::Error;
 use futures::Future;
 
 use crate::net::{
-    connection::{Connection, ConnectionError},
+    connection::{Connection, ConnectionError, RecvBytes, SendBytes},
     network::Network,
 };
 
@@ -49,6 +49,13 @@ impl<
     }
 }
 
+pub trait SplitChannel : Channel {
+    type Sender: SendBytes + Send;
+    type Receiver: RecvBytes + Send;
+    fn split(self) -> (Self::Sender, Self::Receiver);
+    fn reform(s: Self::Sender, r: Self::Receiver) -> Self;
+}
+
 /// Tune to a specific channel
 pub trait Tuneable {
     type Error: Error + 'static;
@@ -68,8 +75,8 @@ pub trait Tuneable {
 }
 
 impl<
-        R: tokio::io::AsyncRead + std::marker::Unpin,
-        W: tokio::io::AsyncWrite + std::marker::Unpin,
+        R: tokio::io::AsyncRead + std::marker::Unpin + Send,
+        W: tokio::io::AsyncWrite + std::marker::Unpin + Send,
     > Tuneable for Network<R, W>
 {
     type Error = ConnectionError;
@@ -82,7 +89,8 @@ impl<
         &mut self,
         idx: usize,
     ) -> Result<T, Self::Error> {
-        self[idx].recv().await
+        let idx = self.id_to_index(idx);
+        self.connections[idx].recv().await
     }
 
     async fn send_to<T: serde::Serialize + Sync>(
@@ -90,6 +98,7 @@ impl<
         idx: usize,
         msg: &T,
     ) -> Result<(), Self::Error> {
-        self[idx].send(msg).await
+        let idx = self.id_to_index(idx);
+        self.connections[idx].send(msg).await
     }
 }

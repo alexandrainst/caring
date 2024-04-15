@@ -30,29 +30,6 @@ pub struct Network<R: tokio::io::AsyncRead + Unpin, W: tokio::io::AsyncWrite + U
     pub index: usize,
 }
 
-impl<
-        R: tokio::io::AsyncRead + std::marker::Unpin,
-        W: tokio::io::AsyncWrite + std::marker::Unpin,
-    > std::ops::Index<usize> for Network<R, W>
-{
-    type Output = Connection<R, W>;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        let i = self.id_to_index(index);
-        &self.connections[i]
-    }
-}
-
-impl<
-        R: tokio::io::AsyncRead + std::marker::Unpin,
-        W: tokio::io::AsyncWrite + std::marker::Unpin,
-    > std::ops::IndexMut<usize> for Network<R, W>
-{
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        let i = self.id_to_index(index);
-        &mut self.connections[i]
-    }
-}
 
 #[derive(thiserror::Error, Debug)]
 #[error("Error communicating with {id}: {source}")]
@@ -63,8 +40,8 @@ pub struct NetworkError {
 
 // TODO: Do timeouts?
 // PERFORMANCE: serialize in network once when broadcasting.
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
-    fn id_to_index(&self, index: usize) -> usize {
+impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Network<R, W> {
+    pub(crate) fn id_to_index(&self, index: usize) -> usize {
         let n = self.connections.len() + 1;
         if index < self.index {
             index
@@ -302,7 +279,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Network<R, W> {
     }
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
+impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Unicast for Network<R, W> {
     type Error = NetworkError;
 
     #[tracing::instrument(skip_all)]
@@ -328,7 +305,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Unicast for Network<R, W> {
     }
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Broadcast for Network<R, W> {
+impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Broadcast for Network<R, W> {
     type Error = NetworkError;
 
     #[tracing::instrument(skip_all)]
