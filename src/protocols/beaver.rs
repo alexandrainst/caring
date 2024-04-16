@@ -1,11 +1,12 @@
 use std::iter;
 
-use itertools::{izip, multiunzip};
+use futures::future::join_all;
+use itertools::{izip, multiunzip, multizip};
 use rand::RngCore;
 
 use crate::{
     algebra::field::Field,
-    net::{agency::Broadcast},
+    net::{agency::Broadcast, mux::NetworkGateway, network::Network, SplitChannel},
     schemes::{Shared, SharedVec},
 };
 
@@ -139,6 +140,27 @@ pub async fn beaver_multiply_many<
     }
     Some(zs)
 }
+
+//pub async fn beaver_multiply_many2<
+//    C,
+//    F: Field,
+//    S: Shared<Value = F, Context = C> + Copy + std::ops::Mul<S::Value, Output = S>,
+//>(
+//    ctx: &C,
+//    xs: &[S],
+//    ys: &[S],
+//    triples: &[BeaverTriple<S>],
+//    agent: Network<impl SplitChannel + Send + 'static>,
+//) -> Option<Vec<S>> {
+//    let n = xs.len();
+//    let (gateway, mut muxes) = NetworkGateway::multiplex(agent, n);
+//    let iter = multizip((xs, ys, triples, muxes.iter_mut())).map(|(x, y, triple, net)| {
+//        beaver_multiply(ctx, *x, *y, triple.clone(), net)
+//    });
+//    let zs : Option<Vec<S>> = join_all(iter).await.into_iter().collect();
+//    let _ = gateway.takedown().await;
+//    zs
+//}
 
 #[derive(Clone)]
 pub struct BeaverSquare<S: Shared> {
