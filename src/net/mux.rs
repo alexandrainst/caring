@@ -153,7 +153,7 @@ where
 ///
 /// Constructed by [Gateway::multiplex]
 pub struct Gateway<'a, C: SplitChannel> {
-    handle: GatewayInner<'a, C>,
+    inner: GatewayInner<'a, C>,
     muxes: Vec<MuxConn>,
 }
 
@@ -184,7 +184,7 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
     /// let t2 = async move {
     ///     m2.send(&String::from("Friend")).await.unwrap();
     /// };
-    /// futures::join!(t1, t2, gateway.run()); // Gateway needs to be run aswell.
+    /// futures::join!(t1, t2, gateway.drive()); // Gateway needs to be run aswell.
     /// # };
     /// #
     /// # use itertools::Itertools;
@@ -199,7 +199,7 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
     /// # let t2 = async move {
     /// #     let _ : String = m2.recv().await.unwrap();
     /// # };
-    /// # futures::join!(t1, t2, gateway.run());
+    /// # futures::join!(t1, t2, gateway.drive());
     /// # };
     /// # futures::join!(first, second)
     /// # });
@@ -224,18 +224,15 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
             (send, chan, [error_coms1, error_coms2])
         }));
 
-        let gateway = GatewayInner {
+        let inner = GatewayInner {
             mailboxes: sends,
             inbox,
             channel: con,
             errors,
         };
 
-        let handle = gateway;
-        //let handle = tokio::spawn(gateway.run());
-
         Self {
-            handle,
+            inner,
             muxes: channels,
         }
     }
@@ -245,7 +242,7 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
         func: impl FnMut(MuxConn) -> F,
     ) -> Vec<T> {
         let res = join_all(self.muxes.into_iter().map(func));
-        let (res, _) = join!(res, self.handle.run());
+        let (res, _) = join!(res, self.inner.run());
         res
     }
 
@@ -254,7 +251,7 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
     }
 
     pub async fn drive(self) {
-        self.handle.run().await;
+        self.inner.run().await;
     }
 
 }
@@ -385,7 +382,7 @@ mod test {
                 s1 + &s2 + &s3
             };
 
-            let (s, _) = join!(s, gateway.handle.run());
+            let (s, _) = join!(s, gateway.inner.run());
             s
         };
 
@@ -400,7 +397,7 @@ mod test {
                 );
                 s1 + &s2 + &s3
             };
-            let (s, _) = (s, gateway.handle.run()).join().await;
+            let (s, _) = (s, gateway.inner.run()).join().await;
             s
         };
 
@@ -427,7 +424,7 @@ mod test {
                 s2.expect_err("Should be closed");
                 s3.expect_err("Should be closed");
             };
-            join!(h, gateway.handle.run())
+            join!(h, gateway.inner.run())
         };
 
         let p2 = async {

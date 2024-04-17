@@ -201,7 +201,6 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     fn mul(self, rhs: F) -> Self::Output {
         Self {
             y: self.y * rhs,
-            ..self
         }
     }
 }

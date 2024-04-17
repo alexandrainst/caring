@@ -108,7 +108,7 @@ pub trait Shared:
     ///
     /// * `ctx`: scheme and instance specific context
     /// * `many_shares`: shares by each party to be recombined.
-    fn recombine_many(ctx: &Self::Context, many_shares: &[impl AsRef<[Self]>]) -> Vec<Option<F>> {
+    fn recombine_many(ctx: &Self::Context, many_shares: &[impl AsRef<[Self]>]) -> Vec<Option<Self::Value>> {
         // This is ugly and a bit inefficient.
         let n = many_shares[0].as_ref().len();
         let m = many_shares.len();

@@ -27,7 +27,7 @@ pub struct VerifiableShare<F: Field, G: Group> {
 /// but we should possibly do it for some groups e.g., curve25519.
 pub struct PedersenGenParams<G: Group>(G, G);
 
-pub fn share<F: Field, G: Group>(
+pub fn share<F, G>(
     secret: F,
     ids: &[F],
     threshold: usize,
@@ -35,7 +35,7 @@ pub fn share<F: Field, G: Group>(
     PedersenGenParams(g, h): &PedersenGenParams<G>,
 ) -> Vec<VerifiableShare<F, G>>
 where
-    G: std::ops::Mul<F, Output = G>,
+    G: std::ops::Mul<F, Output = G>, F: Field, G: Group
 {
     let mut p1: Polynomial<F> = Polynomial::random(threshold, rng);
     let p2: Polynomial<F> = Polynomial::random(threshold, rng);
