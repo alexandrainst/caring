@@ -199,9 +199,7 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
     ///
     /// * `rhs`: field element to multiply with
     fn mul(self, rhs: F) -> Self::Output {
-        Self {
-            y: self.y * rhs,
-        }
+        Self { y: self.y * rhs }
     }
 }
 

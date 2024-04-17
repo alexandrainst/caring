@@ -5,8 +5,8 @@
 
 // TODO: Add Multiplex trait with impls for Network and SplitChannel?
 
-use std::{ops::RangeBounds, sync::Arc};
 use std::{error::Error, vec::Drain};
+use std::{ops::RangeBounds, sync::Arc};
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -236,10 +236,7 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
         }
     }
 
-    pub async fn map<T, F: Future<Output = T>>(
-        self,
-        func: impl FnMut(MuxConn) -> F,
-    ) -> Vec<T> {
+    pub async fn map<T, F: Future<Output = T>>(self, func: impl FnMut(MuxConn) -> F) -> Vec<T> {
         let res = join_all(self.muxes.into_iter().map(func));
         let (res, _) = join!(res, self.inner.run());
         res
@@ -252,7 +249,6 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
     pub async fn drive(self) {
         self.inner.run().await;
     }
-
 }
 
 impl<'a, C: SplitChannel + Send> GatewayInner<'a, C> {

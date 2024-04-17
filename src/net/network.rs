@@ -13,7 +13,6 @@ use crate::net::{
     SplitChannel, Tuneable,
 };
 
-
 // NOTE: We should probably find a way to include drop-outs in the broadcasts, since threshold
 // schemes will continue to function if we lose connections underway. Maybe this is just handled by
 // the network? But that would require the ability to resume a protocol after handling the drop-out.
@@ -26,7 +25,6 @@ use crate::net::{
 //
 // One could still be for the broadcast/unicast operations to have a `size` function
 // which gives the current network size. However I am not sure if this will be relevant?
-
 
 /// Peer-to-Peer network
 ///

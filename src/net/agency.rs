@@ -27,7 +27,6 @@ use std::{error::Error, marker::PhantomData};
 use futures::Future;
 use itertools::Itertools;
 
-
 pub trait Broadcast {
     type Error: Error + 'static;
     // type Error: Error + 'static;

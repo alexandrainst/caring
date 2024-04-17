@@ -7,10 +7,13 @@ use group::Group;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{algebra::{
-    math::{lagrange_interpolation, Vector},
-    poly::Polynomial,
-}, schemes::Shared};
+use crate::{
+    algebra::{
+        math::{lagrange_interpolation, Vector},
+        poly::Polynomial,
+    },
+    schemes::Shared,
+};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VerifiableShare<F: Field, G: Group> {
@@ -38,7 +41,9 @@ pub fn share<F, G>(
     PedersenGenParams(g, h): &PedersenGenParams<G>,
 ) -> Vec<VerifiableShare<F, G>>
 where
-    G: std::ops::Mul<F, Output = G>, F: Field, G: Group
+    G: std::ops::Mul<F, Output = G>,
+    F: Field,
+    G: Group,
 {
     let mut p1: Polynomial<F> = Polynomial::random(threshold, rng);
     let p2: Polynomial<F> = Polynomial::random(threshold, rng);
@@ -95,14 +100,15 @@ where
 pub struct PedersenContext<F: Field, G: Group> {
     ids: Vec<F>,
     threshold: usize,
-    pedersen_params: PedersenGenParams<G>
+    pedersen_params: PedersenGenParams<G>,
 }
 
-impl<F,G> Shared for VerifiableShare<F, G> where
-        F: Field + Serialize + DeserializeOwned,
-        G: Group + Serialize + DeserializeOwned + std::ops::Mul<F, Output = G>
+impl<F, G> Shared for VerifiableShare<F, G>
+where
+    F: Field + Serialize + DeserializeOwned,
+    G: Group + Serialize + DeserializeOwned + std::ops::Mul<F, Output = G>,
 {
-    type Context = PedersenContext<F,G>;
+    type Context = PedersenContext<F, G>;
 
     type Value = F;
 
@@ -111,15 +117,17 @@ impl<F,G> Shared for VerifiableShare<F, G> where
     }
 
     fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<Self::Value> {
-        let cheating : bool = shares.iter().zip(ctx.ids.iter()).map(|(s, id)| verify(id, s, &ctx.pedersen_params)).any(|c| !c);
+        let cheating: bool = shares
+            .iter()
+            .zip(ctx.ids.iter())
+            .map(|(s, id)| verify(id, s, &ctx.pedersen_params))
+            .any(|c| !c);
         if cheating {
             return None;
         }
         Some(reconstruct(shares, &ctx.ids))
     }
-
 }
-
 
 /// Reconstruct shares
 ///
@@ -151,7 +159,6 @@ impl<F: Field, G: Group> Add for VerifiableShare<F, G> {
         self + &rhs
     }
 }
-
 
 impl<F: Field, G: Group> Sub<&Self> for VerifiableShare<F, G> {
     type Output = Self;

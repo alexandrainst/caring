@@ -3,11 +3,7 @@ use std::iter;
 use itertools::{izip, multiunzip};
 use rand::RngCore;
 
-use crate::{
-    algebra::field::Field,
-    net::agency::Broadcast,
-    schemes::Shared,
-};
+use crate::{algebra::field::Field, net::agency::Broadcast, schemes::Shared};
 
 /// Beaver (Multiplication) Triple
 #[derive(Clone)]

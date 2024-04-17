@@ -273,7 +273,9 @@ pub fn share_many<F, G>(
 where
     F: ops::Mul<G, Output = G>,
     Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>,
-    for<'a> &'a crate::algebra::poly::Polynomial<F>: std::ops::Mul<G, Output = Polynomial<G>>, F: Field, G: Group
+    for<'a> &'a crate::algebra::poly::Polynomial<F>: std::ops::Mul<G, Output = Polynomial<G>>,
+    F: Field,
+    G: Group,
 {
     let n = ids.len();
     assert!(
