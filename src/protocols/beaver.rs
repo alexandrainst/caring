@@ -1,13 +1,12 @@
 use std::iter;
 
-use futures::future::join_all;
-use itertools::{izip, multiunzip, multizip};
+use itertools::{izip, multiunzip};
 use rand::RngCore;
 
 use crate::{
     algebra::field::Field,
-    net::{agency::Broadcast, mux::NetworkGateway, network::Network, SplitChannel},
-    schemes::{Shared, SharedVec},
+    net::agency::Broadcast,
+    schemes::Shared,
 };
 
 /// Beaver (Multiplication) Triple
@@ -228,7 +227,7 @@ mod test {
     use super::*;
     use crate::{
         algebra::element::Element32,
-        net::{agency::Unicast, network::InMemoryNetwork},
+        net::network::InMemoryNetwork,
         schemes::shamir::{self, ShamirParams},
     };
 

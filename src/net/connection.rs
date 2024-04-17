@@ -204,7 +204,7 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> SplitChannel for
     type Sender = Sending<W>;
     type Receiver = Receiving<R>;
 
-    fn split<'a>(&'a mut self) -> (&'a mut Self::Sender, &'a mut Self::Receiver) {
+    fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver) {
         (&mut self.sender, &mut self.receiver)
     }
 }

@@ -10,7 +10,7 @@ use tokio::io::AsyncWriteExt;
 use crate::net::{
     agency::{Broadcast, Unicast},
     connection::{Connection, ConnectionError, DuplexConnection, SendBytes, TcpConnection},
-    Channel, SplitChannel, Tuneable,
+    SplitChannel, Tuneable,
 };
 
 /// Peer-2-peer network
@@ -170,7 +170,7 @@ impl<C: SplitChannel> Network<C> {
                 let id = i;
                 match m {
                     Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
-                    Err(duration) => {
+                    Err(_duration) => {
                         todo!("handle it")
                         //Err(NetworkError {
                         //id,
@@ -230,7 +230,7 @@ impl<C: SplitChannel> Network<C> {
             .into_iter()
             .map(|(id, m)| match m {
                 Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
-                Err(duration) => {
+                Err(_duration) => {
                     todo!("handle it")
                     //    Err(NetworkError {
                     //    id,
