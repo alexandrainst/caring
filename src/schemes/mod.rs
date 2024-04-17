@@ -48,7 +48,10 @@ use crate::net::{
 
 /// Currently unused trait, but might be a better way to represent that a share
 /// can be multiplied by a const, however, it could also just be baked into 'Shared' directly.
-trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output = Self> + std::ops::MulAssign<A> {}
+trait MulByConst<A>:
+    Shared<Value = A> + std::ops::Mul<A, Output = Self> + std::ops::MulAssign<A>
+{
+}
 
 /// For a value of type `F` the value is secret-shared
 ///
@@ -57,17 +60,19 @@ trait MulByConst<A>: Shared<A> + std::ops::Mul<A, Output = Self> + std::ops::Mul
 /// such as beaver triple multiplication.
 ///
 /// (Maybe rename to SecretShared?)
-pub trait Shared<F>:
+pub trait Shared:
     Sized
     + Add<Output = Self>
     + Sub<Output = Self>
     + serde::Serialize
     + serde::de::DeserializeOwned
     + Clone
+    + Sync
 {
     /// The context needed to use the scheme.
     /// This can be a struct containing the threshold, ids and other things.
     type Context: Send + Clone;
+    type Value: Clone;
 
     /// Perform secret sharing splitting `secret` into a number of shares.
     ///
@@ -75,15 +80,28 @@ pub trait Shared<F>:
     /// * `secret`: secret value to share
     /// * `rng`: cryptographic secure random number generator
     ///
-    fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self>;
+    fn share(ctx: &Self::Context, secret: Self::Value, rng: &mut impl RngCore) -> Vec<Self>;
 
     /// Recombine the shares back into a secret,
     /// returning an value if successfull.
     ///
     /// * `ctx`: scheme and instance specific context
     /// * `shares`: (secret-shared) shares to combine back
-    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F>;
+    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<Self::Value>;
     // TODO: Should be Result<F, impl Error> with some generic Secret-sharing error
+
+    // These vecs of vecs are pretty annoying
+    fn share_many(
+        ctx: &Self::Context,
+        secrets: &[Self::Value],
+        rng: &mut impl RngCore,
+    ) -> Vec<Vec<Self>> {
+        let shares: Vec<_> = secrets
+            .iter()
+            .map(|secret| Self::share(ctx, secret.clone(), rng))
+            .collect();
+        crate::help::transpose(shares)
+    }
 
     /// Recombine several (different) shares back into multiple secrets,
     /// Return an option for each successfull recombination
@@ -107,12 +125,27 @@ pub trait Shared<F>:
     }
 }
 
+pub trait SharedVec:
+    Sized
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + serde::Serialize
+    + serde::de::DeserializeOwned
+    + Clone
+{
+    type Value;
+    type Context: Send + Clone;
+
+    fn share(ctx: &Self::Context, secrets: &[Self::Value], rng: &mut impl RngCore) -> Self;
+    fn recombine(ctx: &Self::Context, shares: &[Self], rng: &mut impl RngCore) -> Vec<Self::Value>;
+}
+
 /// Support for multiplication of two shares for producing a share.
 ///
 /// Note, that this is different to beaver multiplication as it does not require
 /// triplets, however it does require a native multiplication protocol.
 ///
-pub trait InteractiveMult<F>: Shared<F> {
+pub trait InteractiveMult: Shared {
     /// Perform interactive multiplication
     ///
     /// * `ctx`: scheme and instance specific context

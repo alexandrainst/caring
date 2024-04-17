@@ -2,7 +2,7 @@
 use rand::RngCore;
 use std::ops::*;
 
-trait Field:
+pub trait Field:
     Clone
     + Copy
     + Sized

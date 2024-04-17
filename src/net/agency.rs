@@ -27,18 +27,6 @@ use std::{error::Error, marker::PhantomData};
 use futures::Future;
 use itertools::Itertools;
 
-// NOTE: We should probably find a way to include drop-outs in the broadcasts, since threshold
-// schemes will continue to function if we lose connections underway. Maybe this is just handled by
-// the network? But that would require the ability to resume a protocol after handling the drop-out.
-// Another method is just ignore drop-outs, and as such the network will never error out.
-// Otherwise we could do something totally different, which is let the network just have a
-// threshold, ignoring drop-outs until then, then returning errors.
-//
-// In the same manner we can let the network have re-try strategies and the like.
-// It is probably better handled in that layer anyway.
-//
-// One could still be for the broadcast/unicast operations to have a `size` function
-// which gives the current network size. However I am not sure if this will be relevant?
 
 pub trait Broadcast {
     type Error: Error + 'static;
@@ -50,7 +38,7 @@ pub trait Broadcast {
     /// Returns: an error if there were problems broadcasting the message.
     fn broadcast(
         &mut self,
-        msg: &impl serde::Serialize,
+        msg: &(impl serde::Serialize + Sync),
     ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 
     /// Broadcast a message to all parties and await their messages
@@ -65,7 +53,7 @@ pub trait Broadcast {
         msg: T,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned;
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync;
 
     /// Receive a message from a party
     ///
@@ -80,6 +68,7 @@ pub trait Broadcast {
     fn size(&self) -> usize;
 }
 
+// TODO: Possible rename this trait as it's name is confusing.
 pub trait Unicast {
     type Error: Error + 'static;
 
@@ -93,7 +82,7 @@ pub trait Unicast {
     /// * `msgs`: Messages to send
     fn unicast(
         &mut self,
-        msgs: &[impl serde::Serialize],
+        msgs: &[impl serde::Serialize + Sync],
     ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 
     /// Unicast a message to each party and await their messages
@@ -106,7 +95,7 @@ pub trait Unicast {
         msgs: Vec<T>,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned;
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync;
 
     /// Receive a message for each party.
     ///

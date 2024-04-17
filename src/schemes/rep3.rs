@@ -28,8 +28,9 @@ pub fn recombine<F: Field>(shares: &[Share<F>; 3]) -> F {
     shares[0].0 + shares[1].0 + shares[2].0
 }
 
-impl<F: Field + Serialize + DeserializeOwned> super::Shared<F> for Share<F> {
+impl<F: Field + Serialize + DeserializeOwned> super::Shared for Share<F> {
     type Context = ();
+    type Value = F;
 
     fn share(_ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
         share(secret, rng).to_vec()
@@ -64,7 +65,7 @@ pub async fn multiplication<F: Field + Serialize + DeserializeOwned>(
     Share(c0, c1)
 }
 
-impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> InteractiveMult<F> for Share<F> {
+impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> InteractiveMult for Share<F> {
     async fn interactive_mult<U: Tuneable>(
         _ctx: &Self::Context,
         net: &mut U,

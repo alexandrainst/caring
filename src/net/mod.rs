@@ -3,41 +3,43 @@ use std::error::Error;
 use futures::Future;
 
 use crate::net::{
-    connection::{Connection, ConnectionError},
+    connection::{Connection, ConnectionError, RecvBytes, SendBytes},
     network::Network,
 };
 
 pub mod agency;
 pub mod connection;
+pub mod mux;
 pub mod network;
 
-// TODO: Serde trait bounds on `T`
-// TODO: Properly use this trait for other things (Connection/Agency etc.)
+/// A communication medium between you and another party.
+///
+/// Allows you to send and receive arbitrary messages.
 pub trait Channel {
-    type Error: Error + 'static;
+    type Error: Error + Send + Sync + 'static;
 
     /// Send a message over the channel
     ///
     /// * `msg`: message to serialize and send
-    fn send<T: serde::Serialize>(
+    fn send<T: serde::Serialize + Sync>(
         &mut self,
         msg: &T,
-    ) -> impl Future<Output = Result<(), Self::Error>>;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     fn recv<T: serde::de::DeserializeOwned>(
         &mut self,
-    ) -> impl Future<Output = Result<T, Self::Error>>;
+    ) -> impl Future<Output = Result<T, Self::Error>> + Send;
 }
 
 impl<
-        R: tokio::io::AsyncRead + std::marker::Unpin,
-        W: tokio::io::AsyncWrite + std::marker::Unpin,
+        R: tokio::io::AsyncRead + std::marker::Unpin + Send,
+        W: tokio::io::AsyncWrite + std::marker::Unpin + Send,
     > Channel for Connection<R, W>
 {
     type Error = ConnectionError;
 
-    async fn send<T: serde::Serialize>(&mut self, _msg: &T) -> Result<(), Self::Error> {
-        self.send(_msg).await
+    async fn send<T: serde::Serialize + Sync>(&mut self, msg: &T) -> Result<(), Self::Error> {
+        Connection::send(self, &msg).await
     }
 
     fn recv<T: serde::de::DeserializeOwned>(
@@ -47,10 +49,16 @@ impl<
     }
 }
 
+/// A [Channel] which can be split into a sender and receiver.
+pub trait SplitChannel: Channel {
+    type Sender: SendBytes<SendError = Self::Error> + Send;
+    type Receiver: RecvBytes<RecvError = Self::Error> + Send;
+    fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver);
+}
+
 /// Tune to a specific channel
 pub trait Tuneable {
     type Error: Error + 'static;
-    type SubChannel: Channel;
 
     fn id(&self) -> usize;
 
@@ -59,20 +67,15 @@ pub trait Tuneable {
         idx: usize,
     ) -> impl Future<Output = Result<T, Self::Error>>;
 
-    fn send_to<T: serde::Serialize>(
+    fn send_to<T: serde::Serialize + Sync>(
         &mut self,
         idx: usize,
         msg: &T,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 }
 
-impl<
-        R: tokio::io::AsyncRead + std::marker::Unpin,
-        W: tokio::io::AsyncWrite + std::marker::Unpin,
-    > Tuneable for Network<R, W>
-{
-    type Error = ConnectionError;
-    type SubChannel = Connection<R, W>;
+impl<C: SplitChannel> Tuneable for Network<C> {
+    type Error = C::Error;
 
     fn id(&self) -> usize {
         self.index
@@ -82,14 +85,16 @@ impl<
         &mut self,
         idx: usize,
     ) -> Result<T, Self::Error> {
-        self[idx].recv().await
+        let idx = self.id_to_index(idx);
+        self.connections[idx].recv().await
     }
 
-    async fn send_to<T: serde::Serialize>(
+    async fn send_to<T: serde::Serialize + Sync>(
         &mut self,
         idx: usize,
         msg: &T,
     ) -> Result<(), Self::Error> {
-        self[idx].send(msg).await
+        let idx = self.id_to_index(idx);
+        self.connections[idx].send(msg).await
     }
 }

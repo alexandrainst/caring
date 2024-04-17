@@ -1,5 +1,5 @@
 use ff::Field;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 
 use crate::{net::agency::Unicast, schemes::Shared};
 
@@ -12,7 +12,7 @@ pub async fn pick_random<C, F, S>(
 where
     F: From<u64>, /* <-- not nice */
     F: Field,
-    S: Shared<F, Context = C> + std::iter::Sum,
+    S: Shared<Value = F, Context = C> + std::iter::Sum,
 {
     // Currently there are no enforcement that the random value be in the given range
     // or even being random at all.
