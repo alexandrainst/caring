@@ -5,12 +5,14 @@ use std::ops::{Add, Mul, MulAssign, Sub};
 use ff::Field;
 use group::Group;
 use rand::RngCore;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::algebra::{
+use crate::{algebra::{
     math::{lagrange_interpolation, Vector},
     poly::Polynomial,
-};
+}, schemes::Shared};
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct VerifiableShare<F: Field, G: Group> {
     secret: F,
     blindness: F,
@@ -25,6 +27,7 @@ pub struct VerifiableShare<F: Field, G: Group> {
 /// These are cosntant public values, and should have a default implementation for ease of use.
 /// NOTE: We can't really provide general default implementation for any Group,
 /// but we should possibly do it for some groups e.g., curve25519.
+#[derive(Clone)]
 pub struct PedersenGenParams<G: Group>(G, G);
 
 pub fn share<F, G>(
@@ -88,6 +91,39 @@ where
     *g * *secret + *h * *blindness == check
 }
 
+#[derive(Clone)]
+pub struct PedersenContext<F: Field, G: Group> {
+    ids: Vec<F>,
+    threshold: usize,
+    pedersen_params: PedersenGenParams<G>
+}
+
+impl<F,G> Shared for VerifiableShare<F, G> where
+        F: Field + Serialize + DeserializeOwned,
+        G: Group + Serialize + DeserializeOwned + std::ops::Mul<F, Output = G>
+{
+    type Context = PedersenContext<F,G>;
+
+    type Value = F;
+
+    fn share(ctx: &Self::Context, secret: Self::Value, rng: &mut impl RngCore) -> Vec<Self> {
+        share(secret, &ctx.ids, ctx.threshold, rng, &ctx.pedersen_params)
+    }
+
+    fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<Self::Value> {
+        let cheating : bool = shares.iter().zip(ctx.ids.iter()).map(|(s, id)| verify(id, s, &ctx.pedersen_params)).any(|c| !c);
+        if cheating {
+            return None;
+        }
+        Some(reconstruct(shares, &ctx.ids))
+    }
+
+}
+
+
+/// Reconstruct shares
+///
+/// Warning: Does not check them!
 pub fn reconstruct<F: Field, G: Group>(shares: &[VerifiableShare<F, G>], ids: &[F]) -> F {
     // TODO: Maybe verify that the shares are all correct.
 
@@ -108,6 +144,15 @@ impl<F: Field, G: Group> Add<&Self> for VerifiableShare<F, G> {
     }
 }
 
+impl<F: Field, G: Group> Add for VerifiableShare<F, G> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        self + &rhs
+    }
+}
+
+
 impl<F: Field, G: Group> Sub<&Self> for VerifiableShare<F, G> {
     type Output = Self;
 
@@ -116,6 +161,14 @@ impl<F: Field, G: Group> Sub<&Self> for VerifiableShare<F, G> {
         self.blindness -= &rhs.blindness;
         self.commitment.0 -= &rhs.commitment.0;
         self
+    }
+}
+
+impl<F: Field, G: Group> Sub for VerifiableShare<F, G> {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        self - &rhs
     }
 }
 
