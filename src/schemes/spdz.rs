@@ -1,16 +1,13 @@
 //! (Some versirn of) SPDZ
+//! This SPDZ implementation is primarely based on the following lecture by Ivan Damgård: 
+//! (part one:) https://www.youtube.com/watch?v=N80DV3Brds0 (and part two:) https://www.youtube.com/watch?v=Ce45hp24b2E 
 //!
-//! The idea is to implement the bare-bones version of spdz, probably a more recent one.
-//! We will probably need some homomorphic encryption or oblivious transfer to enable this.
-//!
-//! Further more stands the issue of sharing the input in a nice way, since a lot of
-//! preprocessing is needed in spdz beforehand.
-//!
-//! The spdz(2k) scheme is actually not that difficult in the online phase,
-//! however it requres some heavy machinery in the offline phase.
+//! We will need some homomorphic encryption or oblivious transfer to enable preprocessing. 
+//! But for now that is handled by a dealer.
 //!
 
 // TODO: make costum errors.
+// TODO: give panics messages that explains what went wrong. - consider using expect instead. 
 use ff::PrimeField;
 
 use crate::{net::agency::Broadcast, protocols::commitments};
@@ -125,7 +122,7 @@ pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwne
     } else {
         // TODO: Make nice errorhandling
         let correction = network.recv_from(who_is_sending).await.unwrap();
-        let res = recive_share_from(correction, rand_known_to_i, who_is_sending, mac_key_share);
+        let res = receive_share_from(correction, rand_known_to_i, who_is_sending, mac_key_share);
         let share = match res {
             Ok(s) => s,
             Err(e) => return Err(e),
@@ -159,8 +156,8 @@ fn send_share<F: PrimeField>(
     Ok((share, correction))
 }
 
-// When resiving a share, the party resiving it needs to know who send it.
-fn recive_share_from<F: PrimeField>(
+// When receiving a share, the party receiving it needs to know who send it.
+fn receive_share_from<F: PrimeField>(
     correction: F,
     rand_known_to_i: &mut preprocessing::RandomKnownToPi<F>,
     who: usize,
@@ -193,6 +190,19 @@ pub async fn partial_opening_2<F: PrimeField + serde::Serialize + serde::de::Des
     candidate_vals.iter().sum()
 }
 
+// partiel opening that handles the broadcasting and pushing to opended values. All that is partially opened needs to be checked later. 
+pub async fn partial_opening_3<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
+    candidate_val: F,
+    share_of_mac_to_candidate_val: &F,
+    mac_key_share: &F,
+    network: &mut impl Broadcast,
+    partially_opened_vals: &mut Vec<F>,
+) -> F {
+    let candidate_vals = network.symmetric_broadcast(candidate_val).await.unwrap();
+    let candidate_val = candidate_vals.iter().sum();
+    partially_opened_vals.push(candidate_val * mac_key_share - share_of_mac_to_candidate_val);
+    candidate_val
+}
 #[derive(Debug)]
 struct SpdzParams<F: PrimeField> {
     mac_key_share: F,
@@ -241,7 +251,17 @@ pub async fn check_one_elment<F>(
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
 {
-    let d = *mac_key_share * val_to_check - share_of_mac_to_val;
+    let d = val_to_check * mac_key_share - share_of_mac_to_val;
+    check_one_d(d, network).await
+}
+
+pub async fn check_one_d<F>(
+    d: F,
+    network: &mut impl Broadcast,
+) -> bool
+where
+    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
+{
     let (c, s) = commitments::commit(d);
     let cs = network.symmetric_broadcast((c, s)).await.unwrap();
     let ds = network.symmetric_broadcast(d).await.unwrap();
@@ -257,7 +277,6 @@ where
     let ds_sum: F = ds.iter().sum();
     (ds_sum == 0.into()) && this_went_well
 }
-
 #[cfg(test)]
 mod test {
 
@@ -399,52 +418,40 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(
+        let (elm1_1, correction) = send_share(
             elm1,
             &mut (p1_prepros.rand_known_to_me),
             &mut p1_prepros.rand_known_to_i,
             p1_context.params.who_am_i,
             p1_context.params.mac_key_share,
-        ) {
-            Ok((e, c)) => (e, c),
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong while P1 was sending the share.");
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match recive_share_from(
+        let elm1_2 = receive_share_from(
             correction,
             &mut p2_prepros.rand_known_to_i,
             0,
             p2_context.params.mac_key_share,
-        ) {
-            Ok(s) => s,
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong while P2 was receiving the share.") ;
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!((elm1_1.mac + elm1_2.mac) == (elm1 * secret_values.mac_key));
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(
+        let (elm2_2, correction) = send_share(
             elm2,
             &mut (p2_prepros.rand_known_to_me),
             &mut p2_prepros.rand_known_to_i,
             p2_context.params.who_am_i,
             p2_context.params.mac_key_share,
-        ) {
-            Ok((e, c)) => (e, c),
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong when P2 was sending the share") ;
 
-        let elm2_1 = match recive_share_from(
+        let elm2_1 = receive_share_from(
             correction,
             &mut p1_prepros.rand_known_to_i,
             1,
             p1_context.params.mac_key_share,
-        ) {
-            Ok(s) => s,
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong while P1 was receiving the share");
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
     }
@@ -482,10 +489,7 @@ mod test {
                 &mut network,
             )
             .await;
-            let elm = match element {
-                Ok(e) => e,
-                Err(_) => panic!(),
-            };
+            let elm = element.expect("Something went wrong in sharing");
             let res = open_elm(elm, &mut network, &context.params.mac_key_share).await;
             assert!(val == res);
         }
@@ -512,53 +516,39 @@ mod test {
 
         // P1 shares an element
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(
+        let (elm1_1, correction) = send_share(
             elm1,
             &mut (p1_context.preprocessed_values.rand_known_to_me),
             &mut p1_context.preprocessed_values.rand_known_to_i,
             p1_context.params.who_am_i,
             p1_context.params.mac_key_share,
-        ) {
-            Ok((e, c)) => (e, c),
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong when P1 was sending the element") ;
 
-        let elm1_2 = match recive_share_from(
+        let elm1_2 = receive_share_from(
             correction,
             &mut (p2_context.preprocessed_values.rand_known_to_i),
             0,
             p2_context.params.mac_key_share,
-        ) {
-            Ok(s) => s,
-            Err(_) => {
-                panic!();
-            }
-        };
+        ).expect("Something went wrong when P2 was reseving the element");
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(
+        let (elm2_2, correction) = send_share(
             elm2,
             &mut (p2_context.preprocessed_values.rand_known_to_me),
             &mut p2_context.preprocessed_values.rand_known_to_i,
             p2_context.params.who_am_i,
             p2_context.params.mac_key_share,
-        ) {
-            Ok((e, c)) => (e, c),
-            Err(_) => panic!(),
-        };
+        ).expect("someting went wrong when P2 was sending the element");
 
-        let elm2_1 = match recive_share_from(
+        let elm2_1 = receive_share_from(
             correction,
             &mut p1_context.preprocessed_values.rand_known_to_i,
             1,
             p1_context.params.mac_key_share,
-        ) {
-            Ok(s) => s,
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong when P1 was reseving the element");
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
 
@@ -583,52 +573,40 @@ mod test {
 
         // P1 shares an element
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(
+        let (elm1_1, correction) = send_share(
             elm1,
             &mut (p1_context.preprocessed_values.rand_known_to_me),
             &mut p1_context.preprocessed_values.rand_known_to_i,
             p1_context.params.who_am_i,
             p1_context.params.mac_key_share,
-        ) {
-            Ok((e, c)) => (e, c),
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong when P1 was sending the element.");
 
         //let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match recive_share_from(
+        let elm1_2 = receive_share_from(
             correction,
             &mut (p2_context.preprocessed_values.rand_known_to_i),
             0,
             p2_context.params.mac_key_share,
-        ) {
-            Ok(s) => s,
-            Err(_) => panic!(),
-        };
+        ).expect("Something went worng when P2 was receiving the element");
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(
+        let (elm2_2, correction) = send_share(
             elm2,
             &mut (p2_context.preprocessed_values.rand_known_to_me),
             &mut p2_context.preprocessed_values.rand_known_to_i,
             p2_context.params.who_am_i,
             p2_context.params.mac_key_share,
-        ) {
-            Ok((e, c)) => (e, c),
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong when P2 was sending the element.");
 
-        let elm2_1 = match recive_share_from(
+        let elm2_1 = receive_share_from(
             correction,
             &mut p1_context.preprocessed_values.rand_known_to_i,
             1,
             p1_context.params.mac_key_share,
-        ) {
-            Ok(s) => s,
-            Err(_) => panic!(),
-        };
+        ).expect("Something went worng when P1 was receiving the element");
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
 
@@ -652,6 +630,84 @@ mod test {
         }
     }
 
+    #[tokio::test]
+    async fn test_partial_opening_3_and_check_all_partial_values_one_by_one() {
+        use crate::net::network::InMemoryNetwork;
+        type F = Element32;
+        let (mut p1_context, mut p2_context, secret_values) = dummie_prepross();
+
+        // P1 shares an element
+        let elm1 = F::from_u128(56u128);
+        let (elm1_1, correction) = send_share(
+            elm1,
+            &mut (p1_context.preprocessed_values.rand_known_to_me),
+            &mut p1_context.preprocessed_values.rand_known_to_i,
+            p1_context.params.who_am_i,
+            p1_context.params.mac_key_share,
+        ).expect("Something went wrong when P1 was sending the element.");
+
+        let elm1_2 = receive_share_from(
+            correction,
+            &mut (p2_context.preprocessed_values.rand_known_to_i),
+            0,
+            p2_context.params.mac_key_share,
+        ).expect("Something went worng when P2 was receiving the element");
+        assert!((elm1_1.val + elm1_2.val) == elm1);
+        assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
+
+        // P2 shares an element
+        let elm2 = F::from_u128(18u128);
+        let (elm2_2, correction) = send_share(
+            elm2,
+            &mut (p2_context.preprocessed_values.rand_known_to_me),
+            &mut p2_context.preprocessed_values.rand_known_to_i,
+            p2_context.params.who_am_i,
+            p2_context.params.mac_key_share,
+        ).expect("Something went wrong when P2 was sending the element.");
+
+        let elm2_1 = receive_share_from(
+            correction,
+            &mut p1_context.preprocessed_values.rand_known_to_i,
+            1,
+            p1_context.params.mac_key_share,
+        ).expect("Something went worng when P1 was receiving the element");
+        assert!((elm2_1.val + elm2_2.val) == elm2);
+        assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
+
+        // Parties opens elm1
+        let p1_partially_opened_vals = p1_context.opened_values;
+        let p2_partially_opened_vals = p2_context.opened_values;
+        let mut partially_opened_vals = vec![p1_partially_opened_vals, p2_partially_opened_vals];
+        let mut mac_key_shares = vec![p1_context.params.mac_key_share, p2_context.params.mac_key_share];
+        async fn do_mpc(network: InMemoryNetwork, elm: Share<F>, val1: F, partially_opened_vals: Vec<F>, mac_key_shares: F) {
+            let mut network = network;
+            let mut partially_opened_vals = partially_opened_vals;
+            let val1_guess = partial_opening_3(elm.val, &elm.mac, &mac_key_shares, &mut network, &mut partially_opened_vals).await;
+            assert!(val1_guess == val1);
+            for d in partially_opened_vals{
+                if !check_one_d(d, &mut network).await {
+                    // TODO: check that it actually fails, if there is a wrong value somewhere. 
+                    panic!("Someone cheated")
+
+                }
+            }
+        }
+
+        let mut taskset = tokio::task::JoinSet::new();
+        let cluster = InMemoryNetwork::in_memory(2); //asuming two players
+        let elm1_v = vec![elm1_1, elm1_2];
+        let mut i = 0;
+        partially_opened_vals.reverse();
+        for network in cluster {
+            taskset.spawn(do_mpc(network, elm1_v[i], elm1, partially_opened_vals.pop().unwrap(), mac_key_shares[i]));
+            i += 1;
+        }
+        while let Some(res) = taskset.join_next().await {
+            res.unwrap();
+        }
+        
+    }
+
     #[test]
     fn test_addition() {
         type F = Element32;
@@ -660,52 +716,40 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) = match send_share(
+        let (elm1_1, correction) = send_share(
             elm1,
             &mut (p1_prepros.rand_known_to_me),
             &mut p1_prepros.rand_known_to_i,
             p1_context.params.who_am_i,
             p1_context.params.mac_key_share,
-        ) {
-            Ok((e, c)) => (e, c),
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong when P1 was sending the element.");
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match recive_share_from(
+        let elm1_2 = receive_share_from(
             correction,
             &mut p2_prepros.rand_known_to_i,
             0,
             p2_context.params.mac_key_share,
-        ) {
-            Ok(s) => s,
-            Err(_) => panic!(),
-        };
+        ) .expect("Something went wrong when P2 was receiving the element.");
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) = match send_share(
+        let (elm2_2, correction) = send_share(
             elm2,
             &mut (p2_prepros.rand_known_to_me),
             &mut p2_prepros.rand_known_to_i,
             p2_context.params.who_am_i,
             p2_context.params.mac_key_share,
-        ) {
-            Ok((e, c)) => (e, c),
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong when P2 was sending the element.");
 
-        let elm2_1 = match recive_share_from(
+        let elm2_1 = receive_share_from(
             correction,
             &mut p1_prepros.rand_known_to_i,
             1,
             p1_context.params.mac_key_share,
-        ) {
-            Ok(s) => s,
-            Err(_) => panic!(),
-        };
+        ).expect("Something went wrong when P1 was receiving the element.");
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
 
@@ -738,7 +782,7 @@ mod test {
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match recive_share_from(
+        let elm1_2 = match receive_share_from(
             correction,
             &mut p2_prepros.rand_known_to_i,
             0,
@@ -763,7 +807,7 @@ mod test {
             Err(_) => panic!(),
         };
 
-        let elm2_1 = match recive_share_from(
+        let elm2_1 = match receive_share_from(
             correction,
             &mut p1_prepros.rand_known_to_i,
             1,
@@ -804,7 +848,7 @@ mod test {
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match recive_share_from(
+        let elm1_2 = match receive_share_from(
             correction,
             &mut p2_prepros.rand_known_to_i,
             0,
@@ -844,7 +888,7 @@ mod test {
         };
 
         let p2_prepros = &mut p2_context.preprocessed_values;
-        let elm1_2 = match recive_share_from(
+        let elm1_2 = match receive_share_from(
             correction,
             &mut p2_prepros.rand_known_to_i,
             0,
@@ -869,7 +913,7 @@ mod test {
             Err(_) => panic!(),
         };
 
-        let elm2_1 = match recive_share_from(
+        let elm2_1 = match receive_share_from(
             correction,
             &mut p1_prepros.rand_known_to_i,
             1,
@@ -948,7 +992,7 @@ mod test {
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match recive_share_from(
+        let elm1_2 = match receive_share_from(
             correction,
             &mut p2_prepros.rand_known_to_i,
             0,
@@ -996,7 +1040,7 @@ mod test {
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match recive_share_from(
+        let elm1_2 = match receive_share_from(
             correction,
             &mut p2_prepros.rand_known_to_i,
             0,
