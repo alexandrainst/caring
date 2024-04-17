@@ -1,13 +1,13 @@
 //! (Some versirn of) SPDZ
-//! This SPDZ implementation is primarely based on the following lecture by Ivan Damgård: 
-//! (part one:) https://www.youtube.com/watch?v=N80DV3Brds0 (and part two:) https://www.youtube.com/watch?v=Ce45hp24b2E 
+//! This SPDZ implementation is primarely based on the following lecture by Ivan Damgård:
+//! (part one:) https://www.youtube.com/watch?v=N80DV3Brds0 (and part two:) https://www.youtube.com/watch?v=Ce45hp24b2E
 //!
-//! We will need some homomorphic encryption or oblivious transfer to enable preprocessing. 
+//! We will need some homomorphic encryption or oblivious transfer to enable preprocessing.
 //! But for now that is handled by a dealer.
 //!
 
 // TODO: make costum errors.
-// TODO: give panics messages that explains what went wrong. - consider using expect instead. 
+// TODO: give panics messages that explains what went wrong. - consider using expect instead.
 use ff::PrimeField;
 
 use crate::{net::agency::Broadcast, protocols::commitments};
@@ -66,8 +66,22 @@ where
 
     let e = s1 - triplet.a;
     let d = s2 - triplet.b;
-    let e = partial_opening_3(e.val, &e.mac, &mac_key_share, network, &mut context.opened_values).await;
-    let d = partial_opening_3(d.val, &d.mac, &mac_key_share, network, &mut context.opened_values).await;
+    let e = partial_opening(
+        e.val,
+        &e.mac,
+        &mac_key_share,
+        network,
+        &mut context.opened_values,
+    )
+    .await;
+    let d = partial_opening(
+        d.val,
+        &d.mac,
+        &mac_key_share,
+        network,
+        &mut context.opened_values,
+    )
+    .await;
     let res = (triplet.c + triplet.b * e + triplet.a * d).add_public(
         e * d,
         is_chosen_party,
@@ -175,8 +189,8 @@ fn receive_share_from<F: PrimeField>(
 }
 
 // ToDo: candidate share insted of val, when we need both the val and the mac. - could probably be done using only shares
-// partiel opening that handles the broadcasting and pushing to opended values. All that is partially opened needs to be checked later. 
-pub async fn partial_opening_3<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
+// partiel opening that handles the broadcasting and pushing to opended values. All that is partially opened needs to be checked later.
+pub async fn partial_opening<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     candidate_val: F,
     share_of_mac_to_candidate_val: &F,
     mac_key_share: &F,
@@ -215,7 +229,14 @@ pub async fn open_elm<F>(
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
 {
-    let opened_val = partial_opening_3(share_to_open.val, &share_to_open.mac, mac_key_share, network, partially_opened_vals).await;
+    let opened_val = partial_opening(
+        share_to_open.val,
+        &share_to_open.mac,
+        mac_key_share,
+        network,
+        partially_opened_vals,
+    )
+    .await;
     let this_went_well =
         check_one_elment(opened_val, network, &share_to_open.mac, mac_key_share).await;
     if this_went_well {
@@ -241,10 +262,7 @@ where
     check_one_d(d, network).await
 }
 
-pub async fn check_one_d<F>(
-    d: F,
-    network: &mut impl Broadcast,
-) -> bool
+pub async fn check_one_d<F>(d: F, network: &mut impl Broadcast) -> bool
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
 {
@@ -410,7 +428,8 @@ mod test {
             &mut p1_prepros.rand_known_to_i,
             p1_context.params.who_am_i,
             p1_context.params.mac_key_share,
-        ).expect("Something went wrong while P1 was sending the share.");
+        )
+        .expect("Something went wrong while P1 was sending the share.");
 
         let mut p2_prepros = p2_context.preprocessed_values;
         let elm1_2 = receive_share_from(
@@ -418,7 +437,8 @@ mod test {
             &mut p2_prepros.rand_known_to_i,
             0,
             p2_context.params.mac_key_share,
-        ).expect("Something went wrong while P2 was receiving the share.") ;
+        )
+        .expect("Something went wrong while P2 was receiving the share.");
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!((elm1_1.mac + elm1_2.mac) == (elm1 * secret_values.mac_key));
 
@@ -430,14 +450,16 @@ mod test {
             &mut p2_prepros.rand_known_to_i,
             p2_context.params.who_am_i,
             p2_context.params.mac_key_share,
-        ).expect("Something went wrong when P2 was sending the share") ;
+        )
+        .expect("Something went wrong when P2 was sending the share");
 
         let elm2_1 = receive_share_from(
             correction,
             &mut p1_prepros.rand_known_to_i,
             1,
             p1_context.params.mac_key_share,
-        ).expect("Something went wrong while P1 was receiving the share");
+        )
+        .expect("Something went wrong while P1 was receiving the share");
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
     }
@@ -476,7 +498,13 @@ mod test {
             )
             .await;
             let elm = element.expect("Something went wrong in sharing");
-            let res = open_elm(elm, &mut network, &context.params.mac_key_share, &mut context.opened_values).await;
+            let res = open_elm(
+                elm,
+                &mut network,
+                &context.params.mac_key_share,
+                &mut context.opened_values,
+            )
+            .await;
             assert!(val == res);
         }
 
@@ -496,7 +524,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_partial_opening_3_and_check_all_partial_values_one_by_one() {
+    async fn test_partial_opening_and_check_all_partial_values_one_by_one() {
         use crate::net::network::InMemoryNetwork;
         type F = Element32;
         let (mut p1_context, mut p2_context, secret_values) = dummie_prepross();
@@ -509,14 +537,16 @@ mod test {
             &mut p1_context.preprocessed_values.rand_known_to_i,
             p1_context.params.who_am_i,
             p1_context.params.mac_key_share,
-        ).expect("Something went wrong when P1 was sending the element.");
+        )
+        .expect("Something went wrong when P1 was sending the element.");
 
         let elm1_2 = receive_share_from(
             correction,
             &mut (p2_context.preprocessed_values.rand_known_to_i),
             0,
             p2_context.params.mac_key_share,
-        ).expect("Something went worng when P2 was receiving the element");
+        )
+        .expect("Something went worng when P2 was receiving the element");
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
 
@@ -528,14 +558,16 @@ mod test {
             &mut p2_context.preprocessed_values.rand_known_to_i,
             p2_context.params.who_am_i,
             p2_context.params.mac_key_share,
-        ).expect("Something went wrong when P2 was sending the element.");
+        )
+        .expect("Something went wrong when P2 was sending the element.");
 
         let elm2_1 = receive_share_from(
             correction,
             &mut p1_context.preprocessed_values.rand_known_to_i,
             1,
             p1_context.params.mac_key_share,
-        ).expect("Something went worng when P1 was receiving the element");
+        )
+        .expect("Something went worng when P1 was receiving the element");
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
 
@@ -543,17 +575,32 @@ mod test {
         let p1_partially_opened_vals = p1_context.opened_values;
         let p2_partially_opened_vals = p2_context.opened_values;
         let mut partially_opened_vals = vec![p1_partially_opened_vals, p2_partially_opened_vals];
-        let mut mac_key_shares = vec![p1_context.params.mac_key_share, p2_context.params.mac_key_share];
-        async fn do_mpc(network: InMemoryNetwork, elm: Share<F>, val1: F, partially_opened_vals: Vec<F>, mac_key_shares: F) {
+        let mut mac_key_shares = vec![
+            p1_context.params.mac_key_share,
+            p2_context.params.mac_key_share,
+        ];
+        async fn do_mpc(
+            network: InMemoryNetwork,
+            elm: Share<F>,
+            val1: F,
+            partially_opened_vals: Vec<F>,
+            mac_key_shares: F,
+        ) {
             let mut network = network;
             let mut partially_opened_vals = partially_opened_vals;
-            let val1_guess = partial_opening_3(elm.val, &elm.mac, &mac_key_shares, &mut network, &mut partially_opened_vals).await;
+            let val1_guess = partial_opening(
+                elm.val,
+                &elm.mac,
+                &mac_key_shares,
+                &mut network,
+                &mut partially_opened_vals,
+            )
+            .await;
             assert!(val1_guess == val1);
-            for d in partially_opened_vals{
+            for d in partially_opened_vals {
                 if !check_one_d(d, &mut network).await {
-                    // TODO: check that it actually fails, if there is a wrong value somewhere. 
+                    // TODO: check that it actually fails, if there is a wrong value somewhere.
                     panic!("Someone cheated")
-
                 }
             }
         }
@@ -564,13 +611,18 @@ mod test {
         let mut i = 0;
         partially_opened_vals.reverse();
         for network in cluster {
-            taskset.spawn(do_mpc(network, elm1_v[i], elm1, partially_opened_vals.pop().unwrap(), mac_key_shares[i]));
+            taskset.spawn(do_mpc(
+                network,
+                elm1_v[i],
+                elm1,
+                partially_opened_vals.pop().unwrap(),
+                mac_key_shares[i],
+            ));
             i += 1;
         }
         while let Some(res) = taskset.join_next().await {
             res.unwrap();
         }
-        
     }
 
     #[test]
@@ -587,7 +639,8 @@ mod test {
             &mut p1_prepros.rand_known_to_i,
             p1_context.params.who_am_i,
             p1_context.params.mac_key_share,
-        ).expect("Something went wrong when P1 was sending the element.");
+        )
+        .expect("Something went wrong when P1 was sending the element.");
 
         let mut p2_prepros = p2_context.preprocessed_values;
         let elm1_2 = receive_share_from(
@@ -595,7 +648,8 @@ mod test {
             &mut p2_prepros.rand_known_to_i,
             0,
             p2_context.params.mac_key_share,
-        ) .expect("Something went wrong when P2 was receiving the element.");
+        )
+        .expect("Something went wrong when P2 was receiving the element.");
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
 
@@ -607,14 +661,16 @@ mod test {
             &mut p2_prepros.rand_known_to_i,
             p2_context.params.who_am_i,
             p2_context.params.mac_key_share,
-        ).expect("Something went wrong when P2 was sending the element.");
+        )
+        .expect("Something went wrong when P2 was sending the element.");
 
         let elm2_1 = receive_share_from(
             correction,
             &mut p1_prepros.rand_known_to_i,
             1,
             p1_context.params.mac_key_share,
-        ).expect("Something went wrong when P1 was receiving the element.");
+        )
+        .expect("Something went wrong when P1 was receiving the element.");
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
 
@@ -809,10 +865,23 @@ mod test {
                 Ok(share) => share,
                 Err(_) => panic!(),
             };
-            let res = partial_opening_3(res_share.val, &res_share.mac, &context.params.mac_key_share, &mut network, &mut context.opened_values).await;
+            let res = partial_opening(
+                res_share.val,
+                &res_share.mac,
+                &context.params.mac_key_share,
+                &mut network,
+                &mut context.opened_values,
+            )
+            .await;
             assert!(expected_res.val == res);
 
-            let res = open_elm(res_share, &mut network, &context.params.mac_key_share, &mut context.opened_values).await;
+            let res = open_elm(
+                res_share,
+                &mut network,
+                &context.params.mac_key_share,
+                &mut context.opened_values,
+            )
+            .await;
             assert!(expected_res.val == res);
         }
 
