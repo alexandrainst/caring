@@ -1,3 +1,10 @@
+//! Multiplexing Connections and Networks
+//!
+//! This moudle provides tools to multiplex channels/connections and networks
+//! in order to run multiple protocols concurrently.
+
+// TODO: Add Multiplex trait with impls for Network and SplitChannel?
+
 use std::{ops::RangeBounds, sync::Arc};
 use std::{error::Error, vec::Drain};
 
@@ -246,7 +253,7 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
         self.muxes.drain(range)
     }
 
-    pub async fn run(self) {
+    pub async fn drive(self) {
         self.handle.run().await;
     }
 
@@ -331,8 +338,8 @@ where
         (gateway, muxnets)
     }
 
-    pub async fn run(self) {
-        let _ = join_all(self.gateways.into_iter().map(|c| c.run())).await;
+    pub async fn drive(self) {
+        let _ = join_all(self.gateways.into_iter().map(|c| c.drive())).await;
     }
 }
 
@@ -446,7 +453,7 @@ mod test {
                     let res = m.symmetric_broadcast(String::from("World")).await.unwrap();
                     assert_eq!(res, vec!["World"; 3]);
                 });
-                let (r1, r2, _) = futures::join!(h1, h2, gateway.run());
+                let (r1, r2, _) = futures::join!(h1, h2, gateway.drive());
                 r1.unwrap();
                 r2.unwrap();
             })

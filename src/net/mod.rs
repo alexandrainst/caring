@@ -12,9 +12,9 @@ pub mod connection;
 pub mod mux;
 pub mod network;
 
-// TODO: Serde trait bounds on `T`
-// TODO: Properly use this trait for other things (Connection/Agency etc.)
-// TODO: Somehow redo the Tuneable, Unicast and Broadcast traits.
+/// A communication medium between you and another party.
+///
+/// Allows you to send and receive arbitrary messages.
 pub trait Channel {
     type Error: Error + Send + Sync + 'static;
 
@@ -49,6 +49,7 @@ impl<
     }
 }
 
+/// A [Channel] which can be split into a sender and receiver.
 pub trait SplitChannel: Channel {
     type Sender: SendBytes<SendError = Self::Error> + Send;
     type Receiver: RecvBytes<RecvError = Self::Error> + Send;
