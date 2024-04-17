@@ -32,6 +32,8 @@ tracing = "0.1.40"
 
 [dev-dependencies]
 tokio-test = "0.4.4"
+curve25519-dalek = { version = "4.1.1", features = ["group", "serde"] }
+sha2 = "0.10.8"
 
 [features]
 rayon = []

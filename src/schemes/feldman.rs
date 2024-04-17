@@ -97,7 +97,7 @@ where
 
     let c_share = shamir::deflate(ctx, c_share, net, rng).await.unwrap();
 
-    // TODO: Degree reduction of polynomial.
+    // TODO: Degree reduction of commitment polynomial.
 
     VerifiableShare {
         share: c_share,

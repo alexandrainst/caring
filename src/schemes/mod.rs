@@ -1,7 +1,8 @@
 //! # Secret Sharing Schemes
 //! This module contains different secret sharing schemes along with some common abstract functionality.
-//! - Shamir (Passive Security, Addition)
-//! - Feldman (Active Security, Addition)
+//! - Shamir (Passive Security, Addition, BeaverMult, InteractiveMult)
+//! - Feldman (Active Security, Addition, BeaverMult)
+//! - Pedersen (Active Security, Addition, BeaverMult)
 //! - SPDZ (TODO)
 //! - SPDZ2k (TODO)
 //!
@@ -12,13 +13,6 @@
 //! as easily. However an initial stepping stone is the `Shared<F>` trait, which represent a
 //! secret 'Share' for `F`. As such by providing a context/parameters to the scheme,
 //! one can perform arbitrary sharing/reconstruction.
-//!
-//! Other relevant trait suggestions for the future:
-//! - `ThresholdShared`
-//! - `Mult`
-//! - `Add`
-//! - `Reveal`
-//! - `BeaverMult`
 //!
 //! Note, things hould be kept as I/O agnostic as possible,
 //! and therefore should at most use the Broadcast/Unicast traits for

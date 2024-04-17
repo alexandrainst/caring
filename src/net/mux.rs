@@ -90,7 +90,6 @@ impl super::connection::RecvBytes for MuxedReceiver {
     async fn recv_bytes(&mut self) -> Result<tokio_util::bytes::BytesMut, Self::RecvError> {
         futures::select! {
             msg = self.mailbox.next() => {
-                // TODO: Change this to an error.
                 let msg = msg.ok_or(MuxError::DeadGateway)?;
                 Ok(msg)
             },

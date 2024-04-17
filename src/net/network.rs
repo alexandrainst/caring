@@ -50,7 +50,6 @@ pub struct NetworkError<E: Error> {
     source: E,
 }
 
-// TODO: Do timeouts?
 // PERFORMANCE: serialize in network once when broadcasting.
 impl<C: SplitChannel> Network<C> {
     pub(crate) fn id_to_index(&self, index: usize) -> usize {

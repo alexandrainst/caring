@@ -1,3 +1,4 @@
+//! WIP: Very incomplete
 use std::error::Error;
 
 use crate::net::agency::Broadcast;
