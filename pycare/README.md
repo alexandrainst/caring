@@ -1,5 +1,5 @@
 <h1 align="center">Caring for Python</h1>
-<h2 align="center">Because we care about Python too!</h2>
+<div align="center">Because we care about Python too!</div>
 
 Python bindings to perform a MPC summation.
 ```py
