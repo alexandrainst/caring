@@ -1,5 +1,5 @@
 <h1 align="center">Caring for Python</h1>
-<h2 align="center">Because Python Cares Too!</h2>
+<h2 align="center">Because we care about Python too!</h2>
 
 Python bindings to perform a MPC summation.
 ```py
@@ -11,6 +11,14 @@ Python bindings to perform a MPC summation.
     # Takedown the system again.
     engine.takedown()
 ```
+Note that there is currently no support for channel encryption.
+
+
+## Install
+We currently build using GitHub actions for Python 3.7 and above for Linux x86_64 and aarch64.
+The targets can be found [actions](https://github.com/alexandrainst/caring/actions/workflows/pyo3.yml) for the PyO3 CI as wheels.
+To install a wheel run the following `pip install caring-<version>.whl` for the version for your given platform.
+
 
 ## Examples
 There are two test files in [examples](./examples) showcasing the use between two different parties test1.py and test2.py.

@@ -1,5 +1,5 @@
-# Caring
-_(Secret) Sharing is caring. (Name to change)_
+<h1 align="center">Caring</h1>
+<h2 align="center">is Secret Sharing</h2>
 
 This is a library for performing secure multiparty computation by (mostly) secret sharing.
 The aim of this is to provide datatypes and constructs to build larger MPC programs,
@@ -12,7 +12,7 @@ Currently we are working with the following schemes:
 - Rep3 (addition)
 - SPDZ (wip)
 - SPDZ2k (todo)
-
+*Note* that this is prototype software and not suited to be used in security critical applications as of yet.
 
 ## To Build
 We use a few things that require nightly, so switch to that.
