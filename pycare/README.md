@@ -1,5 +1,6 @@
 <h1 align="center">Caring for Python</h1>
 <div align="center">Because we care about Python too!</div>
+<br/><br/>
 
 Python bindings to perform a MPC summation.
 ```py
@@ -33,5 +34,5 @@ To install the package locally you want to setup a virtual environment and insta
 ```
 Then you should be able to run `maturin develop` and have a version of `pycare` available.
 
-
-<div align="center">*Built with ❤️ using [PyO3](https://github.com/PyO3/pyo3)*</div>
+<br/><br/>
+<div align="center"><i>Built with ❤️ using [PyO3](https://github.com/PyO3/pyo3)</i></div>

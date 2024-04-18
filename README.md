@@ -1,5 +1,6 @@
 <h1 align="center">Caring</h1>
 <div align="center">is Secret Sharing</div>
+<br/><br/>
 
 This is a library for performing secure multiparty computation by (mostly) secret sharing.
 The aim of this is to provide datatypes and constructs to build larger MPC programs,
@@ -11,17 +12,8 @@ Currently, we are working with the following schemes:
 - Pedersen Secret Sharing (lack. addition + multiplication)
 - Rep3 (addition)
 - SPDZ (wip)
-- SPDZ2k (todo)
 
 *Note*: This is prototype software and not suited to be used in security critical applications as of yet.
-
-## To Build
-We use a few things that require nightly, so switch to that.
-```sh
-rustup default nightly
-cargo build
-```
-
 ## Subprojects
 
 The base crate here is to provide a library with secret-sharing and other MPC functionality.
