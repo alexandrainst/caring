@@ -35,7 +35,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --find-interpreter --zig
+          args: --release --out dist --zig
           sccache: 'true'
           container: 'off'
           working-directory: pycare
@@ -44,3 +44,59 @@ jobs:
         with:
           name: wheels
           path: pycare/dist
+
+  windows:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install C compiler
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install Zigbuild
+        run: pip install cargo-zigbuild
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64-pc-windows-msvc
+          args: --release --out dist --zig
+          sccache: 'true'
+          container: 'off'
+          working-directory: pycare
+      - name: Upload wheels
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels
+          path: pycare/dist
+
+  macos:
+    runs-on: self-hosted
+    strategy:
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install C compiler
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install Zigbuild
+        run: pip install cargo-zigbuild
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --zig
+          sccache: 'true'
+          container: 'off'
+          working-directory: pycare
+      - name: Upload wheels
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels
+          path: pycare/dist
+
