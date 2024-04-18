@@ -229,20 +229,6 @@ impl TcpConnection {
     }
 }
 
-pub type TlsConnection = Connection<
-    ReadHalf<tokio_rustls::TlsStream<TcpStream>>,
-    WriteHalf<tokio_rustls::TlsStream<TcpStream>>,
->;
-impl TlsConnection {
-    /// New TLS-based connection from a stream
-    ///
-    /// * `stream`: TCP stream to use
-    pub fn from_tls(stream: tokio_rustls::TlsStream<TcpStream>) -> Self {
-        let (reader, writer) = tokio::io::split(stream);
-        Self::new(reader, writer)
-    }
-}
-
 /// Connection to a in-memory data stream.
 /// This always have a corresponding other connection in the same process.
 pub type DuplexConnection = Connection<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
