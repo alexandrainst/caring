@@ -5,13 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
-name = "pycare"
+name = "caring"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.19.0"
+pyo3 = "0.21"
 wecare = { path = "../wecare" }
-tokio = { version = "1.33.0", features = ["full"] }
-curve25519-dalek = { version = "4.1.1", features = ["group", "serde"] }
-rand = "0.8.5"
-fixed = "2.0.0-alpha.11"

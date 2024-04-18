@@ -41,7 +41,7 @@ impl Engine {
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn pycare(_py: Python, m: &PyModule) -> PyResult<()> {
+fn caring(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_class::<Engine>()?;
     Ok(())

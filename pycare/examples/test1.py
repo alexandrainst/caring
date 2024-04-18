@@ -1,7 +1,5 @@
-import pycare
-import time
-
-engine = pycare.setup("127.0.0.1:1234", "127.0.0.1:1235")
+import caring
+engine = caring.setup("127.0.0.1:1234", "127.0.0.1:1235")
 
 res = engine.sum(2.5)
 print(f"2.5 - 5 = {res}")
@@ -33,5 +31,4 @@ print(f"0 + 0 = {res}")
 res = engine.sum(0.01)
 print(f"0.01 + 0.02 = {res}")
 
-time.sleep(1)
-# engine.takedown()
+engine.takedown()
