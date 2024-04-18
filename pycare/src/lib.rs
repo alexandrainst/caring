@@ -8,8 +8,8 @@ struct Engine(Option<AdderEngine>);
 /// Setup a MPC addition engine connected to the given sockets.
 #[pyfunction]
 #[pyo3(signature = (my_addr, *others))]
-fn setup(my_addr: &str, others: &PyTuple) -> PyResult<Engine> {
-    let others : Vec<_> = others.iter().map(|x| x.extract().unwrap())
+fn setup(my_addr: &str, others: &Bound<'_, PyTuple>) -> PyResult<Engine> {
+    let others : Vec<_> = others.iter().map(|x| x.extract::<String>().unwrap().clone())
         .collect();
     match setup_engine(my_addr, &others) {
         Ok(e) => Ok(Engine(Some(e))),
@@ -41,7 +41,7 @@ impl Engine {
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn caring(_py: Python, m: &PyModule) -> PyResult<()> {
+fn caring(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_class::<Engine>()?;
     Ok(())

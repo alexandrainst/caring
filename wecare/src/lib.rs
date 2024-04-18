@@ -109,9 +109,9 @@ impl std::fmt::Display for MpcError {
 
 impl std::error::Error for MpcError {}
 
-pub fn setup_engine(my_addr: &str, others: &[&str]) -> Result<AdderEngine, MpcError> {
+pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>]) -> Result<AdderEngine, MpcError> {
     let my_addr: SocketAddr = my_addr.parse().unwrap();
-    let others: Vec<SocketAddr> = others.iter().map(|s| s.parse().unwrap()).collect();
+    let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
 
     let threshold = ((others.len() + 1) / 2 + 1) as u64;
     let runtime = tokio::runtime::Builder::new_current_thread()
