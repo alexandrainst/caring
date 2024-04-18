@@ -1,3 +1,5 @@
+//! WIP: Only basic traits and a mock version implemented
+
 use futures::Future;
 
 use crate::net::Channel;

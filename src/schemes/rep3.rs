@@ -3,7 +3,6 @@
 //! For an example see
 //! https://medium.com/partisia-blockchain/mpc-techniques-series-part-1-secret-sharing-d8f98324674a
 //!
-// TODO: Parametrize this over fields instead?
 
 use ff::Field;
 use rand::RngCore;
@@ -142,7 +141,7 @@ mod test {
             .unwrap();
     }
 
-    #[ignore = "Currently fails, I am not sure why"]
+    #[ignore = "Known bug. The output becomes malformed after the second mult"]
     #[tokio::test]
     async fn mult_twice() {
         type F = Element32;

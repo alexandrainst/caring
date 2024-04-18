@@ -24,7 +24,6 @@ pub mod pedersen;
 pub mod rep3;
 pub mod shamir;
 pub mod spdz;
-pub mod spdz2k;
 
 use std::{
     error::Error,

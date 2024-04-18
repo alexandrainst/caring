@@ -13,11 +13,12 @@
 // Reconsider most of this, as this is just a more primitive manual implementation of something,
 // like `ndarray`.
 
-use ff::Field;
-use rayon::prelude::*;
-
 // TODO: Consider smallvec or tinyvec
 // TODO: Make parallel version it's own type switch on them using cfg..
+
+
+use ff::Field;
+use rayon::prelude::*;
 
 /// Represention of a mathematical vector of type `F`.
 ///
