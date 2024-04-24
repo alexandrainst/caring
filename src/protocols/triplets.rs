@@ -27,7 +27,7 @@ impl<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned> Multiplicat
     ///
 
     // We change here from using the context, to only askring for the specific information that we need.
-    pub async fn makeTriplet(
+    pub async fn make_triplet(
         mut rng: &mut impl RngCore,
         agent: &mut impl Broadcast,
         is_chosen_party: bool,

@@ -166,6 +166,7 @@ dependencies = [
  "num-traits",
  "overload",
  "rand",
+ "rand_chacha",
  "rayon",
  "serde",
  "sha2",

@@ -8,10 +8,10 @@
 // This has to be done interactivly - look at triplets for inspiration
 
 use ff::PrimeField;
-use rand::RngCore;
+//use rand::{thread_rng, RngCore};
 
 use crate::{
-    net::agency::Broadcast,
+    //net::agency::Broadcast,
     schemes::spdz::{self, SpdzContext},
 };
 
@@ -56,7 +56,9 @@ pub struct SecretValues<F> {
 
 // A dealer who is not colluding with either of the other parties.
 pub fn dealer_prepross<F: PrimeField>(
-    mut rng: rand::rngs::mock::StepRng,
+    //mut rng: rand::rngs::mock::StepRng,
+    //mut rng: rand::rngs::ThreadRng,
+    mut rng: impl rand::Rng,
     known_to_each: Vec<usize>,
     number_of_triplets: usize,
     number_of_parties: usize,
@@ -84,7 +86,6 @@ pub fn dealer_prepross<F: PrimeField>(
         mac_keys.push(mac_key_share);
         let p_context = SpdzContext {
             opened_values: vec![],
-            closed_values: vec![],
             params: spdz::SpdzParams {
                 mac_key_share,
                 who_am_i: i,
