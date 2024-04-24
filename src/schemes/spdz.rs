@@ -266,7 +266,7 @@ pub async fn check_one_d<F>(d: F, network: &mut impl Broadcast) -> bool
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
 {
-    let (c, s) = commitments::commit(d);
+    let (c, s) = commitments::commit(&d);
     let cs = network.symmetric_broadcast((c, s)).await.unwrap();
     let ds = network.symmetric_broadcast(d).await.unwrap();
     let dcs = ds.iter().zip(cs.iter());
@@ -281,6 +281,34 @@ where
     let ds_sum: F = ds.iter().sum();
     (ds_sum == 0.into()) && this_went_well
 }
+
+pub async fn check_all_d<F>(partially_opened_vals: & Vec<F>, network: &mut impl Broadcast) -> bool
+where
+    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned +std::convert::Into<u64>,
+{
+    // TODO: consider making a commit to many function
+    // TODO: broadcast many values at a time - that is more efficient. 
+    // Lets do it the naive way first.
+    let mut this_went_well = true;
+    for d in partially_opened_vals{
+        let (c,s) = commitments::commit(d);
+        let cs = network.symmetric_broadcast((c, s)).await.unwrap();
+        let ds = network.symmetric_broadcast(*d).await.unwrap();
+        let dcs = ds.iter().zip(cs.iter()); 
+        for (d, (c, s)) in dcs {
+            let t = commitments::verify_commit(d, c, s);
+            if !t {
+                this_went_well = false;
+            }
+        }
+        let ds_sum: F = ds.iter().sum();
+        if !(ds_sum == 0.into()) || !this_went_well{
+            this_went_well = false;
+        }
+    }
+    this_went_well
+}
+
 #[cfg(test)]
 mod test {
 
@@ -602,6 +630,105 @@ mod test {
                     // TODO: check that it actually fails, if there is a wrong value somewhere.
                     panic!("Someone cheated")
                 }
+            }
+        }
+
+        let mut taskset = tokio::task::JoinSet::new();
+        let cluster = InMemoryNetwork::in_memory(2); //asuming two players
+        let elm1_v = vec![elm1_1, elm1_2];
+        let mut i = 0;
+        partially_opened_vals.reverse();
+        for network in cluster {
+            taskset.spawn(do_mpc(
+                network,
+                elm1_v[i],
+                elm1,
+                partially_opened_vals.pop().unwrap(),
+                mac_key_shares[i],
+            ));
+            i += 1;
+        }
+        while let Some(res) = taskset.join_next().await {
+            res.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_partial_opening_and_check_all_partial_values_using_check_all() {
+        use crate::net::network::InMemoryNetwork;
+        type F = Element32;
+        let (mut p1_context, mut p2_context, secret_values) = dummie_prepross();
+
+        // P1 shares an element
+        let elm1 = F::from_u128(56u128);
+        let (elm1_1, correction) = send_share(
+            elm1,
+            &mut (p1_context.preprocessed_values.rand_known_to_me),
+            &mut p1_context.preprocessed_values.rand_known_to_i,
+            p1_context.params.who_am_i,
+            p1_context.params.mac_key_share,
+        )
+        .expect("Something went wrong when P1 was sending the element.");
+
+        let elm1_2 = receive_share_from(
+            correction,
+            &mut (p2_context.preprocessed_values.rand_known_to_i),
+            0,
+            p2_context.params.mac_key_share,
+        )
+        .expect("Something went worng when P2 was receiving the element");
+        assert!((elm1_1.val + elm1_2.val) == elm1);
+        assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
+
+        // P2 shares an element
+        let elm2 = F::from_u128(18u128);
+        let (elm2_2, correction) = send_share(
+            elm2,
+            &mut (p2_context.preprocessed_values.rand_known_to_me),
+            &mut p2_context.preprocessed_values.rand_known_to_i,
+            p2_context.params.who_am_i,
+            p2_context.params.mac_key_share,
+        )
+        .expect("Something went wrong when P2 was sending the element.");
+
+        let elm2_1 = receive_share_from(
+            correction,
+            &mut p1_context.preprocessed_values.rand_known_to_i,
+            1,
+            p1_context.params.mac_key_share,
+        )
+        .expect("Something went worng when P1 was receiving the element");
+        assert!((elm2_1.val + elm2_2.val) == elm2);
+        assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
+
+        // Parties opens elm1
+        let p1_partially_opened_vals = p1_context.opened_values;
+        let p2_partially_opened_vals = p2_context.opened_values;
+        let mut partially_opened_vals = vec![p1_partially_opened_vals, p2_partially_opened_vals];
+        let mut mac_key_shares = vec![
+            p1_context.params.mac_key_share,
+            p2_context.params.mac_key_share,
+        ];
+        async fn do_mpc(
+            network: InMemoryNetwork,
+            elm: Share<F>,
+            val1: F,
+            partially_opened_vals: Vec<F>,
+            mac_key_shares: F,
+        ) {
+            let mut network = network;
+            let mut partially_opened_vals = partially_opened_vals;
+            let val1_guess = partial_opening(
+                elm.val,
+                &elm.mac,
+                &mac_key_shares,
+                &mut network,
+                &mut partially_opened_vals,
+            )
+            .await;
+            assert!(val1_guess == val1);
+            if !check_all_d(&partially_opened_vals, &mut network).await {
+                panic!("Someone cheated")
             }
         }
 
