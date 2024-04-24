@@ -10,8 +10,10 @@
 // TODO: give panics messages that explains what went wrong. - consider using expect instead.
 use ff::PrimeField;
 
-use crate::{net::agency::Broadcast, protocols::commitments};
+use crate::{net::agency::Broadcast, protocols::commitments::{self, commit, commit_many, verify_many}};
 use derive_more::{Add, AddAssign, Sub, SubAssign};
+
+use super::pedersen::verify;
 
 pub mod preprocessing;
 
@@ -213,11 +215,16 @@ struct SpdzParams<F: PrimeField> {
 #[derive(Debug)]
 pub struct SpdzContext<F: PrimeField> {
     opened_values: Vec<F>,
+    //opened_values: PartiallyOpenedValues<F>,
     closed_values: Vec<Share<F>>,
     // dbgr supplier (det. random bit generator)
     params: SpdzParams<F>,
     preprocessed_values: preprocessing::PreprocessedValues<F>,
 }
+//#[derive(Clone, Copy)]
+//struct PartiallyOpenedValues<F:PrimeField> {
+    //partially_opened_values: Vec<F>,
+//}
 
 //TODO: change this to return an option instead or result, such that it does not return anything if it fails.
 pub async fn open_elm<F>(
@@ -249,7 +256,7 @@ where
     }
 }
 
-pub async fn check_one_elment<F>(
+async fn check_one_elment<F>(
     val_to_check: F,
     network: &mut impl Broadcast,
     share_of_mac_to_val: &F,
@@ -262,7 +269,8 @@ where
     check_one_d(d, network).await
 }
 
-pub async fn check_one_d<F>(d: F, network: &mut impl Broadcast) -> bool
+// An element and its mac are accepted, if the sum of the corresponding d from each party is zero. 
+async fn check_one_d<F>(d: F, network: &mut impl Broadcast) -> bool
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
 {
@@ -282,30 +290,52 @@ where
     (ds_sum == 0.into()) && this_went_well
 }
 
-pub async fn check_all_d<F>(partially_opened_vals: & Vec<F>, network: &mut impl Broadcast) -> bool
+// An element is accepted, if the sum of the corresponding d from each party is zero. 
+// To test many elements at a time, the sums are made as a simle linear combination. 
+// In order to minimize broadcasts we use only one random element, which is then taken to the power of 1,2,...
+// TODO: Consider commiting and bradcasting the random element together with the d's - should be faster. 
+pub async fn check_all_d<F>(partially_opened_vals: Vec<F>, network: &mut impl Broadcast) -> bool
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned +std::convert::Into<u64>,
 {
-    // TODO: consider making a commit to many function
-    // TODO: broadcast many values at a time - that is more efficient. 
-    // Lets do it the naive way first.
+    // TODO: make nice. 
     let mut this_went_well = true;
-    for d in partially_opened_vals{
-        let (c,s) = commitments::commit(d);
-        let cs = network.symmetric_broadcast((c, s)).await.unwrap();
-        let ds = network.symmetric_broadcast(*d).await.unwrap();
-        let dcs = ds.iter().zip(cs.iter()); 
-        for (d, (c, s)) in dcs {
-            let t = commitments::verify_commit(d, c, s);
-            if !t {
-                this_went_well = false;
-            }
-        }
-        let ds_sum: F = ds.iter().sum();
-        if !(ds_sum == 0.into()) || !this_went_well{
+    let (c,s) = commit_many(&partially_opened_vals);
+    let cs = network.symmetric_broadcast((c, s)).await.unwrap();
+    let dss = network.symmetric_broadcast(partially_opened_vals).await.unwrap();
+    let csdss = cs.iter().zip(dss.iter());
+    for ((c,s), ds) in csdss {
+        if ! commitments::verify_many(ds, c, s){
             this_went_well = false;
         }
     }
+    
+    // TODO: This is NOT a propper way to choose a random number!
+    let mut rng = rand::rngs::mock::StepRng::new(42, 7);
+    let r = F::random(&mut rng);
+    let (cr,sr) = commit(&r);
+    let crs = network.symmetric_broadcast((cr, sr)).await.unwrap();
+    let rs = network.symmetric_broadcast(r).await.unwrap();
+    let crsrs = crs.iter().zip(rs.iter());
+    for ((cr,sr), r) in crsrs {
+        if ! commitments::verify_commit(r, cr, sr){
+            this_went_well = false;
+        }
+    }
+    let r_elm:F = rs.iter().sum();
+    let mut sum = F::from_u128(0);
+    for ds in dss{
+        let mut r_elm_base:F = rs.iter().sum();
+        for d in ds{
+            r_elm_base *= r_elm;
+            sum += d*r_elm_base;
+        }
+    }
+
+    if !(sum == F::from_u128(0)){
+        this_went_well = false;
+    }
+
     this_went_well
 }
 
@@ -491,7 +521,6 @@ mod test {
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
     }
-
     #[tokio::test]
     async fn test_sharing_2() {
         type F = Element32;
@@ -550,7 +579,6 @@ mod test {
             res.unwrap();
         }
     }
-
     #[tokio::test]
     async fn test_partial_opening_and_check_all_partial_values_one_by_one() {
         use crate::net::network::InMemoryNetwork;
@@ -652,7 +680,6 @@ mod test {
             res.unwrap();
         }
     }
-
     #[tokio::test]
     async fn test_partial_opening_and_check_all_partial_values_using_check_all() {
         use crate::net::network::InMemoryNetwork;
@@ -727,7 +754,8 @@ mod test {
             )
             .await;
             assert!(val1_guess == val1);
-            if !check_all_d(&partially_opened_vals, &mut network).await {
+            //if !check_all_d(&partially_opened_vals, &mut network).await {
+            if !check_all_d(partially_opened_vals, &mut network).await {
                 panic!("Someone cheated")
             }
         }
