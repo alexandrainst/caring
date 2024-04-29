@@ -1,10 +1,11 @@
-//! (Some versirn of) SPDZ
+//! (Some version of) SPDZ
 //! This SPDZ implementation is primarely based on the following lecture by Ivan Damgård:
 //! (part one:) https://www.youtube.com/watch?v=N80DV3Brds0 (and part two:) https://www.youtube.com/watch?v=Ce45hp24b2E
 //!
 //! We will need some homomorphic encryption or oblivious transfer to enable preprocessing.
 //! But for now that is handled by a dealer.
 //!
+
 
 // TODO: make costum errors.
 use ff::PrimeField;
@@ -227,6 +228,8 @@ pub async fn open_res<F>(
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
 {
+    // TODO: it might be meaningfull to verify that open_values are empty - and cast an error otherwise. 
+    // As one are not allowed to open the result if not all partially opened values have been checked. 
     let opened_shares = network
         .symmetric_broadcast(share_to_open.val)
         .await
@@ -235,12 +238,9 @@ where
     let d = opened_val * mac_key_share - share_to_open.mac;
     let this_went_well = check_one_d(d, network).await;
     if this_went_well {
-        println!("yes this went well");
         opened_val
     } else {
-        // Here we need to cast some err.
-        println!("The check did not go though!");
-        share_to_open.val
+        panic!("The check did not go though");
     }
 }
 
@@ -270,7 +270,7 @@ where
 // In order to minimize broadcasts we use only one random element, which is then taken to the power of 1,2,...
 // TODO: Consider commiting and bradcasting the random element together with the d's - should be faster.
 pub async fn check_all_d<F>(
-    partially_opened_vals: Vec<F>,
+    partially_opened_vals: &mut Vec<F>,
     network: &mut impl Broadcast,
     random_element: F,
 ) -> bool
@@ -279,10 +279,12 @@ where
 {
     // TODO: make nice.
     let mut this_went_well = true;
-    let (c, s) = commit_many(&partially_opened_vals);
+    let (c, s) = commit_many(partially_opened_vals);
+    let partially_opened_vals_copy = partially_opened_vals.to_vec();
+    *partially_opened_vals = vec![];
     let cs = network.symmetric_broadcast((c, s)).await.unwrap();
     let dss = network
-        .symmetric_broadcast(partially_opened_vals)
+        .symmetric_broadcast(partially_opened_vals_copy)
         .await
         .unwrap();
     let csdss = cs.iter().zip(dss.iter());
@@ -748,7 +750,7 @@ mod test {
             .await;
             assert!(val1_guess == val1);
             //if !check_all_d(&partially_opened_vals, &mut network).await {
-            if !check_all_d(partially_opened_vals, &mut network, random_element).await {
+            if !check_all_d(&mut partially_opened_vals, &mut network, random_element).await {
                 panic!("Someone cheated")
             }
         }
@@ -1258,7 +1260,7 @@ mod test {
             // Checking all partially opened values
             let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
             let random_element = F::random(&mut rng);
-            assert!(check_all_d(context.opened_values, &mut network, random_element).await);
+            assert!(check_all_d(&mut context.opened_values, &mut network, random_element).await);
 
             // opening(and checking) val_5
             let res = open_res(val_5, &mut network, &context.params.mac_key_share).await;
