@@ -8,10 +8,13 @@
 
 
 // TODO: make costum errors.
+use crate::{net::Communicate, schemes::interactive::InteractiveShared};
 use ff::PrimeField;
+use async_trait::async_trait;
+use rand::RngCore;
 use crate::{
     net::agency::Broadcast,
-    protocols::commitments::{self, commit, verify_commit, commit_many, verify_many},
+    protocols::commitments::{commit, verify_commit, commit_many, verify_many},
 };
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 
@@ -104,13 +107,69 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
     }
 }
 
+impl<'ctx, F> InteractiveShared<'ctx> for Share<F>
+where F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
+{
+    type Context = &'ctx mut SpdzContext<F>;
+    type Value = F;
+    type Error = ();
+
+    async fn share(
+            ctx: Self::Context,
+            secret: Self::Value,
+            rng: impl RngCore + Send,
+            coms: impl Communicate,
+        ) -> Result<Self, ()> {
+        share(
+            Some(secret), 
+            &mut ctx.preprocessed_values.rand_known_to_me, 
+            &mut ctx.preprocessed_values.rand_known_to_i, 
+            ctx.params.who_am_i, 
+            todo!("who_is_sending"), 
+            ctx.params.mac_key_share, 
+            &mut coms
+        ).await
+    }
+
+
+    async fn symmetric_share(
+        ctx: Self::Context,
+        secret: Self::Value,
+        rng: impl RngCore + Send,
+        coms: impl Communicate,
+    ) -> Result<Vec<Self>, Self::Error> {
+        todo!()
+    }
+    
+    async fn receive_share(
+            ctx: Self::Context,
+            coms: impl Communicate,
+            from: usize,
+        ) -> Result<Self, ()> {
+        share(
+            None, 
+            &mut ctx.preprocessed_values.rand_known_to_me, 
+            &mut ctx.preprocessed_values.rand_known_to_i, 
+            ctx.params.who_am_i, 
+            todo!("who_is_sending"), 
+            ctx.params.mac_key_share, 
+            &mut coms
+        ).await
+    }
+
+    // This might not be the propper way to do recombine - it depends on what exanctly recombine is suppose to mean :)
+    async fn recombine(ctx: Self::Context, share: Self, mut network: impl Communicate) -> Result<F, ()> {
+        Ok(open_res(share, &mut network, &ctx.params.mac_key_share).await)
+    }
+}
+
 pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     op_val: Option<F>,
     rand_known_to_me: &mut preprocessing::RandomKnownToMe<F>,
     rand_known_to_i: &mut preprocessing::RandomKnownToPi<F>,
     who_am_i: usize,
     who_is_sending: usize,
-    mac_key_share: F, //TODO: should this be a share insted? So it dosen't take ownership?
+    mac_key_share: F, //TODO: should this be a share insted of being copied?
     network: &mut impl Broadcast,
 ) -> Result<Share<F>, ()> {
     let is_chosen_one = who_am_i == who_is_sending;
@@ -204,7 +263,7 @@ pub async fn partial_opening<F: PrimeField + serde::Serialize + serde::de::Deser
     partially_opened_vals.push(candidate_val * mac_key_share - share_of_mac_to_candidate_val);
     candidate_val
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SpdzParams<F: PrimeField> {
     mac_key_share: F,
     who_am_i: usize,
@@ -212,7 +271,7 @@ struct SpdzParams<F: PrimeField> {
 
 // The SPDZ context needs to be public atleast to some degree, as it is needed for many operations that we would like to call publicly.
 // If we do not want the context to be public, we should find another way to pass it on.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SpdzContext<F: PrimeField> {
     opened_values: Vec<F>,
     params: SpdzParams<F>,

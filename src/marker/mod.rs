@@ -41,10 +41,10 @@ impl<S> Unverified<S> {
     }
 }
 
-impl<S: InteractiveShared> Verified<S> {
+impl<'ctx, S: InteractiveShared<'ctx>> Verified<S> {
     pub async fn open(
         self,
-        ctx: &S::Context,
+        ctx: S::Context,
         coms: impl Communicate,
     ) -> Result<S::Value, S::Error> {
         S::recombine(ctx, self.0, coms).await
@@ -52,7 +52,7 @@ impl<S: InteractiveShared> Verified<S> {
 
     pub async fn share(
         val: S::Value,
-        ctx: &S::Context,
+        ctx: S::Context,
         rng: impl RngCore + Send,
         coms: impl Communicate,
     ) -> Result<Self, S::Error> {
@@ -61,10 +61,10 @@ impl<S: InteractiveShared> Verified<S> {
     }
 }
 
-impl<S: InteractiveShared> Unverified<S> {
+impl<'ctx, S: InteractiveShared<'ctx>> Unverified<S> {
     pub async fn share_symmetric(
         val: S::Value,
-        ctx: &S::Context,
+        ctx: S::Context,
         rng: impl RngCore + Send,
         coms: impl Communicate,
     ) -> Result<Vec<Self>, S::Error> {
@@ -73,7 +73,7 @@ impl<S: InteractiveShared> Unverified<S> {
     }
 
     pub async fn receive_share(
-        ctx: &S::Context,
+        ctx: S::Context,
         coms: impl Communicate,
         from: usize,
     ) -> Result<Self, S::Error> {

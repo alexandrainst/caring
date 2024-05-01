@@ -35,6 +35,7 @@ use rand::RngCore;
 
 use crate::net::Communicate;
 
+
 /// Currently unused trait, but might be a better way to represent that a share
 /// can be multiplied by a const, however, it could also just be baked into 'Shared' directly.
 pub trait MulByConst<A>:
@@ -143,7 +144,7 @@ pub trait InteractiveMult: Shared {
 pub mod interactive {
     use thiserror::Error;
 
-    use crate::net::Tuneable;
+    use crate::net::{Communicate, Tuneable};
 
     #[derive(Debug, Error)]
     #[error("Communication failure: {0}")]
@@ -155,18 +156,18 @@ pub mod interactive {
     }
 
     use super::*;
-    impl<S, V, C> InteractiveShared for S
+    impl<'ctx, S, V, C> InteractiveShared<'ctx> for S
     where
         S: Shared<Value = V, Context = C> + Send,
         V: Send + Clone,
-        C: Send + Sync + Clone,
+        C: Send + Sync + Clone + 'ctx,
     {
-        type Context = S::Context;
+        type Context = &'ctx S::Context;
         type Value = V;
         type Error = CommunicationError;
 
         async fn share(
-            ctx: &Self::Context,
+            ctx: Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             mut coms: impl Communicate,
@@ -180,7 +181,7 @@ pub mod interactive {
         }
 
         async fn recombine(
-            ctx: &Self::Context,
+            ctx: Self::Context,
             secret: Self,
             mut coms: impl Communicate,
         ) -> Result<V, Self::Error> {
@@ -192,7 +193,7 @@ pub mod interactive {
         }
 
         async fn symmetric_share(
-            ctx: &Self::Context,
+            ctx: Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             mut coms: impl Communicate,
@@ -206,7 +207,7 @@ pub mod interactive {
         }
 
         async fn receive_share(
-            _ctx: &Self::Context,
+            _ctx: Self::Context,
             mut coms: impl Communicate,
             from: usize,
         ) -> Result<Self, Self::Error> {
@@ -216,7 +217,7 @@ pub mod interactive {
         }
     }
 
-    pub trait InteractiveShared:
+    pub trait InteractiveShared<'ctx>:
         Sized
         + Add<Output = Self>
         + Sub<Output = Self>
@@ -225,32 +226,32 @@ pub mod interactive {
         + Clone
         + Sync
     {
-        type Context: Sync + Send + Clone;
+        type Context: Sync + Send + 'ctx;
         type Value: Clone + Send;
         type Error: Send + Sized + 'static;
 
         fn share(
-            ctx: &Self::Context,
+            ctx: Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
 
         fn symmetric_share(
-            ctx: &Self::Context,
+            ctx: Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>>;
 
         fn receive_share(
-            ctx: &Self::Context,
+            ctx: Self::Context,
             coms: impl Communicate,
             from: usize,
         ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
 
         fn recombine(
-            ctx: &Self::Context,
+            ctx: Self::Context,
             secrets: Self,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>>;

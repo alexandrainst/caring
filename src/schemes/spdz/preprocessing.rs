@@ -16,14 +16,14 @@ use crate::{
 };
 
 // ToDo: we should probably make getters for all the fields, and make them private, spdz needs to use the values, but not alter them.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PreprocessedValues<F: PrimeField> {
     pub triplets: Vec<MultiplicationTriple<F>>,
     pub rand_known_to_i: RandomKnownToPi<F>, // consider boxed slices for the outer vec
     pub rand_known_to_me: RandomKnownToMe<F>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MultiplicationTriple<F: PrimeField> {
     //pub shares: (spdz::Share<F>, spdz::Share<F>, spdz::Share<F>),
     pub a: spdz::Share<F>,
@@ -39,12 +39,12 @@ pub fn make_multiplicationtriplet<F: PrimeField>(
     MultiplicationTriple { a, b, c }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RandomKnownToPi<F: PrimeField> {
     pub shares: Vec<Vec<spdz::Share<F>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RandomKnownToMe<F: PrimeField> {
     pub vals: Vec<F>,
 }
