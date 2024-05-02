@@ -41,7 +41,7 @@ jobs:
           path: pycare/dist
 
   windows:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -67,7 +67,7 @@ jobs:
           path: pycare/dist
 
   macos:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         target: [x86_64-apple-darwin, aarch64-apple-darwin]
