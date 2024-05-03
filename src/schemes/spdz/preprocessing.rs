@@ -18,14 +18,29 @@ use crate::{
 // ToDo: we should probably make getters for all the fields, and make them private, spdz needs to use the values, but not alter them.
 #[derive(Debug, Clone)]
 pub struct PreprocessedValues<F: PrimeField> {
-    pub triplets: Vec<MultiplicationTriple<F>>,
+    pub triplets: Triplets<F>,
+    pub for_sharing: ForSharing<F>,
+}
+#[derive(Debug, Clone)]
+pub struct ForSharing<F:PrimeField> {
     pub rand_known_to_i: RandomKnownToPi<F>, // consider boxed slices for the outer vec
     pub rand_known_to_me: RandomKnownToMe<F>,
 }
+#[derive(Debug, Clone)]
+pub struct Triplets<F:PrimeField>{
+    multiplication_triplets: Vec<MultiplicationTriple<F>>,
+}
 
+// TODO: return error instead - a "not enogh preproced elm"-error
+impl<F:PrimeField> Triplets<F> {
+    pub fn get_triplet(&mut self) -> MultiplicationTriple<F>{
+        self.multiplication_triplets.pop().expect("Not enough triplets")
+    }
+}
+
+// TODO: make a getter, they don't need to be set from anywhere else. 
 #[derive(Debug, Clone)]
 pub struct MultiplicationTriple<F: PrimeField> {
-    //pub shares: (spdz::Share<F>, spdz::Share<F>, spdz::Share<F>),
     pub a: spdz::Share<F>,
     pub b: spdz::Share<F>,
     pub c: spdz::Share<F>,
@@ -51,7 +66,6 @@ pub struct RandomKnownToMe<F: PrimeField> {
 
 pub struct SecretValues<F> {
     pub mac_key: F,
-    //secret_shared_elements: Vec<F>,
 }
 
 // A dealer who is not colluding with either of the other parties.
@@ -76,11 +90,13 @@ pub fn dealer_prepross<F: PrimeField>(
             shares: vec![vec![]; number_of_parties],
         };
         let rand_known_to_me = RandomKnownToMe { vals: vec![] };
-        let triplets = vec![];
+        let triplets = Triplets{multiplication_triplets: vec![]};
         let p_preprosvals = PreprocessedValues {
             triplets,
-            rand_known_to_i,
-            rand_known_to_me,
+            for_sharing: ForSharing{
+                rand_known_to_i,
+                rand_known_to_me,
+            },
         };
         let mac_key_share = F::random(&mut rng);
         mac_keys.push(mac_key_share);
@@ -113,10 +129,11 @@ pub fn dealer_prepross<F: PrimeField>(
                     val: ri,
                     mac: r_mac_i,
                 };
-                contexts[i].preprocessed_values.rand_known_to_i.shares[me].push(ri_share);
+                contexts[i].preprocessed_values.for_sharing.rand_known_to_i.shares[me].push(ri_share);
                 if me == i {
                     contexts[me]
                         .preprocessed_values
+                        .for_sharing
                         .rand_known_to_me
                         .vals
                         .push(r);
@@ -130,12 +147,14 @@ pub fn dealer_prepross<F: PrimeField>(
             };
             contexts[number_of_parties - 1]
                 .preprocessed_values
+                .for_sharing
                 .rand_known_to_i
                 .shares[me]
                 .push(r2_share);
             if me == number_of_parties - 1 {
                 contexts[me]
                     .preprocessed_values
+                    .for_sharing
                     .rand_known_to_me
                     .vals
                     .push(r);
@@ -182,7 +201,7 @@ pub fn dealer_prepross<F: PrimeField>(
             };
             let triplet = make_multiplicationtriplet(ai_share, bi_share, ci_share);
 
-            contexts[i].preprocessed_values.triplets.push(triplet);
+            contexts[i].preprocessed_values.triplets.multiplication_triplets.push(triplet);
         }
         let ai_share = spdz::Share { val: a, mac: a_mac };
         let bi_share = spdz::Share { val: b, mac: b_mac };
@@ -192,6 +211,7 @@ pub fn dealer_prepross<F: PrimeField>(
         contexts[number_of_parties - 1]
             .preprocessed_values
             .triplets
+            .multiplication_triplets
             .push(triplet)
     }
 

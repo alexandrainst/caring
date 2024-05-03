@@ -6,6 +6,7 @@ use ff::Field;
 use ff::PrimeField;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use rand::thread_rng;
 
 use crate::algebra::element::Element32;
 // TODO: Find a hashing algorithm of cryptograpic standart to use in commitments
@@ -36,8 +37,8 @@ fn calculate_hash<T: Hash>(t: &T) -> u64 {
 }
 // TODO: The randoness should be based on some randomness generator that is pased on to the commitment
 pub fn commit<F: PrimeField + std::convert::Into<u64>>(val: &F) -> (Commitment, Salt) {
-    // TODO: This is not a propper way to make a random value - there should be a randomness generator in the context
-    let mut rng = rand::rngs::mock::StepRng::new(42, 7);
+    // TODO: consider whether this is the way we wish to make the random value.
+    let mut rng = thread_rng();
     let salt = Salt {
         salt: Element32::random(&mut rng).into(),
     };
@@ -47,8 +48,8 @@ pub fn commit<F: PrimeField + std::convert::Into<u64>>(val: &F) -> (Commitment, 
     (make_commit(vals, salt), salt)
 }
 pub fn commit_many<F: PrimeField + std::convert::Into<u64>>(vals: &Vec<F>) -> (Commitment, Salt) {
-    // TODO: This is not a propper way to make a random value - there should be a randomness generator in the context
-    let mut rng = rand::rngs::mock::StepRng::new(42, 7);
+    // TODO: consider whether this is the way we wish to make the random value.
+    let mut rng = thread_rng();
     let salt = Salt {
         salt: Element32::random(&mut rng).into(),
     };
