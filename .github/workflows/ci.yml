@@ -6,7 +6,7 @@ on:
 jobs:
   test:
     name: cargo test
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Install C compiler
         run: sudo apt-get update && sudo apt-get install -y build-essential
@@ -17,7 +17,7 @@ jobs:
   # Check formatting with rustfmt
   formatting:
     name: cargo fmt
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # Ensure rustfmt is installed and setup problem matcher
