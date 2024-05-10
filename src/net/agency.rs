@@ -28,7 +28,7 @@ use futures::Future;
 use itertools::Itertools;
 
 pub trait Broadcast {
-    type Error: Error + 'static;
+    type Error: Error + Send + 'static;
     // type Error: Error + 'static;
 
     /// Broadcast a message to all other parties.
@@ -67,9 +67,40 @@ pub trait Broadcast {
     fn size(&self) -> usize;
 }
 
+impl<'a, B: Broadcast> Broadcast for &'a mut B {
+    type Error = B::Error;
+
+    fn broadcast(
+        &mut self,
+        msg: &(impl serde::Serialize + Sync),
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> {
+        (**self).broadcast(msg)
+    }
+
+    fn symmetric_broadcast<T>(
+        &mut self,
+        msg: T,
+    ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync {
+            (**self).symmetric_broadcast(msg)
+    }
+
+    fn recv_from<T: serde::de::DeserializeOwned>(
+        &mut self,
+        idx: usize,
+    ) -> impl Future<Output = Result<T, Self::Error>> {
+        (**self).recv_from(idx)
+    }
+
+    fn size(&self) -> usize {
+        (**self).size()
+    }
+}
+
 // TODO: Possible rename this trait as it's name is confusing.
 pub trait Unicast {
-    type Error: Error + 'static;
+    type Error: Error + Send + 'static;
 
     /// Unicast messages to each party
     ///
@@ -108,6 +139,36 @@ pub trait Unicast {
     /// Size of the unicasting network including yourself,
     /// as such there is n-1 outgoing connections
     fn size(&self) -> usize;
+}
+
+impl<'a, U: Unicast> Unicast for &'a mut U {
+    type Error = U::Error;
+
+    fn size(&self) -> usize {
+        (**self).size()
+    }
+
+    fn receive_all<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> impl Future<Output = Result<Vec<T>, Self::Error>> {
+        (**self).receive_all()
+    }
+
+    fn unicast(
+        &mut self,
+        msgs: &[impl serde::Serialize + Sync],
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> {
+        (**self).unicast(msgs)
+    }
+
+    fn symmetric_unicast<T>(
+        &mut self,
+        msgs: Vec<T>,
+    ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync {
+        (**self).symmetric_unicast(msgs)
+    }
 }
 
 use digest::Digest;

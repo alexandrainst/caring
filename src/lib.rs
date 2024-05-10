@@ -2,6 +2,8 @@
 #![allow(refining_impl_trait)]
 #![allow(dead_code)]
 
+#![feature(async_fn_traits)]
+
 mod algebra;
 pub mod net;
 pub mod ot;
@@ -11,3 +13,4 @@ pub mod schemes;
 mod help;
 #[cfg(test)]
 mod testing;
+pub mod marker;

@@ -27,17 +27,14 @@ pub mod spdz;
 
 use std::{
     error::Error,
+    future::Future,
     ops::{Add, Sub},
 };
 
-use futures::Future;
-
 use rand::RngCore;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::net::{
-    agency::{Broadcast, Unicast},
-    Tuneable,
-};
+use crate::net::Communicate;
 
 /// Currently unused trait, but might be a better way to represent that a share
 /// can be multiplied by a const, however, it could also just be baked into 'Shared' directly.
@@ -73,7 +70,7 @@ pub trait Shared:
     /// * `secret`: secret value to share
     /// * `rng`: cryptographic secure random number generator
     ///
-    fn share(ctx: &Self::Context, secret: Self::Value, rng: &mut impl RngCore) -> Vec<Self>;
+    fn share(ctx: &Self::Context, secret: Self::Value, rng: impl RngCore) -> Vec<Self>;
 
     /// Recombine the shares back into a secret,
     /// returning an value if successfull.
@@ -87,11 +84,11 @@ pub trait Shared:
     fn share_many(
         ctx: &Self::Context,
         secrets: &[Self::Value],
-        rng: &mut impl RngCore,
+        mut rng: impl RngCore,
     ) -> Vec<Vec<Self>> {
         let shares: Vec<_> = secrets
             .iter()
-            .map(|secret| Self::share(ctx, secret.clone(), rng))
+            .map(|secret| Self::share(ctx, secret.clone(), &mut rng))
             .collect();
         crate::help::transpose(shares)
     }
@@ -121,20 +118,7 @@ pub trait Shared:
     }
 }
 
-pub trait SharedVec:
-    Sized
-    + Add<Output = Self>
-    + Sub<Output = Self>
-    + serde::Serialize
-    + serde::de::DeserializeOwned
-    + Clone
-{
-    type Value;
-    type Context: Send + Clone;
 
-    fn share(ctx: &Self::Context, secrets: &[Self::Value], rng: &mut impl RngCore) -> Self;
-    fn recombine(ctx: &Self::Context, shares: &[Self], rng: &mut impl RngCore) -> Vec<Self::Value>;
-}
 
 /// Support for multiplication of two shares for producing a share.
 ///
@@ -151,10 +135,99 @@ pub trait InteractiveMult: Shared {
     ///
     /// Returns a result which contains the shared value corresponding
     /// to the multiplication of `a` and `b`.
-    fn interactive_mult<U: Unicast + Tuneable + Broadcast>(
+    fn interactive_mult<U: Communicate>(
         ctx: &Self::Context,
         net: &mut U,
         a: Self,
         b: Self,
     ) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
 }
+
+mod interactive {
+    use super::*;
+    impl<S, V, C> InteractiveShared for S where S: Shared<Value = V, Context = C> + Send, V: Send + Clone, C: Send + Sync + Clone  {
+        type Context = S::Context;
+        type Value = V;
+        type Error = Box<dyn Error + Send>;
+
+        async fn share(
+            ctx: &Self::Context,
+            secret: Self::Value,
+            rng: impl RngCore + Send,
+            mut coms: impl Communicate,
+        ) -> Result<Self, Self::Error> {
+            let shares = S::share(ctx, secret, rng);
+            let my_share = shares[coms.id()].clone();
+            coms.unicast(&shares).await.map_err(|e| {
+                let e : Box<dyn Error + Send> = Box::new(e);
+                e
+            }
+            )?;
+            Ok(my_share)
+        }
+
+        async fn recombine(
+            ctx: &Self::Context,
+            secret: Self,
+            mut coms: impl Communicate,
+        ) -> Result<V, Self::Error> {
+            let shares = coms.symmetric_broadcast(secret).await.unwrap();
+            Ok(Shared::recombine(ctx, &shares).unwrap())
+        }
+
+        async fn symmetric_share(
+            ctx: &Self::Context,
+            secret: Self::Value,
+            rng: impl RngCore + Send,
+            mut coms: impl Communicate,
+        ) -> Result<Vec<Self>, Self::Error> {
+            let shares = S::share(ctx, secret, rng);
+            let shared = coms.symmetric_unicast(shares).await.unwrap();
+            Ok(shared)
+        }
+    }
+
+
+    pub trait InteractiveShared:
+        Sized
+        + Add<Output = Self>
+        + Sub<Output = Self>
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + Clone
+        + Sync
+        {
+            type Context: Sync + Send + Clone;
+            type Value: Clone + Send;
+            type Error: Send + Sized + 'static;
+
+            fn share(
+                ctx: &Self::Context,
+                secret: Self::Value,
+                rng: impl RngCore + Send,
+                coms: impl Communicate,
+            ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
+
+            fn symmetric_share(
+                ctx: &Self::Context,
+                secret: Self::Value,
+                rng: impl RngCore + Send,
+                coms: impl Communicate,
+            ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>>;
+
+            fn recombine(
+                ctx: &Self::Context,
+                secrets: Self,
+                coms: impl Communicate,
+            ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>>;
+        }
+}
+
+pub trait Verify: Sized {
+    type Args: Send;
+
+    fn verify(&self, coms: impl Communicate, args: Self::Args) -> impl Future<Output = bool> + Send;
+
+    fn verify_many(batch: &[Self], coms: impl Communicate, args: Self::Args) -> impl Future<Output = Vec<bool>> + Send;
+}
+

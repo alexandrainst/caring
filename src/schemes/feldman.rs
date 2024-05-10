@@ -38,7 +38,7 @@ pub fn share<F, G>(
     val: F,
     ids: &[F],
     threshold: u64,
-    rng: &mut impl RngCore,
+    mut rng: impl RngCore,
 ) -> Vec<VerifiableShare<F, G>>
 where
     G: std::ops::Mul<F, Output = G>,
@@ -55,7 +55,7 @@ where
 
     // Sample random t-degree polynomial
     let n = ids.len();
-    let poly = (1..threshold).map(|_| F::random(&mut *rng));
+    let poly = (1..threshold).map(|_| F::random(&mut rng));
     // I want to avoid this allocation :(
     let poly: Box<[F]> = iter::once(val).chain(poly).collect();
     let mac_poly: Vector<_> = poly.iter().map(|a| G::generator() * *a).collect();
@@ -144,7 +144,7 @@ impl<
     type Context = ShamirParams<F>;
     type Value = F;
 
-    fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
+    fn share(ctx: &Self::Context, secret: F, rng: impl RngCore) -> Vec<Self> {
         share::<F, G>(secret, &ctx.ids, ctx.threshold, rng)
     }
 
@@ -267,7 +267,7 @@ pub fn share_many<F, G>(
     vals: &[F],
     ids: &[F],
     threshold: u64,
-    rng: &mut impl RngCore,
+    mut rng: impl RngCore,
 ) -> Vec<VecVerifiableShare<F, G>>
 // FIX: This `where` clause is a bit much, it does however work.
 where
@@ -289,7 +289,7 @@ where
     let polys: Vec<_> = vals
         .iter()
         .map(|v| {
-            let mut p = Polynomial::<F>::random(threshold as usize - 1, rng);
+            let mut p = Polynomial::<F>::random(threshold as usize - 1, &mut rng);
             p.0[0] = *v;
             p
         })

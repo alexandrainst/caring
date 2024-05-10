@@ -357,6 +357,31 @@ impl<C: SplitChannel> Broadcast for Network<C> {
     }
 }
 
+impl<C: SplitChannel> Tuneable for Network<C> {
+    type Error = C::Error;
+
+    fn id(&self) -> usize {
+        self.index
+    }
+
+    async fn recv_from<T: serde::de::DeserializeOwned>(
+        &mut self,
+        idx: usize,
+    ) -> Result<T, Self::Error> {
+        let idx = self.id_to_index(idx);
+        self.connections[idx].recv().await
+    }
+
+    async fn send_to<T: serde::Serialize + Sync>(
+        &mut self,
+        idx: usize,
+        msg: &T,
+    ) -> Result<(), Self::Error> {
+        let idx = self.id_to_index(idx);
+        self.connections[idx].send(msg).await
+    }
+}
+
 /// Network containing only duplex connections.
 /// Used for local testing.
 pub type InMemoryNetwork = Network<DuplexConnection>;

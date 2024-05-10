@@ -31,15 +31,15 @@ impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
         let b = F::random(&mut rng);
         let c: F = a * b;
         // Share (preproccess)
-        let a = S::share(ctx, a, rng);
-        let b = S::share(ctx, b, rng);
-        let c = S::share(ctx, c, rng);
+        let a = S::share(ctx, a, &mut rng);
+        let b = S::share(ctx, b, &mut rng);
+        let c = S::share(ctx, c, &mut rng);
         itertools::izip!(a, b, c)
             .map(|(a, b, c)| Self { shares: (a, b, c) })
             .collect()
     }
 
-    pub fn fake_many(ctx: &C, mut rng: &mut impl RngCore, count: usize) -> Vec<Vec<Self>> {
+    pub fn fake_many(ctx: &C, mut rng: impl RngCore, count: usize) -> Vec<Vec<Self>> {
         let zipped = iter::from_fn(|| {
             let a = F::random(&mut rng);
             let b = F::random(&mut rng);
@@ -49,9 +49,9 @@ impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
         .take(count);
         let (a, b, c): (Vec<_>, Vec<_>, Vec<_>) = multiunzip(zipped);
         // Share (preproccess)
-        let a = S::share_many(ctx, &a, rng);
-        let b = S::share_many(ctx, &b, rng);
-        let c = S::share_many(ctx, &c, rng);
+        let a = S::share_many(ctx, &a, &mut rng);
+        let b = S::share_many(ctx, &b, &mut rng);
+        let c = S::share_many(ctx, &c, &mut rng);
 
         itertools::izip!(a, b, c)
             .map(|(a, b, c)| {
@@ -164,12 +164,12 @@ pub struct BeaverSquare<S: Shared> {
 }
 
 impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverSquare<S> {
-    pub fn fake(ctx: &C, mut rng: &mut impl RngCore) -> Vec<Self> {
+    pub fn fake(ctx: &C, mut rng: impl RngCore) -> Vec<Self> {
         let a = F::random(&mut rng);
         let c: F = a * a;
         // Share (preproccess)
-        let a = S::share(ctx, a, rng);
-        let c = S::share(ctx, c, rng);
+        let a = S::share(ctx, a, &mut rng);
+        let c = S::share(ctx, c, &mut rng);
         itertools::izip!(a, c)
             .map(|(a, c)| Self {
                 val: a,

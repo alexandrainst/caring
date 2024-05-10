@@ -62,7 +62,7 @@ impl<F: Field> Polynomial<F> {
     ///
     /// * `degree`: the degree of the polynomial
     /// * `rng`: random number generator to use
-    pub fn random(degree: usize, mut rng: &mut impl RngCore) -> Self {
+    pub fn random(degree: usize, mut rng: impl RngCore) -> Self {
         (0..=degree).map(|_| F::random(&mut rng)).collect()
     }
 }

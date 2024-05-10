@@ -15,7 +15,7 @@ use crate::{net::Tuneable, schemes::InteractiveMult};
 #[derive(Debug, Clone, Copy, Add, Sub, Serialize, Deserialize)]
 pub struct Share<F: Field>(F, F);
 
-pub fn share<F: Field>(secret: F, mut rng: &mut impl RngCore) -> [Share<F>; 3] {
+pub fn share<F: Field>(secret: F, mut rng: impl RngCore) -> [Share<F>; 3] {
     let mut shares = [0; 3].map(|_| F::random(&mut rng));
     let sum = shares[0] + shares[1] + shares[2];
     shares[0] += secret - sum;
@@ -31,8 +31,8 @@ impl<F: Field + Serialize + DeserializeOwned> super::Shared for Share<F> {
     type Context = ();
     type Value = F;
 
-    fn share(_ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
-        share(secret, rng).to_vec()
+    fn share(_ctx: &Self::Context, secret: F, mut rng: impl RngCore) -> Vec<Self> {
+        share(secret, &mut rng).to_vec()
     }
 
     fn recombine(_ctx: &Self::Context, shares: &[Self]) -> Option<F> {
