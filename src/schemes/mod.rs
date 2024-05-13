@@ -32,13 +32,12 @@ use std::{
 };
 
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::net::Communicate;
 
 /// Currently unused trait, but might be a better way to represent that a share
 /// can be multiplied by a const, however, it could also just be baked into 'Shared' directly.
-trait MulByConst<A>:
+pub trait MulByConst<A>:
     Shared<Value = A> + std::ops::Mul<A, Output = Self> + std::ops::MulAssign<A>
 {
 }
@@ -143,12 +142,27 @@ pub trait InteractiveMult: Shared {
     ) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
 }
 
-mod interactive {
+pub mod interactive {
+    use thiserror::Error;
+
+    use crate::net::Tuneable;
+
+
+    #[derive(Debug, Error)]
+    #[error("Communication failure: {0}")]
+    pub struct CommunicationError(Box<dyn Error + Send>);
+    impl CommunicationError {
+        fn new(e: impl Error + Send + 'static) -> Self {
+            Self(Box::new(e))
+        }
+
+    }
+
     use super::*;
     impl<S, V, C> InteractiveShared for S where S: Shared<Value = V, Context = C> + Send, V: Send + Clone, C: Send + Sync + Clone  {
         type Context = S::Context;
         type Value = V;
-        type Error = Box<dyn Error + Send>;
+        type Error = CommunicationError;
 
         async fn share(
             ctx: &Self::Context,
@@ -158,11 +172,7 @@ mod interactive {
         ) -> Result<Self, Self::Error> {
             let shares = S::share(ctx, secret, rng);
             let my_share = shares[coms.id()].clone();
-            coms.unicast(&shares).await.map_err(|e| {
-                let e : Box<dyn Error + Send> = Box::new(e);
-                e
-            }
-            )?;
+            coms.unicast(&shares).await.map_err(CommunicationError::new)?;
             Ok(my_share)
         }
 
@@ -171,7 +181,7 @@ mod interactive {
             secret: Self,
             mut coms: impl Communicate,
         ) -> Result<V, Self::Error> {
-            let shares = coms.symmetric_broadcast(secret).await.unwrap();
+            let shares = coms.symmetric_broadcast(secret).await.map_err(CommunicationError::new)?;
             Ok(Shared::recombine(ctx, &shares).unwrap())
         }
 
@@ -182,8 +192,18 @@ mod interactive {
             mut coms: impl Communicate,
         ) -> Result<Vec<Self>, Self::Error> {
             let shares = S::share(ctx, secret, rng);
-            let shared = coms.symmetric_unicast(shares).await.unwrap();
+            let shared = coms.symmetric_unicast(shares).await.map_err(CommunicationError::new)?;
             Ok(shared)
+        }
+
+        async fn receive_share(
+            _ctx: &Self::Context,
+            mut coms: impl Communicate,
+            from: usize,
+        ) -> Result<Self, Self::Error> {
+            let s = Tuneable::recv_from(&mut coms, from).await;
+            let s = s.map_err(CommunicationError::new)?;
+            Ok(s)
         }
     }
 
@@ -214,6 +234,12 @@ mod interactive {
                 rng: impl RngCore + Send,
                 coms: impl Communicate,
             ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>>;
+
+            fn receive_share(
+                ctx: &Self::Context,
+                coms: impl Communicate,
+                from: usize,
+            ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
 
             fn recombine(
                 ctx: &Self::Context,

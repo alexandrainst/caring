@@ -9,5 +9,5 @@ name = "caring"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.21", features = ["abi3-py37", "generate-import-lib"]}
+pyo3 = { version = "0.21", features = ["abi3-py37", "generate-import-lib", "extension-module"]}
 wecare = { path = "../wecare" }

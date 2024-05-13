@@ -1,8 +1,9 @@
 mod exptree;
 
+use rand::RngCore;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{net::Communicate, schemes::{Shared, Verify}};
+use crate::{net::Communicate, schemes::{interactive::InteractiveShared, Shared, Verify}};
 
 
 #[repr(transparent)]
@@ -31,9 +32,36 @@ impl<S: Verify> Unverified<S> {
             None
         }
     }
+}
 
+impl<S> Unverified<S> {
     pub fn assume_verified(self) -> Verified<S> {
         Verified(self.0)
+    }
+}
+
+
+impl<S: InteractiveShared> Verified<S> {
+    pub async fn open(self, ctx: &S::Context, coms: impl Communicate) -> Result<S::Value, S::Error> {
+        S::recombine(ctx, self.0, coms).await
+    }
+
+    pub async fn share(val: S::Value, ctx: &S::Context, rng: impl RngCore + Send, coms: impl Communicate) -> Result<Self, S::Error> {
+        let s = S::share(ctx, val, rng, coms).await?;
+        Ok(Self(s))
+    }
+
+}
+
+impl<S: InteractiveShared> Unverified<S> {
+    pub async fn share_symmetric(val: S::Value, ctx: &S::Context, rng: impl RngCore + Send, coms: impl Communicate) -> Result<Vec<Self>, S::Error> {
+        let s = S::symmetric_share(ctx, val, rng, coms).await?;
+        Ok(s.into_iter().map(Self).collect())
+    }
+
+    pub async fn receive_share(ctx: &S::Context, coms: impl Communicate, from: usize) -> Result<Self, S::Error> {
+        let s = S::receive_share(ctx, coms, from).await?;
+        Ok(Self(s))
     }
 }
 
@@ -58,18 +86,12 @@ impl<S: Verify> Unverified<Vec<S>> {
         }).collect();
         Verified(res)
     }
-
-
-    pub fn assume_verified(self) -> Verified<S> {
-        todo!()
-    }
 }
 
 // Pure boring manual operator implementations
 // Could be done with some macros instead.
 mod ops {
-    use std::ops::{Add, Sub};
-
+    use std::ops::{Add, Mul, Sub};
     use crate::schemes::Shared;
 
     use super::*;
@@ -121,8 +143,23 @@ mod ops {
             Self(self.0 - rhs.0)
         }
     }
-}
 
+    impl<S: Shared> Mul<S::Value> for Verified<S> where S: Mul<S::Value, Output=S> {
+        type Output = Self;
+
+        fn mul(self, rhs: S::Value) -> Self::Output {
+            Self(self.0 * rhs)
+        }
+    }
+
+    impl<S: Shared> Mul<S::Value> for Unverified<S> where S: Mul<S::Value, Output=S> {
+        type Output = Self;
+
+        fn mul(self, rhs: S::Value) -> Self::Output {
+            Self(self.0 * rhs)
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -142,7 +179,7 @@ mod test {
             me: 0,
         };
         let mut rng = rngs::mock::StepRng::new(0, 0);
-        let s  = mock::Share::share(&ctx, Mod11(3), &mut rng);
+        let s  = <mock::Share<Mod11> as Shared>::share(&ctx, Mod11(3), &mut rng);
         let s = Verified(s[0]);
         let s0 = s.clone();
         let s = s0 + s;
