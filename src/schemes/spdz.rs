@@ -20,7 +20,8 @@ use derive_more::{Add, AddAssign, Sub, SubAssign};
 
 use self::preprocessing::ForSharing;
 
-mod preprocessing;
+pub mod preprocessing;
+use std::path::Path;
 
 // Should we allow Field or use PrimeField?
 #[derive(
@@ -166,6 +167,7 @@ pub async fn share_many<F: PrimeField + serde::Serialize + serde::de::Deserializ
     who_is_sending: usize,
     network: &mut impl Broadcast,
 ) -> Vec<Share<F>> {
+    //let mut res = op_vals.iter().map(|&op_val| async{share(op_val, for_sharing, who_is_sending, params, network).await.expect("...")}).collect()
     let mut res = vec![];
     for op_val in op_vals {
         res.push(share(op_val, for_sharing, who_is_sending, params, network).await.expect("something went wrong in sharing"));
@@ -263,7 +265,7 @@ async fn partial_opening<F: PrimeField + serde::Serialize + serde::de::Deseriali
     partially_opened_vals.push(candidate_val * params.mac_key_share - candidate_share.mac);
     candidate_val
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpdzParams<F: PrimeField> {
     mac_key_share: F,
     who_am_i: usize,
@@ -271,7 +273,7 @@ pub struct SpdzParams<F: PrimeField> {
 
 // The SPDZ context needs to be public atleast to some degree, as it is needed for many operations that we would like to call publicly.
 // If we do not want the context to be public, we probably need some getter functions - and some alter functions. (TODO)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpdzContext<F: PrimeField> {
     opened_values: Vec<F>,
     params: SpdzParams<F>,
@@ -317,16 +319,9 @@ where
     let cs = network.symmetric_broadcast((c, s)).await.unwrap();
     let ds = network.symmetric_broadcast(d).await.unwrap();
     let dcs = ds.iter().zip(cs.iter());
-    let mut this_went_well = true;
-    for (d, (c, s)) in dcs {
-        let t = verify_commit(d, c, s);
-        if !t {
-            this_went_well = false;
-        }
-    }
-
+    let verify_commitments = dcs.fold(true, |acc, (d, (c, s))| verify_commit(d, c, s) && acc);
     let ds_sum: F = ds.iter().sum();
-    (ds_sum == 0.into()) && this_went_well
+    (ds_sum == 0.into()) && verify_commitments
 }
 
 // An element is accepted, if the sum of the corresponding d from each party is zero.
@@ -344,29 +339,20 @@ where
 {
     // TODO: make nice.
     let number_of_ds = partially_opened_vals.len();
-    let mut this_went_well = true;
     let mut partially_opened_vals_copy = partially_opened_vals.to_vec();
     let new_vec = &mut vec![];
     new_vec.append(partially_opened_vals);
-    // We add an additional random element to the vector containing the d's of partially opendend values.
     new_vec.append(&mut vec![random_element]);
     partially_opened_vals_copy.append(&mut vec![random_element]);
-    //let (c, s) = commit_many(partially_opened_vals);
     let (c, s) = commit_many(new_vec);
-    //*partially_opened_vals = vec![];
     let cs = network.symmetric_broadcast((c, s)).await.unwrap();
     let mut dss = network
         .symmetric_broadcast(partially_opened_vals_copy)
         .await
         .unwrap();
     let csdss = cs.iter().zip(dss.iter());
-    for ((c, s), ds) in csdss {
-        if !(verify_many(ds, c, s)) {
-            //this_went_well = false;
-            return false
-        }
-    }
-
+    let this_went_well = csdss.fold(true, |acc, ((c,s),ds)| acc && verify_many(ds, c, s));
+    
     // From each of the vectors we resived from the other parties, we pop of the random element in the end and use it to construct a shared random element.
     let r_elm = (&mut dss).iter_mut().fold(F::from_u128(0), |acc, ds| acc + ds.pop().expect("there is atleast one elm"));
     // From one shared random element we construct a number of elements that are hard to predict:
@@ -378,22 +364,13 @@ where
         let rds = r_elms.iter().zip(ds.clone());
         sum = rds.fold(sum, |acc, (r, d)| acc + d*r);
     }
-
-    if !(sum == F::from_u128(0)) {
-        //this_went_well = false;
-        return false
-    }
-
-    this_went_well
+    this_went_well && (sum == F::from_u128(0))
 }
 
 // TODO: find a more efficent way to to take the power of an element.
-fn power<F: std::ops::MulAssign + Clone>(base:F, exp:usize)->F{
-    let mut res = base.clone();
-    for _i in 1..exp{
-        res *= base.clone();
-    }
-    res
+fn power<F: std::ops::MulAssign + Clone + std::ops::Mul<Output = F>>(base:F, exp:usize)->F{
+    assert!(exp>0);
+    (0..exp-1).fold(base.clone(), |acc, _| acc*base.clone() )
 }
 
 #[cfg(test)]
@@ -1331,6 +1308,7 @@ mod test {
     fn test_power(){
         type F = Element32;
         let a:F = F::from_u128(12u128);
+        assert!(a == power(a, 1)); 
         let aa = a*a;
         assert!(aa == power(a, 2)); 
         let aaa = a*a*a;
@@ -1343,7 +1321,76 @@ mod test {
         assert!(aaaaaa == power(a, 6)); 
 
     }
-    
+    #[test]
+    fn test_dealer_writing_to_file(){
+        
+        // preprosessing by dealer
+        type F = Element32;
+        let file_names = vec![Path::new("src/schemes/spdz/context2.bin"), Path::new("src/schemes/spdz/context1.bin")] ;
+        let known_to_each = vec![1, 2];
+        let number_of_triplets = 2;
+        preprocessing::write_preproc_to_file(
+            file_names.clone(),
+            known_to_each,
+            number_of_triplets,
+            F::from_u128(0u128),
+        ).unwrap();
+        let p1_context: SpdzContext<F> = preprocessing::read_preproc_from_file(
+            file_names[0],
+        );
+        let p2_context: SpdzContext<F> = preprocessing::read_preproc_from_file(
+            file_names[1],
+        );
+        // unpacking
+        let p1_params = p1_context.params;
+        let p2_params = p2_context.params;
+        let mac = p1_params.mac_key_share + p2_params.mac_key_share;
+        let mut p1_preprocessed = p1_context.preprocessed_values;
+        let mut p2_preprocessed = p2_context.preprocessed_values;
+        let p1_known_to_pi = p1_preprocessed.for_sharing.rand_known_to_i.shares;
+        let p2_known_to_pi = p2_preprocessed.for_sharing.rand_known_to_i.shares;
+        let p1_known_to_me = p1_preprocessed.for_sharing.rand_known_to_me.vals;
+        let p2_known_to_me = p2_preprocessed.for_sharing.rand_known_to_me.vals;
+        let p1_triplet_1 = p1_preprocessed.triplets.get_triplet();
+        let p2_triplet_1 = p2_preprocessed.triplets.get_triplet();
+        let p1_triplet_2 = p1_preprocessed.triplets.get_triplet();
+        let p2_triplet_2 = p2_preprocessed.triplets.get_triplet();
+
+
+        // Testing
+        let r = p1_known_to_pi[0][0] + p2_known_to_pi[0][0];
+        let r2 = p1_known_to_me[0];
+        assert!(r.val == r2);
+        assert!(r.mac == r2 * mac);
+
+        let s = p1_known_to_pi[1][0] + p2_known_to_pi[1][0];
+        let s2 = p2_known_to_me[0];
+        assert!(s.val == s2);
+        assert!(s.mac == s2 * mac);
+
+        let s1 = p1_known_to_pi[1][1] + p2_known_to_pi[1][1];
+        let s3 = p2_known_to_me[1];
+        assert!(s1.val == s3);
+        assert!(s1.mac == s3 * mac);
+
+        let a1 = p1_triplet_1.a + p2_triplet_1.a;
+        let b1 = p1_triplet_1.b + p2_triplet_1.b;
+        let c1 = p1_triplet_1.c + p2_triplet_1.c;
+
+        assert!(a1.val * b1.val == c1.val);
+        assert!(a1.val * mac == a1.mac);
+        assert!(b1.val * mac == b1.mac);
+        assert!(c1.val * mac == c1.mac);
+
+        let a2 = p1_triplet_2.a + p2_triplet_2.a;
+        let b2 = p1_triplet_2.b + p2_triplet_2.b;
+        let c2 = p1_triplet_2.c + p2_triplet_2.c;
+
+        assert!(a2.val * b2.val == c2.val);
+        assert!(a2.val * mac == a2.mac);
+        assert!(b2.val * mac == b2.mac);
+        assert!(c2.val * mac == c2.mac);
+    }
     // TODO: test checking - tjek that it can fail.
     // TODO: test errors - in general test that stuff fails when it has to.
 }
