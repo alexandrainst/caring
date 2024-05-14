@@ -92,9 +92,9 @@ pub fn read_preproc_from_file<F:PrimeField +serde::Serialize + serde::de::Deseri
     file_name: &Path, 
 ) -> SpdzContext<F>{
     let mut new_buffer = Vec::new();
-    let mut file = File::open(file_name).unwrap();
-    file.read_to_end(&mut new_buffer).unwrap();
-    let new_context: SpdzContext<F> = bincode::deserialize(&new_buffer).unwrap();
+    let mut file = File::open(file_name).expect("open file");
+    file.read_to_end(&mut new_buffer).expect("read to end");
+    let new_context: SpdzContext<F> = bincode::deserialize(&new_buffer).expect("deserialize");
     new_context
 }
 pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(

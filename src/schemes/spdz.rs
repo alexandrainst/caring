@@ -271,13 +271,19 @@ pub struct SpdzParams<F: PrimeField> {
     who_am_i: usize,
 }
 
+impl<F: PrimeField> SpdzParams<F> {
+    pub fn who_am_i(&self) -> usize{
+        self.who_am_i
+    }
+}
+
 // The SPDZ context needs to be public atleast to some degree, as it is needed for many operations that we would like to call publicly.
 // If we do not want the context to be public, we probably need some getter functions - and some alter functions. (TODO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpdzContext<F: PrimeField> {
-    opened_values: Vec<F>,
-    params: SpdzParams<F>,
-    preprocessed_values: preprocessing::PreprocessedValues<F>,
+    pub opened_values: Vec<F>,
+    pub params: SpdzParams<F>,
+    pub preprocessed_values: preprocessing::PreprocessedValues<F>,
 }
 
 // TODO: return an option or a result instead. - result probably makes most sense, but then we might want the costom errors first
@@ -288,7 +294,7 @@ pub async fn open_res<F>(
     opened_values: &Vec<F>,
 ) -> F
 where
-    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
+    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {   if !opened_values.is_empty() {
         panic!("dont open if there are unchecked open values") // TODO rerun error instead 
         // TODO: consider just calling check all - needs a random element though - either a generator or an element. 
@@ -313,7 +319,7 @@ where
 // An element and its mac are accepted, if the sum of the corresponding d from each party is zero.
 async fn check_one_d<F>(d: F, network: &mut impl Broadcast) -> bool
 where
-    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
+    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
     let (c, s) = commit(&d);
     let cs = network.symmetric_broadcast((c, s)).await.unwrap();
