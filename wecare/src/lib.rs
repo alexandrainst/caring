@@ -1,12 +1,8 @@
 use std::{net::SocketAddr, time::Duration};
-//use ff::PrimeField;
 use caring::{net::network::TcpNetwork, schemes::{feldman, shamir::ShamirParams, spdz::{self, preprocessing}}};
 use rand::thread_rng;
 use std::path::Path;
-//use crate::algebra::element::Element32;
 
-//pub struct AdderEngine<F: PrimeField> {
-//pub struct AdderEngine<F> {
 pub struct AdderEngine {
     network: TcpNetwork,
     runtime: tokio::runtime::Runtime,
@@ -14,8 +10,6 @@ pub struct AdderEngine {
     context: spdz::SpdzContext<curve25519_dalek::Scalar>,
 }
 
-//impl<F: PrimeField> AdderEngine<F> {
-//impl<F> AdderEngine<F> {
 impl AdderEngine {
     pub fn shutdown(self) {
         let AdderEngine { network, runtime, .. } = self;
@@ -40,7 +34,6 @@ fn from_offset(num: u128) -> f64 {
 }
 
 // We start allowing just one element.
-//pub fn mpc_sum<F>(engine: &mut AdderEngine<F>, nums: &[f64]) -> Option<Vec<f64>> {
 pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
     let AdderEngine {
         network,
@@ -65,18 +58,9 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
             .collect();
 
 
-        let mut rng = thread_rng();
-        // TODO: Alterring begins here:
-        //let who_am_i = context.params.who_am_i;
-        //let ctx = engine.context;
-        // TODO: here is a problem. Spdz is not symetric in the same way. 
-        // TODO - continued: If everybody always shares, we mith be able to do it, by simply looping though all parties - letting each be the sender. 
-        //let share = spdz::share(nums, context, who_is_sending, network); 
         let number_of_parties = parties.len();
-        //TODO: we need to transform nums into field elements, 
         let val = curve25519_dalek::Scalar::from(nums[0]);
         let who_am_i = context.params.who_am_i();
-        //let mut shares: [spdz::Share; number_of_parties];
         let mut shares = vec![];
         for i in 0..number_of_parties{
             if i == who_am_i {
@@ -88,20 +72,6 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
         }
         // TODO: we might need a share_many and a open_res_many that works vectorized... 
 
-        //let shares = feldman::share_many::<
-            //curve25519_dalek::Scalar,
-            //curve25519_dalek::RistrettoPoint,
-        //>(&nums, &parties, *threshold, &mut rng);
-
-        //// share my shares.
-        //let shares = network.symmetric_unicast(shares).await.expect("Sharing shares");
-
-        //let my_id = curve25519_dalek::Scalar::from(network.index as u32 + 1);
-        //let ctx = ShamirParams { ids: parties, threshold: *threshold };
-        //for share in shares.iter() {
-            //assert_eq!(share.x, my_id);
-        //}
-
         // compute
         //let my_result: curve25519_dalek::Scalar = shares.into_iter().sum();
         let mut my_result = shares.pop().unwrap();
@@ -109,21 +79,16 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
             my_result += shares.pop().unwrap()
         }
 
-
-        //let open_shares: Vec<feldman::VecVerifiableShare<_,_>> =
-            //network.symmetric_broadcast(my_result).await.expect("Publishing shares");
-
-        //for (share, id) in open_shares.iter().zip(&context.ids) {
-            //assert_eq!(share.x, *id);
-        //}
-
         // reconstruct
         //assert!(spdz::check_all_d(context.open_values, network, random_element).await); - there have been no partial openings. 
-        let res = spdz::open_res(my_result, network, &context.params, &context.opened_values).await;
-        let res_converted_1 = res.as_bytes()[0..128/8].try_into().expect("hope is a light shade of green");
-        let res_converted_2 = u128::from_le_bytes(res_converted_1);
-        let res_converted_3 = from_offset(res_converted_2);
-        let res = res_converted_3;
+        let res = from_offset(
+            u128::from_le_bytes(
+                spdz::open_res(my_result, network, &context.params, &context.opened_values).await
+                    .as_bytes()[0..128/8]
+                    .try_into().expect("convertion between types should go well"
+                )
+            )
+        );
         //let res = feldman::reconstruct_many(&ctx, &open_shares).expect("Failed to validate")
             //.into_iter()
             //.map(|x| x.as_bytes()[0..128/8].try_into().expect("Should be infalliable"))
@@ -163,7 +128,11 @@ pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: &Path)
         .unwrap();
     let network = TcpNetwork::connect(my_addr, &others);
     let network = runtime.block_on(network).map_err(|_| MpcError("Failed to setup network"))?;
-    let context = preprocessing::read_preproc_from_file(file_name);
+    let mut context = preprocessing::read_preproc_from_file(file_name);
+    // Notice: This is a hack and only works as long as the parties share the same number of elements. 
+    // To make a propper solotion, the id must be known befor the preprocessing is made.
+    // To ensure that the right number of elements are made for each party.
+    context.params.who_am_i = network.index;
     let engine = AdderEngine {
         network,
         runtime,

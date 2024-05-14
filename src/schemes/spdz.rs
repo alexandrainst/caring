@@ -10,7 +10,6 @@
 // TODO: make costum errors.
 use crate::{net::Communicate, schemes::interactive::InteractiveShared};
 use ff::PrimeField;
-use async_trait::async_trait;
 use rand::RngCore;
 use crate::{
     net::agency::Broadcast,
@@ -268,7 +267,7 @@ async fn partial_opening<F: PrimeField + serde::Serialize + serde::de::Deseriali
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpdzParams<F: PrimeField> {
     mac_key_share: F,
-    who_am_i: usize,
+    pub who_am_i: usize,
 }
 
 impl<F: PrimeField> SpdzParams<F> {
@@ -1282,7 +1281,7 @@ mod test {
             //context.rng = Some(thread_rng());
             //let mut local_rng = thread_rng();
             // P1 sharing a value: val_p1_1
-            let val_p1_res = share_many(
+            let _val_p1_res = share_many(
                 values,
                 &mut context.preprocessed_values.for_sharing,
                 & context.params,
@@ -1294,7 +1293,6 @@ mod test {
         }
         let mut taskset = tokio::task::JoinSet::new();
         let cluster = InMemoryNetwork::in_memory(number_of_parties); //asuming two players
-        let mut i = 0;
         contexts.reverse();
         values_both.reverse();
         for network in cluster {
@@ -1303,7 +1301,6 @@ mod test {
                 contexts.pop().unwrap(),
                 values_both.pop().unwrap(),
             ));
-            i += 1;
         }
 
         while let Some(res) = taskset.join_next().await {

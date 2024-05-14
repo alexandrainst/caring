@@ -1,8 +1,8 @@
-use ff::derive::bitvec::view::AsBits;
-use ff::derive::bitvec::view::AsMutBits;
+//use ff::derive::bitvec::view::AsBits;
+//use ff::derive::bitvec::view::AsMutBits;
 /// This is a simple commitment scheme.
 /// It is outsorsed to a module, so it can be easily relapaced
-use ff::Field;
+//use ff::Field;
 use ff::PrimeField;
 use rand::Rng;
 use std::collections::hash_map::DefaultHasher;
