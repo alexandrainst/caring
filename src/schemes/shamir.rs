@@ -289,7 +289,7 @@ pub async fn deflate<F: Field + serde::Serialize + serde::de::DeserializeOwned, 
     z: InflatedShare<F>,
     net: &mut U,
     rng: &mut impl RngCore,
-) -> Result<Share<F>, <U as Unicast>::Error> {
+) -> Result<Share<F>, <U as Unicast>::UnicastError> {
     let z = z.0;
     // let x = z.x;
     let n = ctx.ids.len();

@@ -298,18 +298,53 @@ impl<C: SplitChannel> Network<C> {
         let n = n + 1; // We need to count ourselves.
         0..n
     }
+
+    async fn drop_party(_id: usize) -> Result<(), ()> {
+        todo!("Initiate a drop vote");
+
+    }
 }
 
+// TODO: Implement a handler system, such we can handle ad-hoc requests from other parties,
+// such as dropping/kicking other parties for cheating, being slow, etc.
+//
+// Outline:
+// Currently we do not handle any unprepared protocols, but only expected 'happy path' behaviour.
+// In case of protocols or communication failure we return an error, but we do not provide a solution. 
+// The current expection is for the downstream user to handle it themselves, instead of doing
+// something automatic. However, we currently do not have any methods for removing parties,
+// and if we had we still need all other parties to come to the same conclusion.
+//
+// First,
+// we are in need of some voting protocols, such we can initiate a 'drop' vote.
+// How this should be done is not clear-cut, but we can start with something simple.
+//
+// Second,
+// We need the ability to handle these ad-hoc as these voting requests can come at any point in
+// time, while we could check for votes manually each 'round' between each protocol, this would not
+// probably not suffice.
+//
+// We can use asyncness to run these in the back, racing/selecting between the happy-path and
+// incoming vote requests. A handler should be able to be set up so the policies/code for how to
+// react on these requests should be handled.
+//
+// The issue here becomes that we need to process channels before deciding to relay them or handle
+// it with the vote handler.
+//
+//
+//
+
+
 impl<C: SplitChannel> Unicast for Network<C> {
-    type Error = NetworkError<C::Error>;
+    type UnicastError = NetworkError<C::Error>;
 
     #[tracing::instrument(skip_all)]
-    async fn unicast(&mut self, msgs: &[impl serde::Serialize + Sync]) -> Result<(), Self::Error> {
+    async fn unicast(&mut self, msgs: &[impl serde::Serialize + Sync]) -> Result<(), Self::UnicastError> {
         self.unicast(msgs).await
     }
 
     #[tracing::instrument(skip_all)]
-    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, Self::Error>
+    async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, Self::UnicastError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
@@ -317,7 +352,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::Error> {
+    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::UnicastError> {
         self.receive_all().await
     }
 
@@ -327,15 +362,15 @@ impl<C: SplitChannel> Unicast for Network<C> {
 }
 
 impl<C: SplitChannel> Broadcast for Network<C> {
-    type Error = NetworkError<C::Error>;
+    type BroadcastError = NetworkError<C::Error>;
 
     #[tracing::instrument(skip_all)]
-    async fn broadcast(&mut self, msg: &(impl serde::Serialize + Sync)) -> Result<(), Self::Error> {
+    async fn broadcast(&mut self, msg: &(impl serde::Serialize + Sync)) -> Result<(), Self::BroadcastError> {
         self.broadcast(msg).await
     }
 
     #[tracing::instrument(skip_all)]
-    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::Error>
+    async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::BroadcastError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
@@ -345,7 +380,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::Error>> {
+    ) -> impl Future<Output = Result<T, Self::BroadcastError>> {
         Tuneable::recv_from(self, idx).map_err(move |e| NetworkError {
             id: idx as u32,
             source: e,
@@ -358,7 +393,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
 }
 
 impl<C: SplitChannel> Tuneable for Network<C> {
-    type Error = C::Error;
+    type TuningError = C::Error;
 
     fn id(&self) -> usize {
         self.index
@@ -367,7 +402,7 @@ impl<C: SplitChannel> Tuneable for Network<C> {
     async fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> Result<T, Self::Error> {
+    ) -> Result<T, Self::TuningError> {
         let idx = self.id_to_index(idx);
         self.connections[idx].recv().await
     }
@@ -376,7 +411,7 @@ impl<C: SplitChannel> Tuneable for Network<C> {
         &mut self,
         idx: usize,
         msg: &T,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), Self::TuningError> {
         let idx = self.id_to_index(idx);
         self.connections[idx].send(msg).await
     }

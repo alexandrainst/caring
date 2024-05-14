@@ -72,24 +72,24 @@ impl<'a, C: Channel> Channel for &'a mut C {
 
 /// Tune to a specific channel
 pub trait Tuneable {
-    type Error: Error + Send + 'static;
+    type TuningError: Error + Send + 'static;
 
     fn id(&self) -> usize;
 
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::Error>>;
+    ) -> impl Future<Output = Result<T, Self::TuningError>>;
 
     fn send_to<T: serde::Serialize + Sync>(
         &mut self,
         idx: usize,
         msg: &T,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
+    ) -> impl std::future::Future<Output = Result<(), Self::TuningError>>;
 }
 
 impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
-    type Error = R::Error;
+    type TuningError = R::TuningError;
 
     fn id(&self) -> usize {
         (**self).id()
@@ -98,7 +98,7 @@ impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::Error>> {
+    ) -> impl Future<Output = Result<T, Self::TuningError>> {
         (**self).recv_from(idx)
     }
 
@@ -106,7 +106,7 @@ impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
         &mut self,
         idx: usize,
         msg: &T,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> {
+    ) -> impl std::future::Future<Output = Result<(), Self::TuningError>> {
         (**self).send_to(idx, msg)
     }
 }

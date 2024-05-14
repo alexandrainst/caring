@@ -107,16 +107,16 @@ mod test {
     }
 
     impl Broadcast for SingleBroadcast {
-        type Error = <DuplexConnection as Channel>::Error;
+        type BroadcastError = <DuplexConnection as Channel>::Error;
 
         fn broadcast(
             &mut self,
             msg: &(impl serde::Serialize + Sync),
-        ) -> impl std::future::Future<Output = Result<(), Self::Error>> {
+        ) -> impl std::future::Future<Output = Result<(), Self::BroadcastError>> {
             self.inner.send(msg)
         }
 
-        async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::Error>
+        async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::BroadcastError>
         where
             T: serde::Serialize + serde::de::DeserializeOwned + Sync,
         {
@@ -134,7 +134,7 @@ mod test {
         fn recv_from<T: serde::de::DeserializeOwned>(
             &mut self,
             _idx: usize,
-        ) -> impl futures::prelude::Future<Output = Result<T, Self::Error>> {
+        ) -> impl futures::prelude::Future<Output = Result<T, Self::BroadcastError>> {
             self.inner.recv()
         }
 
