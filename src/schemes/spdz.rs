@@ -12,8 +12,7 @@ use crate::{net::Communicate, schemes::interactive::InteractiveShared};
 use ff::PrimeField;
 use rand::RngCore;
 use crate::{
-    net::agency::Broadcast,
-    protocols::commitments::{commit, verify_commit, commit_many, verify_many},
+    algebra::element::Element32, net::agency::Broadcast, protocols::commitments::{commit, commit_many, verify_commit, verify_many}
 };
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 
@@ -270,20 +269,52 @@ pub struct SpdzContext<F: PrimeField> {
 }
 
 // TODO: Naiv impl, fix it.
+// Consider keeping both open_res and open_res_many, as open_res_many needs a random element to be picked, which is a non negligible overhead when only one element is verified.
 pub async fn open_res_many<F>(
     shares_to_open: Vec<Share<F>>,
     network: &mut impl Broadcast,
     params: &SpdzParams<F>,
-    opened_values: &Vec<F>,
+    prev_opened_values: &Vec<F>,
+    random_element: F,
 )-> Vec<F>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    let mut res = vec![];
-    for share in shares_to_open{
-        res.push(open_res(share, network, params, opened_values).await);
+    //let mut res = vec![];
+    //for share in shares_to_open{
+        //res.push(open_res(share, network, params, opened_values).await);
+    //}
+    //res
+    if !prev_opened_values.is_empty() {
+        panic!("don't open if there are unchecked open values") // TODO rerun error instead 
+        // TODO: consider just calling check all - needs a random element though - either a generator or an element. 
+        //check_all_d(opened_values, network, random_element)
     }
-    res
+    let n = shares_to_open.len();
+    let (vals_to_open, macs_to_shares) :(Vec<F>, Vec<F>) = shares_to_open.iter().map(|share| (share.val, share.mac)).collect();
+    let mut opened_vals:Vec<Vec<F>> = network
+        .symmetric_broadcast(vals_to_open)
+        .await
+        .unwrap();
+    //let m = opened_vals.len();
+    //println!("m: {}, n: {}", m,n);
+    // TODO: find a nicer sollution to adding up the diffrent vectors to one:
+    let mut opened_vals_sum:Vec<F> = opened_vals.pop().expect("Atleast one element must be opened");
+    while opened_vals.len() > 0 {
+        let ov = opened_vals.pop().expect("we just verified that there are elements left");
+        for i in 0..n{
+            opened_vals_sum[i] += ov[i];
+        }
+    }
+
+    let opened_shares = opened_vals_sum.iter().zip(macs_to_shares);
+    let mut ds: Vec<F> = opened_shares.map(|(v,m)| params.mac_key_share * v - m).collect();
+    let this_went_well = check_all_d(&mut ds, network, random_element).await; // TODO use propper random element
+    if this_went_well {
+        opened_vals_sum
+    } else {
+        panic!("The check did not go though");
+    }
 }
 // TODO: return an option or a result instead. - result probably makes most sense, but then we might want the costom errors first
 pub async fn open_res<F>(
@@ -294,7 +325,8 @@ pub async fn open_res<F>(
 ) -> F
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
-{   if !opened_values.is_empty() {
+{   
+    if !opened_values.is_empty() {
         panic!("don't open if there are unchecked open values") // TODO rerun error instead 
         // TODO: consider just calling check all - needs a random element though - either a generator or an element. 
         //check_all_d(opened_values, network, random_element)
@@ -340,7 +372,7 @@ pub async fn check_all_d<F>(
     random_element: F,
 ) -> bool
 where
-    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
+    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
     // TODO: make nice.
     let number_of_ds = partially_opened_vals.len();
@@ -380,6 +412,8 @@ fn power<F: std::ops::MulAssign + Clone + std::ops::Mul<Output = F>>(base:F, exp
 
 #[cfg(test)]
 mod test {
+    use std::os::unix::net;
+
     use ff::Field;
     use rand::thread_rng;
     use rand::SeedableRng;
@@ -559,13 +593,15 @@ mod test {
             )
             .await;
             let elm = element.expect("Something went wrong in sharing");
-            let res = open_res_many(
-                elm,
+            let res = open_res(
+                elm[0],
                 &mut network,
                 &context.params,
                 &context.opened_values,
+                //F::from_u128(8u128),
             )
-            .await.pop().expect("There should be a result");
+            .await;
+            //.await.pop().expect("There should be a result");
             assert!(val == res);
         }
 
@@ -1263,6 +1299,7 @@ mod test {
     async fn test_share_many() {
         type F = Element32;
         let rng = rand_chacha::ChaCha20Rng::from_entropy();
+        let mut rng2 = rand_chacha::ChaCha20Rng::from_entropy();
         let known_to_each = vec![4, 0];
         let number_of_triplets = 0;
         let number_of_parties = 2;
@@ -1280,11 +1317,14 @@ mod test {
             None,
         ];
         let values_for_checking = vec![val_p1_1,val_p1_2];
+        let mut random_values = vec![F::random(&mut rng2), F::random(&mut rng2)];
+
         async fn do_mpc(
             mut network: InMemoryNetwork,
             mut context: SpdzContext<F>,
             values: Option<Vec<F>>,
             vals_for_checking: Vec<F>,
+            random_value: F,
         ) {
             let val_p1_res = share(
                 values.clone(),
@@ -1295,10 +1335,10 @@ mod test {
             )
             .await.expect("this is a test and the values are there");
             
-            let vals_zip = val_p1_res.iter().zip(vals_for_checking);
+            let opened_res = open_res_many(val_p1_res, &mut network, &context.params, &context.opened_values, random_value).await;
+            let vals_zip = opened_res.iter().zip(vals_for_checking);
             for (res, check_res) in vals_zip {
-                let o_res = open_res(*res, &mut network, &context.params, &context.opened_values).await;
-                assert!(o_res==check_res);
+                assert!(*res==check_res);
             }
 
         }
@@ -1312,6 +1352,7 @@ mod test {
                 contexts.pop().unwrap(),
                 values_both.pop().unwrap(),
                 values_for_checking.clone(),
+                random_values.pop().unwrap(),
             ));
         }
 
