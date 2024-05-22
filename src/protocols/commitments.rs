@@ -1,8 +1,5 @@
-//use ff::derive::bitvec::view::AsBits;
-//use ff::derive::bitvec::view::AsMutBits;
 /// This is a simple commitment scheme.
 /// It is outsorsed to a module, so it can be easily relapaced
-//use ff::Field;
 use ff::PrimeField;
 use rand::Rng;
 use std::collections::hash_map::DefaultHasher;
@@ -35,9 +32,8 @@ fn calculate_hash<T: Hash>(t: &T) -> u64 {
     t.hash(&mut s);
     s.finish()
 }
-// TODO: The randoness should be based on some randomness generator that is pased on to the commitment
+// TODO: consider whether the randomness should be chosen by the user instead, allowing the user controle over which randomness generator is used.  
 pub fn commit<F: PrimeField  + serde::Serialize>(val: &F) -> (Commitment, Salt) {
-    // TODO: consider whether this is the way we wish to make the random value.
     let mut rng = thread_rng();
     let r_salt: u64 = rng.gen();
     let salt = Salt {

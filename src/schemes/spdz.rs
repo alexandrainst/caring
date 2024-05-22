@@ -24,7 +24,7 @@ use std::path::Path;
 
 // Should we allow Field or use PrimeField?
 #[derive(
-    Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign, serde::Serialize, serde::Deserialize,
+    Debug, Clone, Copy, Add, Sub, AddAssign, SubAssign, serde::Serialize, serde::Deserialize, PartialEq,
 )]
 pub struct Share<F: PrimeField> {
     val: F,
@@ -157,21 +157,46 @@ where F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::conv
     }
 }
 
-// For now just the most naive impl.
-// TODO fix this
+// This impl of share_many only works if the party is either sending or resiving all the elements. 
+// This is by design, as only the sender needs to broadcast, and that is where there are something to be won by doing it in bulk. 
 pub async fn share_many<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
-    op_vals: Vec<Option<F>>, 
+    op_vals: Option<Vec<F>>, 
     for_sharing: &mut ForSharing<F>,
     params: &SpdzParams<F>,
     who_is_sending: usize,
     network: &mut impl Broadcast,
-) -> Vec<Share<F>> {
-    //let mut res = op_vals.iter().map(|&op_val| async{share(op_val, for_sharing, who_is_sending, params, network).await.expect("...")}).collect()
-    let mut res = vec![];
-    for op_val in op_vals {
-        res.push(share(op_val, for_sharing, who_is_sending, params, network).await.expect("something went wrong in sharing"));
-    }
-    res
+) -> Result<Vec<Share<F>>, ()> {
+    let is_chosen_one = params.who_am_i == who_is_sending; 
+    if is_chosen_one {
+        let values = op_vals.expect("The sender needs to enter the value to be send"); 
+        // TODO: return costum error 
+        let res = send_shares(
+            values,
+            for_sharing,
+            params,
+        );
+        let (shares, corrections) = match res {
+            Ok((shares, corrections)) => (shares, corrections),
+            Err(e) => {println!("nice to know"); return Err(e)},
+        };
+        // TODO: return the error instead
+        network
+            .broadcast(&corrections)
+            .await
+            .expect("Broadcasting went wrong");
+        Ok(shares)
+    } else {
+        let corrections = network
+            .recv_from(who_is_sending)
+            .await
+            .expect("all resivers should resive the correction");
+        receive_shares_from(
+            corrections,
+            for_sharing,
+            who_is_sending,
+            params,
+        )
+    }    
 }
 
 pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
@@ -233,6 +258,32 @@ fn send_share<F: PrimeField>(
     let share = r_share.add_public(correction, params.who_am_i == 0, params);
     Ok((share, correction))
 }
+fn send_shares<F: PrimeField>(
+    vals: Vec<F>,
+    for_sharing: &mut ForSharing<F>,
+    params: &SpdzParams<F>, 
+) -> Result<(Vec<Share<F>>, Vec<F>), ()> {
+    let mut res_share: Vec<Share<F>> = vec![];
+    let mut res_correction: Vec<F> = vec![];
+    for val in vals {
+        let r = for_sharing.rand_known_to_me
+            .vals
+            .pop()
+            .expect("To few preprocessed values");
+        // TODO: return an error - preferably a costum not enough preprocessing error - lack of shared random elementsknown to party who_am_i
+        let r_share = match for_sharing.rand_known_to_i.shares[params.who_am_i].pop() {
+            Some(r_share) => r_share,
+            None => {
+                return Err(());
+            }
+        };
+        let correction = val - r;
+        let share = r_share.add_public(correction, params.who_am_i == 0, params);
+        res_share.push(share);
+        res_correction.push(correction);
+    }
+    Ok((res_share, res_correction))
+}
 
 // When receiving a share, the party receiving it needs to know who send it.
 fn receive_share_from<F: PrimeField>(
@@ -250,6 +301,26 @@ fn receive_share_from<F: PrimeField>(
     };
     let share = rand_share.add_public(correction, params.who_am_i == 0, params);
     Ok(share)
+}
+// When receiving a share, the party receiving it needs to know who send it.
+fn receive_shares_from<F: PrimeField>(
+    corrections: Vec<F>,
+    for_sharing: &mut ForSharing<F>,
+    who_is_sending: usize,
+    params: &SpdzParams<F>,
+) -> Result<Vec<Share<F>>, ()> {
+    let n = corrections.len();
+    // ToDo: Throw an error if there is no more elements. Then we need more preprocessing. - see todo in send_share function
+    if n > for_sharing.rand_known_to_i.shares[who_is_sending].len(){
+        return Err(()); // ToDo: Throw an error if there is not enough random elements left. Then we need more preprocessing..
+    }
+    let mut randoms = for_sharing.rand_known_to_i.shares[who_is_sending].split_off(n);
+    // TODO consider changing send_shares to also use split_off instead of pop, so we don't need to reverse. 
+    randoms.reverse(); 
+    let rc = randoms.iter().zip(corrections);
+    let shares = rc.map(|(r,c)| r.add_public(c, params.who_am_i() == 0, params)).collect();
+
+    Ok(shares)
 }
 
 // partiel opening that handles the broadcasting and pushing to opended values. All that is partially opened needs to be checked later.
@@ -295,7 +366,7 @@ pub async fn open_res<F>(
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {   if !opened_values.is_empty() {
-        panic!("dont open if there are unchecked open values") // TODO rerun error instead 
+        panic!("don't open if there are unchecked open values") // TODO rerun error instead 
         // TODO: consider just calling check all - needs a random element though - either a generator or an element. 
         //check_all_d(opened_values, network, random_element)
     }
@@ -383,6 +454,7 @@ mod test {
     use ff::Field;
     use rand::thread_rng;
     use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
 
     use crate::{algebra::element::Element32, net::network::InMemoryNetwork};
 
@@ -1174,8 +1246,6 @@ mod test {
             values: Vec<Option<F>>,
             constant: F,
         ) {
-            //context.rng = Some(thread_rng());
-            //let mut local_rng = thread_rng();
             // P1 sharing a value: val_p1_1
             let val_p1_1_res = share(
                 values[0],
@@ -1254,10 +1324,9 @@ mod test {
     }
     #[tokio::test]
     async fn test_share_many() {
-        // TODO: write a propper test!
         type F = Element32;
-        let rng = rand::rngs::mock::StepRng::new(42, 7);
-        let known_to_each = vec![2, 0];
+        let rng = rand_chacha::ChaCha20Rng::from_entropy();
+        let known_to_each = vec![4, 0];
         let number_of_triplets = 0;
         let number_of_parties = 2;
         let (mut contexts, _secret_values) = preprocessing::dealer_prepross(
@@ -1270,25 +1339,44 @@ mod test {
         let val_p1_1 = F::from_u128(2u128);
         let val_p1_2 = F::from_u128(3u128);
         let mut values_both = vec![
-            vec![Some(val_p1_1), Some(val_p1_2)],
-            vec![None, None],
+            Some(vec![val_p1_1, val_p1_2]),
+            None,
         ];
         async fn do_mpc(
             mut network: InMemoryNetwork,
             mut context: SpdzContext<F>,
-            values: Vec<Option<F>>,
+            values: Option<Vec<F>>,
         ) {
-            //context.rng = Some(thread_rng());
-            //let mut local_rng = thread_rng();
             // P1 sharing a value: val_p1_1
-            let _val_p1_res = share_many(
-                values,
+            let val_p1_res = share_many(
+                values.clone(),
                 &mut context.preprocessed_values.for_sharing,
                 & context.params,
                 0,
                 &mut network,
             )
-            .await;
+            .await.expect("this is a test and the values are there");
+            
+            let mut vals_for_checking = vec![];
+            match values {
+                Some(val_vec) => {
+                    for op_val in val_vec {
+                        vals_for_checking.push(share(Some(op_val), &mut context.preprocessed_values.for_sharing, 0, & context.params, &mut network).await.expect("something went wrong in sharing"));
+                    }
+                },
+                None => {
+                    while vals_for_checking.len() < val_p1_res.len() {
+                        vals_for_checking.push(share(None, &mut context.preprocessed_values.for_sharing, 0, & context.params, &mut network).await.expect("something went wrong in sharing"))
+                    }
+                }  
+            }
+            
+            let vals_zip = val_p1_res.iter().zip(vals_for_checking);
+            for (res, check_res) in vals_zip {
+                let o_res = open_res(*res, &mut network, &context.params, &context.opened_values).await;
+                let o_check = open_res(check_res, &mut network, &context.params, &context.opened_values).await;
+                assert!(o_res==o_check);
+            }
 
         }
         let mut taskset = tokio::task::JoinSet::new();
