@@ -8,16 +8,38 @@
 // This has to be done interactivly - look at triplets for inspiration
 
 use ff::PrimeField;
-//use itertools::{fold, Itertools};
 use rand::SeedableRng;
 use bincode;
-use std::error::Error;
-use std::path::Path;
-use std::{fs::File, io::{self, Read, Write}};
-use crate::{
-    //net::agency::Broadcast,
-    schemes::spdz::{self, SpdzContext},
+use std::{
+    fmt,
+    fs::File, 
+    path::Path, 
+    error::Error,
+    io::{self, Read, Write},
 };
+use crate::schemes::spdz::{self, SpdzContext};
+#[derive(Debug, Clone, PartialEq)]
+pub enum MissingPreProcErrorType{
+    MissingTriplet,
+    MissingForSharingElement,
+}
+#[derive(Debug, Clone)]
+pub struct MissingPreProcError{
+    pub e_type: MissingPreProcErrorType,
+} // TODO: consider ways to show what type of preproc there is missing
+
+impl fmt::Display for MissingPreProcError {
+    fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
+        if self.e_type == MissingPreProcErrorType::MissingTriplet {
+            write!(f, "Not enough preprocessed triplets.")
+        } else if self.e_type == MissingPreProcErrorType::MissingForSharingElement {
+            write!(f, "Not enough pre shared random elements.")
+        } else {
+            write!(f, "Not enough preprocessing available")
+        }
+    }
+}
+impl Error for MissingPreProcError {}
 
 // ToDo: we should probably make getters for all the fields, and make them private, spdz needs to use the values, but not alter them.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -37,8 +59,9 @@ pub struct Triplets<F:PrimeField>{
 
 // TODO: return error instead - a "not enogh preproced elm"-error
 impl<F:PrimeField> Triplets<F> {
-    pub fn get_triplet(&mut self) -> MultiplicationTriple<F>{
-        self.multiplication_triplets.pop().expect("Not enough triplets")
+    pub fn get_triplet(&mut self) -> Result<MultiplicationTriple<F>, MissingPreProcError>{
+        self.multiplication_triplets.pop().ok_or(MissingPreProcError{e_type: MissingPreProcErrorType::MissingTriplet})
+        //.expect("Not enough triplets")
     }
 }
 

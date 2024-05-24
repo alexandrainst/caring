@@ -12,14 +12,14 @@ use crate::{net::Communicate, schemes::interactive::InteractiveShared};
 use ff::PrimeField;
 use rand::RngCore;
 use crate::{
-    algebra::element::Element32, net::agency::Broadcast, protocols::commitments::{commit, commit_many, verify_commit, verify_many}
+    net::agency::Broadcast, protocols::commitments::{commit, commit_many, verify_commit, verify_many}
 };
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 
 use self::preprocessing::ForSharing;
 
 pub mod preprocessing;
-use std::path::Path;
+use std::{error, path::Path};
 
 // Should we allow Field or use PrimeField?
 #[derive(
@@ -61,7 +61,6 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
         }
     }
 }
-// TODO: Do we need the hole context? - In any case, we do not need the hole context to be mutable.
 pub async fn secret_mult<F>(
     s1: Share<F>,
     s2: Share<F>,
@@ -69,14 +68,15 @@ pub async fn secret_mult<F>(
     params: &SpdzParams<F>,
     opened_values: &mut Vec<F>,
     network: &mut impl Broadcast,
-) -> Result<Share<F>, ()>
+) -> Result<Share<F>, preprocessing::MissingPreProcError>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    // TODO: Could be meaningfull to have a custom error, for when there is not enough preprocessed values.
-    // And then return an error instead of panicing
-    let triplet = triplets
-        .get_triplet();
+    let triplet = match triplets
+        .get_triplet(){
+            Ok(tri) => tri,
+            Err(e) => return Err(e),
+        };
     let is_chosen_party = params.who_am_i == 0;
     //let mac_key_share = params.mac_key_share;
 
@@ -152,11 +152,11 @@ pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwne
     params: &SpdzParams<F>,
     who_is_sending: usize,
     network: &mut impl Broadcast,
-) -> Result<Vec<Share<F>>, ()> {
+) -> Result<Vec<Share<F>>, Box<dyn error::Error>> {
     let is_chosen_one = params.who_am_i == who_is_sending; 
     if is_chosen_one {
         let values = op_vals.expect("The sender needs to enter the value to be send"); 
-        // TODO: return costum error 
+        // TODO: return some error 
         let res = send_shares(
             values,
             for_sharing,
@@ -164,25 +164,26 @@ pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwne
         );
         let (shares, corrections) = match res {
             Ok((shares, corrections)) => (shares, corrections),
-            Err(e) => {println!("nice to know"); return Err(e)},
+            Err(e) => return Err(e.into()),
         };
-        // TODO: return the error instead
-        network
+        match network
             .broadcast(&corrections)
-            .await
-            .expect("Broadcasting went wrong");
+            .await {
+                Ok(_) => (),
+                Err(e) => return Err(e.into())
+            };
         Ok(shares)
     } else {
-        let corrections = network
-            .recv_from(who_is_sending)
-            .await
-            .expect("all resivers should resive the correction");
-        receive_shares_from(
+        let corrections = match network.recv_from(who_is_sending).await{
+            Ok(vec) => vec,
+            Err(e) => return Err(e.into()),
+        };
+        Ok(receive_shares_from(
             corrections,
             for_sharing,
             who_is_sending,
             params,
-        )
+        )?)
     }    
 }
 
@@ -190,19 +191,18 @@ fn send_shares<F: PrimeField>(
     vals: Vec<F>,
     for_sharing: &mut ForSharing<F>,
     params: &SpdzParams<F>, 
-) -> Result<(Vec<Share<F>>, Vec<F>), ()> {
+) -> Result<(Vec<Share<F>>, Vec<F>), preprocessing::MissingPreProcError> {
     let mut res_share: Vec<Share<F>> = vec![];
     let mut res_correction: Vec<F> = vec![];
     for val in vals {
-        let r = for_sharing.rand_known_to_me
-            .vals
-            .pop()
-            .expect("To few preprocessed values");
-        // TODO: return an error - preferably a costum not enough preprocessing error - lack of shared random elementsknown to party who_am_i
+        let r = match for_sharing.rand_known_to_me.vals.pop() {
+            Some(elm) => elm,
+            None => return Err(preprocessing::MissingPreProcError{e_type: preprocessing::MissingPreProcErrorType::MissingForSharingElement}),
+        };
         let r_share = match for_sharing.rand_known_to_i.shares[params.who_am_i].pop() {
             Some(r_share) => r_share,
             None => {
-                return Err(());
+                return Err(preprocessing::MissingPreProcError{e_type: preprocessing::MissingPreProcErrorType::MissingForSharingElement});
             }
         };
         let correction = val - r;
@@ -219,13 +219,11 @@ fn receive_shares_from<F: PrimeField>(
     for_sharing: &mut ForSharing<F>,
     who_is_sending: usize,
     params: &SpdzParams<F>,
-) -> Result<Vec<Share<F>>, ()> {
+) -> Result<Vec<Share<F>>, preprocessing::MissingPreProcError> {
     let prep_rand_len = for_sharing.rand_known_to_i.shares[who_is_sending].len();
     let n = corrections.len();
-    // ToDo: Throw an error if there is no more elements. Then we need more preprocessing. - see todo in send_share function
     if n > for_sharing.rand_known_to_i.shares[who_is_sending].len(){
-        println!("Error");
-        return Err(()); // ToDo: Throw an error if there is not enough random elements left. Then we need more preprocessing..
+        return Err(preprocessing::MissingPreProcError{e_type: preprocessing::MissingPreProcErrorType::MissingForSharingElement}); 
     }
     let mut randoms = for_sharing.rand_known_to_i.shares[who_is_sending].split_off(prep_rand_len - n);
     // TODO consider changing send_shares to also use split_off instead of pop, so we don't need to reverse. 
@@ -268,7 +266,6 @@ pub struct SpdzContext<F: PrimeField> {
     pub preprocessed_values: preprocessing::PreprocessedValues<F>,
 }
 
-// TODO: Naiv impl, fix it.
 // Consider keeping both open_res and open_res_many, as open_res_many needs a random element to be picked, which is a non negligible overhead when only one element is verified.
 pub async fn open_res_many<F>(
     shares_to_open: Vec<Share<F>>,
@@ -280,11 +277,6 @@ pub async fn open_res_many<F>(
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    //let mut res = vec![];
-    //for share in shares_to_open{
-        //res.push(open_res(share, network, params, opened_values).await);
-    //}
-    //res
     if !prev_opened_values.is_empty() {
         panic!("don't open if there are unchecked open values") // TODO rerun error instead 
         // TODO: consider just calling check all - needs a random element though - either a generator or an element. 
@@ -296,8 +288,6 @@ where
         .symmetric_broadcast(vals_to_open)
         .await
         .unwrap();
-    //let m = opened_vals.len();
-    //println!("m: {}, n: {}", m,n);
     // TODO: find a nicer sollution to adding up the diffrent vectors to one:
     let mut opened_vals_sum:Vec<F> = opened_vals.pop().expect("Atleast one element must be opened");
     while opened_vals.len() > 0 {
@@ -309,7 +299,7 @@ where
 
     let opened_shares = opened_vals_sum.iter().zip(macs_to_shares);
     let mut ds: Vec<F> = opened_shares.map(|(v,m)| params.mac_key_share * v - m).collect();
-    let this_went_well = check_all_d(&mut ds, network, random_element).await; // TODO use propper random element
+    let this_went_well = check_all_d(&mut ds, network, random_element).await; 
     if this_went_well {
         opened_vals_sum
     } else {
@@ -470,10 +460,10 @@ mod test {
         let p2_known_to_pi = p2_preprocessed.for_sharing.rand_known_to_i.shares;
         let p1_known_to_me = p1_preprocessed.for_sharing.rand_known_to_me.vals;
         let p2_known_to_me = p2_preprocessed.for_sharing.rand_known_to_me.vals;
-        let p1_triplet_1 = p1_preprocessed.triplets.get_triplet();
-        let p2_triplet_1 = p2_preprocessed.triplets.get_triplet();
-        let p1_triplet_2 = p1_preprocessed.triplets.get_triplet();
-        let p2_triplet_2 = p2_preprocessed.triplets.get_triplet();
+        let p1_triplet_1 = p1_preprocessed.triplets.get_triplet().expect("This is a test, the triplet is there.");
+        let p2_triplet_1 = p2_preprocessed.triplets.get_triplet().expect("This is a test, the triplet is there.");
+        let p1_triplet_2 = p1_preprocessed.triplets.get_triplet().expect("This is a test, the triplet is there.");
+        let p2_triplet_2 = p2_preprocessed.triplets.get_triplet().expect("This is a test, the triplet is there.");
 
 
         // Testing
@@ -946,7 +936,7 @@ mod test {
             &p1_context.params,
         ) {
             Ok((e, c)) => (e[0], c[0]),
-            Err(_) => panic!(),
+            Err(e) => {println!("Error: {}", e); panic!()},
         };
 
         let mut p2_prepros = p2_context.preprocessed_values;
@@ -1300,7 +1290,7 @@ mod test {
         type F = Element32;
         let rng = rand_chacha::ChaCha20Rng::from_entropy();
         let mut rng2 = rand_chacha::ChaCha20Rng::from_entropy();
-        let known_to_each = vec![4, 0];
+        let known_to_each = vec![2, 0];
         let number_of_triplets = 0;
         let number_of_parties = 2;
         let (mut contexts, _secret_values) = preprocessing::dealer_prepross(
@@ -1360,6 +1350,85 @@ mod test {
             res.unwrap();
         }
     }
+    #[tokio::test]
+    async fn test_missingpreprocerror() {
+        type F = Element32;
+        let rng = rand_chacha::ChaCha20Rng::from_entropy();
+        let known_to_each = vec![2, 0];
+        let number_of_triplets = 0;
+        let number_of_parties = 2;
+        let (mut contexts, _secret_values) = preprocessing::dealer_prepross(
+            rng,
+            known_to_each,
+            number_of_triplets,
+            number_of_parties,
+        );
+
+        let val_p1_1 = F::from_u128(2u128);
+        let val_p1_2 = F::from_u128(3u128);
+        let mut values_both = vec![
+            vec![Some(vec![val_p1_1, val_p1_2]), None],
+            vec![None, Some(vec![val_p1_1,val_p1_2])],
+        ];
+
+        async fn do_mpc(
+            mut network: InMemoryNetwork,
+            mut context: SpdzContext<F>,
+            values: Vec<Option<Vec<F>>>,
+        ) {
+            let values_1 = values[0].clone();
+            let values_2 = values[1].clone();
+            let mut val_p1_res = share(
+                values_1,
+                &mut context.preprocessed_values.for_sharing,
+                & context.params,
+                0,
+                &mut network,
+            )
+            .await.expect("this is a test, the value is there");
+
+            let val_2 = val_p1_res.pop().expect("this is a test, the value is there");
+            let val_1 = val_p1_res.pop().expect("this is a test, the value is there");
+            
+            let val_3_res = secret_mult(val_1, val_2, &mut context.preprocessed_values.triplets, &context.params, &mut context.opened_values, &mut network).await;
+            let val_3 = val_3_res;
+            assert!(val_3.is_err());
+            match val_3 {
+                Ok(_) => panic!("can't happen, we just checked"),
+                Err(e) => println!("Error: {}", e),
+            };
+            
+            let val_p2_res = share(
+                values_2,
+                &mut context.preprocessed_values.for_sharing,
+                & context.params,
+                1,
+                &mut network,
+            )
+            .await;
+            assert!(val_p2_res.is_err());
+            match val_p2_res {
+                Ok(_) => panic!("can't happen, we just checked"),
+                Err(e) => println!("Error: {}", e),
+            };
+
+        }
+        let mut taskset = tokio::task::JoinSet::new();
+        let cluster = InMemoryNetwork::in_memory(number_of_parties); //asuming two players
+        contexts.reverse();
+        values_both.reverse();
+        for network in cluster {
+            taskset.spawn(do_mpc(
+                network,
+                contexts.pop().unwrap(),
+                values_both.pop().unwrap(),
+            ));
+        }
+
+        while let Some(res) = taskset.join_next().await {
+            res.unwrap();
+        }
+    }
     #[test]
     fn test_power(){
         type F = Element32;
@@ -1407,10 +1476,10 @@ mod test {
         let p2_known_to_pi = p2_preprocessed.for_sharing.rand_known_to_i.shares;
         let p1_known_to_me = p1_preprocessed.for_sharing.rand_known_to_me.vals;
         let p2_known_to_me = p2_preprocessed.for_sharing.rand_known_to_me.vals;
-        let p1_triplet_1 = p1_preprocessed.triplets.get_triplet();
-        let p2_triplet_1 = p2_preprocessed.triplets.get_triplet();
-        let p1_triplet_2 = p1_preprocessed.triplets.get_triplet();
-        let p2_triplet_2 = p2_preprocessed.triplets.get_triplet();
+        let p1_triplet_1 = p1_preprocessed.triplets.get_triplet().expect("This is a test, the triplet is there.");
+        let p2_triplet_1 = p2_preprocessed.triplets.get_triplet().expect("This is a test, the triplet is there.");
+        let p1_triplet_2 = p1_preprocessed.triplets.get_triplet().expect("This is a test, the triplet is there.");
+        let p2_triplet_2 = p2_preprocessed.triplets.get_triplet().expect("This is a test, the triplet is there.");
 
 
         // Testing
@@ -1447,6 +1516,5 @@ mod test {
         assert!(b2.val * mac == b2.mac);
         assert!(c2.val * mac == c2.mac);
     }
-    // TODO: test checking - tjek that it can fail.
     // TODO: test errors - in general test that stuff fails when it has to.
 }
