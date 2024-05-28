@@ -1,20 +1,34 @@
 use pyo3::{prelude::*, types::PyTuple, exceptions::PyIOError};
 
 use wecare::*;
+use std::path::Path;
 
 #[pyclass]
 struct Engine(Option<AdderEngine>);
 
 /// Setup a MPC addition engine connected to the given sockets.
 #[pyfunction]
-#[pyo3(signature = (my_addr, *others))]
-fn setup(my_addr: &str, others: &Bound<'_, PyTuple>) -> PyResult<Engine> {
+#[pyo3(signature = (path_to_pre, my_addr, *others))]
+// TODO: the setup needs a path to the preprocessed values. 
+// TODO-continued: It should be resived here, in a format that works for python,
+// TODO-continued and then changed into a format that works for rust, - setup_engine expects a path.
+
+fn setup(path_to_pre: &str, my_addr: &str, others: &Bound<'_, PyTuple>) -> PyResult<Engine> {
     let others : Vec<_> = others.iter().map(|x| x.extract::<String>().unwrap().clone())
         .collect();
-    match setup_engine(my_addr, &others) {
+    let file_name = Path::new(path_to_pre);
+    match setup_engine(my_addr, &others, file_name) {
         Ok(e) => Ok(Engine(Some(e))),
         Err(e) => Err(PyIOError::new_err(e.0))
     }
+}
+
+// TODO: needs to know for how many parties 
+// TODO-continued: - maybe also an address for where to save the files? 
+// TODO-continued: - or to whom it should be distributed?
+// TODO-continued: for now we will hardcode the adresses - and do the distribution via the shared filesystem - this is ONLY for testing. 
+fn do_preproc(){ 
+    // TODO fill out
 }
 
 

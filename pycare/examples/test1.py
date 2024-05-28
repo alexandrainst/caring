@@ -1,5 +1,11 @@
 import caring
-engine = caring.setup("127.0.0.1:1234", "127.0.0.1:1235")
+# TODO: We need to make som preprocessing. Non of the participating parties should be allowed to do this, 
+# as knowing the other parties preprocedsed values breaks privacy. 
+# However for starters, and testing purposses ONLY we will allow party 1 to do it 
+# and save it where both party one and party two can find it. 
+
+# TODO: pycare.do_preproc
+engine = caring.setup("./context1.bin", "127.0.0.1:1234", "127.0.0.1:1235")
 
 res = engine.sum(2.5)
 print(f"2.5 - 5 = {res}")
@@ -30,5 +36,8 @@ print(f"0 + 0 = {res}")
 
 res = engine.sum(0.01)
 print(f"0.01 + 0.02 = {res}")
+
+res = engine.sum(8.0)
+print(f"8.0 + 2.02 = {res}")
 
 engine.takedown()
