@@ -49,6 +49,7 @@ impl<F: PrimeField> Share<F> {
         }
     }
 }
+
 // Mutliplication between a share and a public value
 // This operation is symmetric
 impl<F: PrimeField> std::ops::Mul<F> for Share<F> {

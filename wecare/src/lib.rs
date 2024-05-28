@@ -59,46 +59,53 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
 
 
         let number_of_parties = parties.len();
-        let val = curve25519_dalek::Scalar::from(nums[0]);
+        let vals: Vec<_> = nums.iter().map(|&n| curve25519_dalek::Scalar::from(n)).collect();
         let who_am_i = context.params.who_am_i();
-        let mut shares = vec![];
+        let mut shares: Vec<Vec<spdz::Share<_>>> = vec![];
         for i in 0..number_of_parties{
             if i == who_am_i {
-                shares.push(spdz::share(Some(val), &mut context.preprocessed_values.for_sharing, i, &context.params, network).await.expect("TODO: look at error")); 
+                let s: Vec<spdz::Share<_>> = spdz::share(Some(vals.clone()), &mut context.preprocessed_values.for_sharing, &context.params, i, network).await.expect("TODO: look at error");
+                shares.push(s); 
             } else {
-                shares.push(spdz::share(None, &mut context.preprocessed_values.for_sharing, i, &context.params, network).await.expect("TODO: look at error")); 
+                let s: Vec<spdz::Share<_>> = spdz::share(None, &mut context.preprocessed_values.for_sharing, &context.params, i, network).await.expect("TODO: look at error"); 
+                shares.push(s); 
             }
 
         }
-        // TODO: we might need a share_many and a open_res_many that works vectorized... 
-
-        // compute
-        //let my_result: curve25519_dalek::Scalar = shares.into_iter().sum();
-        let mut my_result = shares.pop().unwrap();
-        while shares.len() > 0{
-            my_result += shares.pop().unwrap()
+        // Compute
+        let mut shares = shares.into_iter();
+        let mut my_result: Vec<spdz::Share<_>> = shares.next().expect("atleast one result");
+        let my_res_len = my_result.len();
+        for s in shares {
+            println!("my_result: {}", my_result.len());
+            for i in 0..my_res_len {
+                my_result[i] += s[i];
+            }
         }
 
-        // reconstruct
-        //assert!(spdz::check_all_d(context.open_values, network, random_element).await); - there have been no partial openings. 
-        let res = from_offset(
-            u128::from_le_bytes(
-                spdz::open_res(my_result, network, &context.params, &context.opened_values).await
-                    .as_bytes()[0..128/8]
-                    .try_into().expect("convertion between types should go well"
-                )
-            )
-        );
-        //let res = feldman::reconstruct_many(&ctx, &open_shares).expect("Failed to validate")
-            //.into_iter()
-            //.map(|x| x.as_bytes()[0..128/8].try_into().expect("Should be infalliable"))
-            //.map(u128::from_le_bytes)
-            //.map(from_offset)
-            //.collect();
-        // NOTE: Since we are only using half of this space, we have
-        // a possibility of 'checking' for computation failures.
-
-        Some(vec![f64::from(res)])
+        // TODO: make random element
+        let random_element = curve25519_dalek::Scalar::from(12u128);
+        let res: Vec<_> = 
+            if my_result.len() == 1 {
+                vec![
+                    from_offset(
+                        u128::from_le_bytes(
+                            spdz::open_res(my_result.pop().expect("we just checked, it is there."), network, &context.params, &context.opened_values).await
+                                .as_bytes()[0..128/8]
+                                .try_into().expect("convertion between types should go well"
+                            )
+                        )
+                    )
+                ]
+            } else {
+                spdz::open_res_many(my_result, network, &context.params, &context.opened_values, random_element).await
+                    .into_iter()
+                    .map(|x| x.as_bytes()[0..128/8].try_into().expect("convertion between types should go well"))
+                    .map(u128::from_le_bytes)
+                    .map(from_offset)
+                    .collect()
+            };
+        Some(res)
     });
     res
 }
@@ -201,5 +208,41 @@ mod test {
         let b = t2.join().expect("joining")[0];
         assert_eq!(a, 64.0);
         assert_eq!(b, 64.0);
+    }
+
+    #[test]
+    fn sunshine_for_two() {
+        use std::thread;
+        do_preproc();
+        let t1 = thread::spawn(|| {
+            println!("[1] Setting up...");
+            let mut engine = setup_engine("127.0.0.1:2234", &["127.0.0.1:2235"], Path::new("src/context1.bin") ).unwrap();
+            println!("[1] Ready");
+            let res = mpc_sum(&mut engine, &[32.0, 11.9]).unwrap();
+            println!("[1] Done");
+            drop(engine);
+            res
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        let t2 = thread::spawn(|| {
+            println!("[2] Setting up...");
+            let mut engine = setup_engine("127.0.0.1:2235", &["127.0.0.1:2234"], Path::new("src/context2.bin") ).unwrap();
+            println!("[2] Ready");
+            let res = mpc_sum(&mut engine, &[32.0, 24.1]).unwrap();
+            println!("[2] Done");
+            drop(engine);
+            res
+        });
+        let a = t1.join().expect("joining");
+        let a1 = a[0];
+        let a2 = a[1];
+        let b = t2.join().expect("joining");
+        let b1 = b[0];
+        let b2 = b[1];
+        assert_eq!(a1, 64.0);
+        assert_eq!(b1, 64.0);
+        assert_eq!(a2, 36.0);
+        assert_eq!(b2, 36.0);
+        assert_eq!(a,[64.0, 36.0]);
     }
 }
