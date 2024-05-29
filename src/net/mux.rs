@@ -19,9 +19,7 @@ use tokio::join;
 
 use crate::{
     help,
-    net::{
-        network::Network, Channel, RecvBytes, SendBytes, SplitChannel
-    },
+    net::{network::Network, Channel, RecvBytes, SendBytes, SplitChannel},
 };
 
 #[derive(Debug, Error)]

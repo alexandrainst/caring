@@ -8,7 +8,6 @@ pub mod connection;
 pub mod mux;
 pub mod network;
 
-
 pub trait SendBytes: Send {
     type SendError: Error + Send + Sync + 'static;
 
@@ -39,7 +38,6 @@ impl<S: SendBytes> SendBytes for &mut S {
     }
 }
 
-
 pub trait RecvBytes: Send {
     type RecvError: Error + Send + Sync + 'static;
     fn recv_bytes(
@@ -64,7 +62,6 @@ impl<R: RecvBytes> RecvBytes for &mut R {
     ) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send {
         (**self).recv_bytes()
     }
-
 }
 
 /// A communication medium between you and another party.
@@ -77,17 +74,14 @@ impl<C: Channel> Channel for &mut C {
     type Error = C::Error;
 }
 
-
-
 /// A [Channel] which can be split into a sender and receiver.
 pub trait SplitChannel: Channel + Send {
     type Sender: SendBytes<SendError = Self::SendError> + Send;
     type Receiver: RecvBytes<RecvError = Self::RecvError> + Send;
     fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver);
-
 }
 
-impl<'a, C: SplitChannel> SplitChannel for &'a mut C  {
+impl<'a, C: SplitChannel> SplitChannel for &'a mut C {
     type Sender = C::Sender;
     type Receiver = C::Receiver;
 
@@ -95,7 +89,6 @@ impl<'a, C: SplitChannel> SplitChannel for &'a mut C  {
         (**self).split()
     }
 }
-
 
 /// Tune to a specific channel
 pub trait Tuneable {

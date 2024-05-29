@@ -44,9 +44,9 @@ pub struct Network<C: SplitChannel> {
 
 #[derive(thiserror::Error, Debug)]
 #[error("Error communicating with {id}: {source}")]
-pub enum NetworkError<E,U> {
-    Incoming {id: u32, source: E},
-    Outgoing {id: u32, source: U}
+pub enum NetworkError<E, U> {
+    Incoming { id: u32, source: E },
+    Outgoing { id: u32, source: U },
 }
 
 #[allow(type_alias_bounds)] // It clearly matters, stop complaining
@@ -69,22 +69,18 @@ impl<C: SplitChannel> Network<C> {
         }
     }
 
-
     /// Broadcast a message to all other parties.
     ///
     /// Asymmetric, non-waiting
     ///
     /// * `msg`: Message to send
-    pub async fn broadcast(
-        &mut self,
-        msg: &(impl serde::Serialize + Sync),
-    ) -> NetResult<(), C> {
+    pub async fn broadcast(&mut self, msg: &(impl serde::Serialize + Sync)) -> NetResult<(), C> {
         let my_id = self.index;
-        let packet : Bytes = bincode::serialize(&msg).unwrap().into();
+        let packet: Bytes = bincode::serialize(&msg).unwrap().into();
         let outgoing = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let id = if i < my_id { i } else { i + 1 } as u32;
             conn.send_bytes(packet.clone())
-                .map_err(move |e| NetworkError::Outgoing{id, source: e})
+                .map_err(move |e| NetworkError::Outgoing { id, source: e })
         });
         future::try_join_all(outgoing).await?;
         Ok(())
@@ -98,10 +94,7 @@ impl<C: SplitChannel> Network<C> {
     /// Asymmetric, non-waiting
     ///
     /// * `msgs`: Messages to send
-    pub async fn unicast(
-        &mut self,
-        msgs: &[impl serde::Serialize + Sync],
-    ) -> NetResult<(), C> {
+    pub async fn unicast(&mut self, msgs: &[impl serde::Serialize + Sync]) -> NetResult<(), C> {
         let my_id = self.index;
         let outgoing = self
             .connections
@@ -122,9 +115,7 @@ impl<C: SplitChannel> Network<C> {
     /// Asymmetric, waiting
     ///
     /// Returns: A list sorted by the connections (skipping yourself)
-    pub async fn receive_all<T: serde::de::DeserializeOwned>(
-        &mut self,
-    ) -> NetResult<Vec<T>, C> {
+    pub async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> NetResult<Vec<T>, C> {
         let my_id = self.index;
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv::<T>();
@@ -163,7 +154,7 @@ impl<C: SplitChannel> Network<C> {
         let (mut tx, mut rx): (Vec<_>, Vec<_>) =
             self.connections.iter_mut().map(|c| c.split()).unzip();
 
-        let packet : Bytes = bincode::serialize(&msg).unwrap().into();
+        let packet: Bytes = bincode::serialize(&msg).unwrap().into();
         let outgoing = tx.iter_mut().enumerate().map(|(id, conn)| {
             let id = if id < my_id { id } else { id + 1 } as u32;
             conn.send_bytes(packet.clone())
@@ -209,10 +200,7 @@ impl<C: SplitChannel> Network<C> {
     /// will be send to party `i`.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_unicast<T>(
-        &mut self,
-        mut msgs: Vec<T>,
-    ) -> NetResult<Vec<T>, C>
+    pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> NetResult<Vec<T>, C>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
@@ -308,7 +296,6 @@ impl<C: SplitChannel> Network<C> {
 
     async fn drop_party(_id: usize) -> Result<(), ()> {
         todo!("Initiate a drop vote");
-
     }
 }
 
@@ -317,7 +304,7 @@ impl<C: SplitChannel> Network<C> {
 //
 // Outline:
 // Currently we do not handle any unprepared protocols, but only expected 'happy path' behaviour.
-// In case of protocols or communication failure we return an error, but we do not provide a solution. 
+// In case of protocols or communication failure we return an error, but we do not provide a solution.
 // The current expection is for the downstream user to handle it themselves, instead of doing
 // something automatic. However, we currently do not have any methods for removing parties,
 // and if we had we still need all other parties to come to the same conclusion.
@@ -341,12 +328,14 @@ impl<C: SplitChannel> Network<C> {
 //
 //
 
-
 impl<C: SplitChannel> Unicast for Network<C> {
     type UnicastError = NetworkError<C::RecvError, C::SendError>;
 
     #[tracing::instrument(skip_all)]
-    async fn unicast(&mut self, msgs: &[impl serde::Serialize + Sync]) -> Result<(), Self::UnicastError> {
+    async fn unicast(
+        &mut self,
+        msgs: &[impl serde::Serialize + Sync],
+    ) -> Result<(), Self::UnicastError> {
         self.unicast(msgs).await
     }
 
@@ -359,7 +348,9 @@ impl<C: SplitChannel> Unicast for Network<C> {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(&mut self) -> Result<Vec<T>, Self::UnicastError> {
+    async fn receive_all<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> Result<Vec<T>, Self::UnicastError> {
         self.receive_all().await
     }
 
@@ -372,7 +363,10 @@ impl<C: SplitChannel> Broadcast for Network<C> {
     type BroadcastError = NetworkError<C::RecvError, C::SendError>;
 
     #[tracing::instrument(skip_all)]
-    async fn broadcast(&mut self, msg: &(impl serde::Serialize + Sync)) -> Result<(), Self::BroadcastError> {
+    async fn broadcast(
+        &mut self,
+        msg: &(impl serde::Serialize + Sync),
+    ) -> Result<(), Self::BroadcastError> {
         self.broadcast(msg).await
     }
 
@@ -408,7 +402,13 @@ impl<C: SplitChannel> Tuneable for Network<C> {
         idx: usize,
     ) -> Result<T, Self::TuningError> {
         let idx = self.id_to_index(idx);
-        self.connections[idx].recv().await.map_err(|e | NetworkError::Incoming { id: idx as u32, source: e })
+        self.connections[idx]
+            .recv()
+            .await
+            .map_err(|e| NetworkError::Incoming {
+                id: idx as u32,
+                source: e,
+            })
     }
 
     async fn send_to<T: serde::Serialize + Sync>(
@@ -417,7 +417,13 @@ impl<C: SplitChannel> Tuneable for Network<C> {
         msg: &T,
     ) -> Result<(), Self::TuningError> {
         let idx = self.id_to_index(idx);
-        self.connections[idx].send(msg).await.map_err(|e | NetworkError::Outgoing { id: idx as u32, source: e })
+        self.connections[idx]
+            .send(msg)
+            .await
+            .map_err(|e| NetworkError::Outgoing {
+                id: idx as u32,
+                source: e,
+            })
     }
 }
 
@@ -474,10 +480,7 @@ impl TcpNetwork {
     ///
     /// * `me`: Socket address to open to
     /// * `peers`: Socket addresses of other peers
-    pub async fn connect(
-        me: SocketAddr,
-        peers: &[SocketAddr],
-    ) -> NetResult<Self, TcpConnection> {
+    pub async fn connect(me: SocketAddr, peers: &[SocketAddr]) -> NetResult<Self, TcpConnection> {
         let n = peers.len();
 
         // Connecting to parties

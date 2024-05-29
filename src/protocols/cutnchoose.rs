@@ -90,7 +90,9 @@ mod test {
     use crate::{
         algebra::element::Element32,
         net::{
-            agency::Broadcast, connection::{self, ConnectionError, DuplexConnection}, Channel, RecvBytes, SendBytes, SplitChannel
+            agency::Broadcast,
+            connection::{self, ConnectionError, DuplexConnection},
+            Channel, RecvBytes, SendBytes, SplitChannel,
         },
         protocols::cutnchoose::{choose, cut},
         schemes::{
@@ -157,7 +159,8 @@ mod test {
 
         fn recv_bytes(
             &mut self,
-        ) -> impl std::future::Future<Output = Result<tokio_util::bytes::BytesMut, Self::RecvError>> + Send {
+        ) -> impl std::future::Future<Output = Result<tokio_util::bytes::BytesMut, Self::RecvError>> + Send
+        {
             self.inner.recv_bytes()
         }
     }

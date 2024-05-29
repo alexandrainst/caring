@@ -78,16 +78,16 @@ impl<R: AsyncRead, W: AsyncWrite> Connection<R, W> {
     }
 }
 
-
 pub struct Sending<W: AsyncWrite>(FramedWrite<W, LengthDelimitedCodec>);
 pub struct Receiving<R: AsyncRead>(FramedRead<R, LengthDelimitedCodec>);
-
 
 impl<W: AsyncWrite + Unpin + Send> SendBytes for Sending<W> {
     type SendError = ConnectionError;
 
     async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), Self::SendError> {
-        SinkExt::<_>::send(&mut self.0, bytes).await.map_err(|_| ConnectionError::Closed)
+        SinkExt::<_>::send(&mut self.0, bytes)
+            .await
+            .map_err(|_| ConnectionError::Closed)
     }
 }
 
@@ -95,7 +95,8 @@ impl<R: AsyncRead + Unpin + Send> RecvBytes for Receiving<R> {
     type RecvError = ConnectionError;
 
     async fn recv_bytes(&mut self) -> Result<BytesMut, Self::RecvError> {
-        self.0.next()
+        self.0
+            .next()
             .await
             .ok_or(ConnectionError::Closed)?
             .map_err(|e| ConnectionError::Unknown(Box::new(e)))
@@ -117,7 +118,6 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Connection<R, W>
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
         self.receiver.recv().await
     }
-
 }
 
 impl<
@@ -148,7 +148,7 @@ impl<
     }
 }
 
-impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Channel for Connection<R,W> {
+impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Channel for Connection<R, W> {
     type Error = ConnectionError;
 }
 
