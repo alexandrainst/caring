@@ -82,8 +82,9 @@ impl<'a, B: Broadcast> Broadcast for &'a mut B {
         msg: T,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync {
-            (**self).symmetric_broadcast(msg)
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
+    {
+        (**self).symmetric_broadcast(msg)
     }
 
     fn recv_from<T: serde::de::DeserializeOwned>(
@@ -166,7 +167,8 @@ impl<'a, U: Unicast> Unicast for &'a mut U {
         msgs: Vec<T>,
     ) -> impl Future<Output = Result<Vec<T>, Self::Error>>
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync {
+        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
+    {
         (**self).symmetric_unicast(msgs)
     }
 }

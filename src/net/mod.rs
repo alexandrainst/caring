@@ -111,8 +111,6 @@ impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
     }
 }
 
-
 /// General communication with support for most network functionality.
-pub trait Communicate : agency::Broadcast + agency::Unicast + Tuneable + Send {}
-impl<'a, C: Communicate> Communicate for &'a mut C { }
-
+pub trait Communicate: agency::Broadcast + agency::Unicast + Tuneable + Send {}
+impl<'a, C: Communicate> Communicate for &'a mut C {}
