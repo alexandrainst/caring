@@ -39,8 +39,8 @@ impl<F: Field + serde::Serialize + serde::de::DeserializeOwned> super::Shared fo
     type Context = ShamirParams<F>;
     type Value = F;
 
-    fn share(ctx: &Self::Context, secret: F, rng: &mut impl RngCore) -> Vec<Self> {
-        share(secret, &ctx.ids, ctx.threshold, rng)
+    fn share(ctx: &Self::Context, secret: F, mut rng: impl RngCore) -> Vec<Self> {
+        share(secret, &ctx.ids, ctx.threshold, &mut rng)
     }
 
     fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<F> {
@@ -343,8 +343,8 @@ impl<F: Field + Serialize + serde::de::DeserializeOwned> super::Shared for VecSh
 
     type Value = Vec<F>;
 
-    fn share(ctx: &Self::Context, secret: Self::Value, rng: &mut impl RngCore) -> Vec<Self> {
-        share_many(&secret, &ctx.ids, ctx.threshold, rng)
+    fn share(ctx: &Self::Context, secret: Self::Value, mut rng: impl RngCore) -> Vec<Self> {
+        share_many(&secret, &ctx.ids, ctx.threshold, &mut rng)
     }
 
     fn recombine(ctx: &Self::Context, shares: &[Self]) -> Option<Self::Value> {
@@ -447,7 +447,7 @@ pub fn share_many<F: Field>(
     vs: &[F],
     ids: &[F],
     threshold: u64,
-    rng: &mut impl RngCore,
+    mut rng: impl RngCore,
 ) -> Vec<VecShare<F>> {
     // FIX: Code duplication with 'share'
     let n = ids.len();
@@ -461,7 +461,7 @@ pub fn share_many<F: Field>(
     let polynomials: Vec<_> = vs
         .iter()
         .map(|v| {
-            let mut p = Polynomial::random(threshold as usize - 1, rng);
+            let mut p = Polynomial::random(threshold as usize - 1, &mut rng);
             p.0[0] = *v;
             p
         })

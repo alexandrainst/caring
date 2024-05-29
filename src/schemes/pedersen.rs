@@ -37,7 +37,7 @@ pub fn share<F, G>(
     secret: F,
     ids: &[F],
     threshold: usize,
-    rng: &mut impl RngCore,
+    mut rng: impl RngCore,
     PedersenGenParams(g, h): &PedersenGenParams<G>,
 ) -> Vec<VerifiableShare<F, G>>
 where
@@ -45,8 +45,8 @@ where
     F: Field,
     G: Group,
 {
-    let mut p1: Polynomial<F> = Polynomial::random(threshold, rng);
-    let p2: Polynomial<F> = Polynomial::random(threshold, rng);
+    let mut p1: Polynomial<F> = Polynomial::random(threshold, &mut rng);
+    let p2: Polynomial<F> = Polynomial::random(threshold, &mut rng);
     // secret `s`
     p1.0[0] = secret;
     // random secret `t` (left random)
@@ -112,7 +112,7 @@ where
 
     type Value = F;
 
-    fn share(ctx: &Self::Context, secret: Self::Value, rng: &mut impl RngCore) -> Vec<Self> {
+    fn share(ctx: &Self::Context, secret: Self::Value, rng: impl RngCore) -> Vec<Self> {
         share(secret, &ctx.ids, ctx.threshold, rng, &ctx.pedersen_params)
     }
 

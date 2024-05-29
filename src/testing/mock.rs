@@ -83,7 +83,7 @@ impl<F: Field + Serialize + DeserializeOwned + PartialEq + Sync> Shared for Shar
     fn share(
         ctx: &Self::Context,
         secret: Self::Value,
-        _rng: &mut impl rand::prelude::RngCore,
+        _rng: impl rand::prelude::RngCore,
     ) -> Vec<Self> {
         (0..ctx.all_parties)
             .map(|i| Share {

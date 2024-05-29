@@ -2,10 +2,7 @@ use std::error::Error;
 
 use futures::Future;
 
-use crate::net::{
-    connection::{Connection, ConnectionError, RecvBytes, SendBytes},
-    network::Network,
-};
+use crate::net::connection::{Connection, ConnectionError, RecvBytes, SendBytes};
 
 pub mod agency;
 pub mod connection;
@@ -56,9 +53,26 @@ pub trait SplitChannel: Channel {
     fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver);
 }
 
+impl<'a, C: Channel> Channel for &'a mut C {
+    type Error = C::Error;
+
+    fn send<T: serde::Serialize + Sync>(
+        &mut self,
+        msg: &T,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        (**self).send(msg)
+    }
+
+    fn recv<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> impl Future<Output = Result<T, Self::Error>> + Send {
+        (**self).recv()
+    }
+}
+
 /// Tune to a specific channel
 pub trait Tuneable {
-    type Error: Error + 'static;
+    type Error: Error + Send + 'static;
 
     fn id(&self) -> usize;
 
@@ -74,27 +88,29 @@ pub trait Tuneable {
     ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
 }
 
-impl<C: SplitChannel> Tuneable for Network<C> {
-    type Error = C::Error;
+impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
+    type Error = R::Error;
 
     fn id(&self) -> usize {
-        self.index
+        (**self).id()
     }
 
-    async fn recv_from<T: serde::de::DeserializeOwned>(
+    fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> Result<T, Self::Error> {
-        let idx = self.id_to_index(idx);
-        self.connections[idx].recv().await
+    ) -> impl Future<Output = Result<T, Self::Error>> {
+        (**self).recv_from(idx)
     }
 
-    async fn send_to<T: serde::Serialize + Sync>(
+    fn send_to<T: serde::Serialize + Sync>(
         &mut self,
         idx: usize,
         msg: &T,
-    ) -> Result<(), Self::Error> {
-        let idx = self.id_to_index(idx);
-        self.connections[idx].send(msg).await
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> {
+        (**self).send_to(idx, msg)
     }
 }
+
+/// General communication with support for most network functionality.
+pub trait Communicate: agency::Broadcast + agency::Unicast + Tuneable + Send {}
+impl<'a, C: Communicate> Communicate for &'a mut C {}
