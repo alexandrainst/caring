@@ -20,9 +20,7 @@ use tokio::join;
 use crate::{
     help,
     net::{
-        connection::{RecvBytes, SendBytes},
-        network::Network,
-        Channel, SplitChannel,
+        network::Network, Channel, RecvBytes, SendBytes, SplitChannel
     },
 };
 
@@ -64,7 +62,7 @@ impl MultiplexedMessage {
     }
 }
 
-impl super::connection::SendBytes for MuxedSender {
+impl SendBytes for MuxedSender {
     type SendError = MuxError;
 
     async fn send_bytes(&mut self, bytes: tokio_util::bytes::Bytes) -> Result<(), Self::SendError> {
@@ -84,7 +82,7 @@ impl super::connection::SendBytes for MuxedSender {
 }
 
 use tokio_util::bytes::{Buf, BufMut, Bytes, BytesMut};
-impl super::connection::RecvBytes for MuxedReceiver {
+impl RecvBytes for MuxedReceiver {
     type RecvError = MuxError;
 
     async fn recv_bytes(&mut self) -> Result<tokio_util::bytes::BytesMut, Self::RecvError> {
@@ -113,18 +111,25 @@ pub struct MuxConn(MuxedSender, MuxedReceiver);
 
 impl Channel for MuxConn {
     type Error = MuxError;
+}
 
-    fn send<T: serde::Serialize + Sync>(
+impl SendBytes for MuxConn {
+    type SendError = MuxError;
+
+    fn send_bytes(
         &mut self,
-        msg: &T,
-    ) -> impl futures::prelude::Future<Output = Result<(), Self::Error>> + Send {
-        self.0.send_thing(msg)
+        bytes: Bytes,
+    ) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send {
+        self.0.send_bytes(bytes)
     }
+}
+impl RecvBytes for MuxConn {
+    type RecvError = MuxError;
 
-    fn recv<T: serde::de::DeserializeOwned>(
+    fn recv_bytes(
         &mut self,
-    ) -> impl futures::prelude::Future<Output = Result<T, Self::Error>> + Send {
-        self.1.recv_thing()
+    ) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send {
+        self.1.recv_bytes()
     }
 }
 
@@ -166,6 +171,7 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
     ///
     /// # Example
     /// ```
+    /// # use crate::caring::net::SendBytes;
     /// # use caring::net::connection::Connection;
     /// # use caring::net::mux::Gateway;
     /// # tokio_test::block_on(async {
@@ -186,6 +192,7 @@ impl<'a, C: SplitChannel + Send + 'static> Gateway<'a, C> {
     /// futures::join!(t1, t2, gateway.drive()); // Gateway needs to be run aswell.
     /// # };
     /// #
+    /// # use crate::caring::net::RecvBytes;
     /// # use itertools::Itertools;
     /// # use crate::caring::net::Channel;
     /// # let second = async move {
@@ -346,13 +353,13 @@ mod test {
     use crate::net::{
         connection::Connection,
         mux::{Gateway, NetworkGateway},
-        Channel, RecvBytes, SendBytes, SplitChannel,
+        RecvBytes, SendBytes, SplitChannel,
     };
 
     async fn chat(c: &mut impl SplitChannel, text: &'static str) -> String {
         let text = String::from(text);
         let (s, r) = c.split();
-        let (res, msg) = join!(s.send_thing(&text), r.recv_thing());
+        let (res, msg) = join!(s.send(&text), r.recv());
         res.unwrap();
         let msg = msg.unwrap();
         assert_eq!(text, msg);

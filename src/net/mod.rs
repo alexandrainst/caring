@@ -1,74 +1,101 @@
-use std::error::Error;
+use std::{error::Error, future::Future};
 
-use futures::Future;
-
-use crate::net::connection::{Connection, ConnectionError, RecvBytes, SendBytes};
+use serde::{de::DeserializeOwned, Serialize};
+use tokio_util::bytes::{Bytes, BytesMut};
 
 pub mod agency;
 pub mod connection;
 pub mod mux;
 pub mod network;
 
+
+pub trait SendBytes: Send {
+    type SendError: Error + Send + Sync + 'static;
+
+    fn send_bytes(
+        &mut self,
+        bytes: Bytes,
+    ) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send;
+
+    fn send<T: Serialize + Sync>(
+        &mut self,
+        msg: &T,
+    ) -> impl Future<Output = Result<(), Self::SendError>> + Send {
+        async {
+            let msg = bincode::serialize(msg).unwrap();
+            self.send_bytes(msg.into()).await
+        }
+    }
+}
+
+impl<S: SendBytes> SendBytes for &mut S {
+    type SendError = S::SendError;
+
+    fn send_bytes(
+        &mut self,
+        bytes: Bytes,
+    ) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send {
+        (**self).send_bytes(bytes)
+    }
+}
+
+
+pub trait RecvBytes: Send {
+    type RecvError: Error + Send + Sync + 'static;
+    fn recv_bytes(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send;
+
+    fn recv<T: DeserializeOwned>(
+        &mut self,
+    ) -> impl Future<Output = Result<T, Self::RecvError>> + Send {
+        async {
+            let msg = self.recv_bytes().await?;
+            Ok(bincode::deserialize(&msg).unwrap())
+        }
+    }
+}
+
+impl<R: RecvBytes> RecvBytes for &mut R {
+    type RecvError = R::RecvError;
+
+    fn recv_bytes(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send {
+        (**self).recv_bytes()
+    }
+
+}
+
 /// A communication medium between you and another party.
 ///
 /// Allows you to send and receive arbitrary messages.
-pub trait Channel {
-    type Error: Error + Send + Sync + 'static;
-
-    /// Send a message over the channel
-    ///
-    /// * `msg`: message to serialize and send
-    fn send<T: serde::Serialize + Sync>(
-        &mut self,
-        msg: &T,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    fn recv<T: serde::de::DeserializeOwned>(
-        &mut self,
-    ) -> impl Future<Output = Result<T, Self::Error>> + Send;
+pub trait Channel: SendBytes + RecvBytes {
+    type Error: Error + Send;
+}
+impl<C: Channel> Channel for &mut C {
+    type Error = C::Error;
 }
 
-impl<
-        R: tokio::io::AsyncRead + std::marker::Unpin + Send,
-        W: tokio::io::AsyncWrite + std::marker::Unpin + Send,
-    > Channel for Connection<R, W>
-{
-    type Error = ConnectionError;
 
-    async fn send<T: serde::Serialize + Sync>(&mut self, msg: &T) -> Result<(), Self::Error> {
-        Connection::send(self, &msg).await
-    }
-
-    fn recv<T: serde::de::DeserializeOwned>(
-        &mut self,
-    ) -> impl Future<Output = Result<T, Self::Error>> {
-        Connection::recv(self)
-    }
-}
 
 /// A [Channel] which can be split into a sender and receiver.
-pub trait SplitChannel: Channel {
-    type Sender: SendBytes<SendError = Self::Error> + Send;
-    type Receiver: RecvBytes<RecvError = Self::Error> + Send;
+pub trait SplitChannel: Channel + Send {
+    type Sender: SendBytes<SendError = Self::SendError> + Send;
+    type Receiver: RecvBytes<RecvError = Self::RecvError> + Send;
     fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver);
+
 }
 
-impl<'a, C: Channel> Channel for &'a mut C {
-    type Error = C::Error;
+impl<'a, C: SplitChannel> SplitChannel for &'a mut C  {
+    type Sender = C::Sender;
+    type Receiver = C::Receiver;
 
-    fn send<T: serde::Serialize + Sync>(
-        &mut self,
-        msg: &T,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        (**self).send(msg)
-    }
-
-    fn recv<T: serde::de::DeserializeOwned>(
-        &mut self,
-    ) -> impl Future<Output = Result<T, Self::Error>> + Send {
-        (**self).recv()
+    fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver) {
+        (**self).split()
     }
 }
+
 
 /// Tune to a specific channel
 pub trait Tuneable {
@@ -85,7 +112,7 @@ pub trait Tuneable {
         &mut self,
         idx: usize,
         msg: &T,
-    ) -> impl std::future::Future<Output = Result<(), Self::TuningError>>;
+    ) -> impl Future<Output = Result<(), Self::TuningError>>;
 }
 
 impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
@@ -106,7 +133,7 @@ impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
         &mut self,
         idx: usize,
         msg: &T,
-    ) -> impl std::future::Future<Output = Result<(), Self::TuningError>> {
+    ) -> impl Future<Output = Result<(), Self::TuningError>> {
         (**self).send_to(idx, msg)
     }
 }

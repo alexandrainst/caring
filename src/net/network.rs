@@ -1,15 +1,16 @@
-use crate::net::connection::RecvBytes;
-use std::{collections::BTreeMap, error::Error, net::SocketAddr, ops::Range, time::Duration};
+use crate::net::{Channel, RecvBytes, SendBytes};
+use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 
 use futures::future::join_all;
 use futures::prelude::*;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use tokio::io::AsyncWriteExt;
+use tokio_util::bytes::Bytes;
 
 use crate::net::{
     agency::{Broadcast, Unicast},
-    connection::{Connection, ConnectionError, DuplexConnection, SendBytes, TcpConnection},
+    connection::{Connection, DuplexConnection, TcpConnection},
     SplitChannel, Tuneable,
 };
 
@@ -43,10 +44,13 @@ pub struct Network<C: SplitChannel> {
 
 #[derive(thiserror::Error, Debug)]
 #[error("Error communicating with {id}: {source}")]
-pub struct NetworkError<E: Error> {
-    id: u32,
-    source: E,
+pub enum NetworkError<E,U> {
+    Incoming {id: u32, source: E},
+    Outgoing {id: u32, source: U}
 }
+
+#[allow(type_alias_bounds)] // It clearly matters, stop complaining
+type NetResult<T, C: Channel> = std::result::Result<T, NetworkError<C::RecvError, C::SendError>>;
 
 // PERFORMANCE: serialize in network once when broadcasting.
 impl<C: SplitChannel> Network<C> {
@@ -65,6 +69,7 @@ impl<C: SplitChannel> Network<C> {
         }
     }
 
+
     /// Broadcast a message to all other parties.
     ///
     /// Asymmetric, non-waiting
@@ -73,12 +78,13 @@ impl<C: SplitChannel> Network<C> {
     pub async fn broadcast(
         &mut self,
         msg: &(impl serde::Serialize + Sync),
-    ) -> Result<(), NetworkError<C::Error>> {
+    ) -> NetResult<(), C> {
         let my_id = self.index;
+        let packet : Bytes = bincode::serialize(&msg).unwrap().into();
         let outgoing = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let id = if i < my_id { i } else { i + 1 } as u32;
-            conn.send(&msg)
-                .map_err(move |e| NetworkError { source: e, id })
+            conn.send_bytes(packet.clone())
+                .map_err(move |e| NetworkError::Outgoing{id, source: e})
         });
         future::try_join_all(outgoing).await?;
         Ok(())
@@ -95,7 +101,7 @@ impl<C: SplitChannel> Network<C> {
     pub async fn unicast(
         &mut self,
         msgs: &[impl serde::Serialize + Sync],
-    ) -> Result<(), NetworkError<C::Error>> {
+    ) -> NetResult<(), C> {
         let my_id = self.index;
         let outgoing = self
             .connections
@@ -105,7 +111,7 @@ impl<C: SplitChannel> Network<C> {
             .map(|(i, (conn, msg))| {
                 let id = if i < my_id { i } else { i + 1 } as u32;
                 conn.send(msg)
-                    .map_err(move |e| NetworkError { source: e, id })
+                    .map_err(move |e| NetworkError::Outgoing { id, source: e })
             });
         future::try_join_all(outgoing).await?;
         Ok(())
@@ -118,7 +124,7 @@ impl<C: SplitChannel> Network<C> {
     /// Returns: A list sorted by the connections (skipping yourself)
     pub async fn receive_all<T: serde::de::DeserializeOwned>(
         &mut self,
-    ) -> Result<Vec<T>, NetworkError<C::Error>> {
+    ) -> NetResult<Vec<T>, C> {
         let my_id = self.index;
         let messages = self.connections.iter_mut().enumerate().map(|(i, conn)| {
             let msg = conn.recv::<T>();
@@ -132,10 +138,10 @@ impl<C: SplitChannel> Network<C> {
         let messages: Vec<_> = messages
             .into_iter()
             .map(|(id, m)| match m {
-                Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
+                Ok(m) => m.map_err(|e| NetworkError::Incoming { id, source: e }),
                 Err(_duration) => todo!("handle it"),
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<NetResult<_, C>>()?;
 
         assert!(
             messages.len() == self.connections.len(),
@@ -149,7 +155,7 @@ impl<C: SplitChannel> Network<C> {
     /// Messages are ordered by their index.
     ///
     /// * `msg`: message to send and receive
-    pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, NetworkError<C::Error>>
+    pub async fn symmetric_broadcast<T>(&mut self, msg: T) -> NetResult<Vec<T>, C>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
@@ -157,14 +163,15 @@ impl<C: SplitChannel> Network<C> {
         let (mut tx, mut rx): (Vec<_>, Vec<_>) =
             self.connections.iter_mut().map(|c| c.split()).unzip();
 
+        let packet : Bytes = bincode::serialize(&msg).unwrap().into();
         let outgoing = tx.iter_mut().enumerate().map(|(id, conn)| {
             let id = if id < my_id { id } else { id + 1 } as u32;
-            conn.send_thing(&msg)
-                .map_err(move |e| NetworkError { source: e, id })
+            conn.send_bytes(packet.clone())
+                .map_err(move |e| NetworkError::Outgoing { id, source: e })
         });
 
         let messages = rx.iter_mut().enumerate().map(|(i, conn)| {
-            let msg = conn.recv_thing::<T>();
+            let msg = conn.recv::<T>();
             let msg = tokio::time::timeout(Duration::from_secs(5), msg);
             let id = if i < my_id { i } else { i + 1 } as u32;
             async move { (id, msg.await) }
@@ -181,7 +188,7 @@ impl<C: SplitChannel> Network<C> {
             .map(|(i, m)| {
                 let id = i;
                 match m {
-                    Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
+                    Ok(m) => m.map_err(|e| NetworkError::Incoming { id, source: e }),
                     Err(_duration) => {
                         todo!("handle it")
                         //Err(NetworkError {
@@ -191,7 +198,7 @@ impl<C: SplitChannel> Network<C> {
                     }
                 }
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<NetResult<_, C>>()?;
 
         messages.insert(self.index, msg);
         Ok(messages)
@@ -205,7 +212,7 @@ impl<C: SplitChannel> Network<C> {
     pub async fn symmetric_unicast<T>(
         &mut self,
         mut msgs: Vec<T>,
-    ) -> Result<Vec<T>, NetworkError<C::Error>>
+    ) -> NetResult<Vec<T>, C>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
@@ -221,13 +228,13 @@ impl<C: SplitChannel> Network<C> {
             .enumerate()
             .map(|(id, (conn, msg))| {
                 let id = id as u32;
-                conn.send_thing(msg)
-                    .map_err(move |e| NetworkError { source: e, id })
+                conn.send(msg)
+                    .map_err(move |e| NetworkError::Outgoing { id, source: e })
             });
 
         let messages = rx.iter_mut().enumerate().map(|(i, conn)| {
             let id = if i < my_id { i } else { i + 1 } as u32;
-            let msg = conn.recv_thing::<T>();
+            let msg = conn.recv::<T>();
             let msg = tokio::time::timeout(Duration::from_secs(5), msg);
             async move { (id, msg.await) }
         });
@@ -241,7 +248,7 @@ impl<C: SplitChannel> Network<C> {
         let mut messages: Vec<_> = messages
             .into_iter()
             .map(|(id, m)| match m {
-                Ok(m) => m.map_err(|e| NetworkError { id, source: e }),
+                Ok(m) => m.map_err(|e| NetworkError::Incoming { id, source: e }),
                 Err(_duration) => {
                     todo!("handle it")
                     //    Err(NetworkError {
@@ -250,7 +257,7 @@ impl<C: SplitChannel> Network<C> {
                     //})
                 }
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<NetResult<_, C>>()?;
 
         messages.insert(self.index, my_own_msg);
         Ok(messages)
@@ -262,7 +269,7 @@ impl<C: SplitChannel> Network<C> {
     /// We then (all) sort the connection list by the numbers picked.
     ///
     /// * `rng`: Random number generator to use
-    pub async fn resolute_ids(&mut self, rng: &mut impl Rng) -> Result<(), NetworkError<C::Error>> {
+    pub async fn resolute_ids(&mut self, rng: &mut impl Rng) -> NetResult<(), C> {
         self.index = 0; // reset index.
         let num: u64 = rng.gen();
         let results = self.symmetric_broadcast(num).await?;
@@ -336,7 +343,7 @@ impl<C: SplitChannel> Network<C> {
 
 
 impl<C: SplitChannel> Unicast for Network<C> {
-    type UnicastError = NetworkError<C::Error>;
+    type UnicastError = NetworkError<C::RecvError, C::SendError>;
 
     #[tracing::instrument(skip_all)]
     async fn unicast(&mut self, msgs: &[impl serde::Serialize + Sync]) -> Result<(), Self::UnicastError> {
@@ -362,7 +369,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
 }
 
 impl<C: SplitChannel> Broadcast for Network<C> {
-    type BroadcastError = NetworkError<C::Error>;
+    type BroadcastError = NetworkError<C::RecvError, C::SendError>;
 
     #[tracing::instrument(skip_all)]
     async fn broadcast(&mut self, msg: &(impl serde::Serialize + Sync)) -> Result<(), Self::BroadcastError> {
@@ -381,10 +388,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
         &mut self,
         idx: usize,
     ) -> impl Future<Output = Result<T, Self::BroadcastError>> {
-        Tuneable::recv_from(self, idx).map_err(move |e| NetworkError {
-            id: idx as u32,
-            source: e,
-        })
+        Tuneable::recv_from(self, idx)
     }
 
     fn size(&self) -> usize {
@@ -393,7 +397,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
 }
 
 impl<C: SplitChannel> Tuneable for Network<C> {
-    type TuningError = C::Error;
+    type TuningError = NetworkError<C::RecvError, C::SendError>;
 
     fn id(&self) -> usize {
         self.index
@@ -404,7 +408,7 @@ impl<C: SplitChannel> Tuneable for Network<C> {
         idx: usize,
     ) -> Result<T, Self::TuningError> {
         let idx = self.id_to_index(idx);
-        self.connections[idx].recv().await
+        self.connections[idx].recv().await.map_err(|e | NetworkError::Incoming { id: idx as u32, source: e })
     }
 
     async fn send_to<T: serde::Serialize + Sync>(
@@ -413,7 +417,7 @@ impl<C: SplitChannel> Tuneable for Network<C> {
         msg: &T,
     ) -> Result<(), Self::TuningError> {
         let idx = self.id_to_index(idx);
-        self.connections[idx].send(msg).await
+        self.connections[idx].send(msg).await.map_err(|e | NetworkError::Outgoing { id: idx as u32, source: e })
     }
 }
 
@@ -473,7 +477,7 @@ impl TcpNetwork {
     pub async fn connect(
         me: SocketAddr,
         peers: &[SocketAddr],
-    ) -> Result<Self, NetworkError<ConnectionError>> {
+    ) -> NetResult<Self, TcpConnection> {
         let n = peers.len();
 
         // Connecting to parties
@@ -518,7 +522,7 @@ impl TcpNetwork {
         Ok(network)
     }
 
-    pub async fn shutdown(self) -> Result<(), NetworkError<ConnectionError>> {
+    pub async fn shutdown(self) -> NetResult<(), TcpConnection> {
         let futs = self
             .connections
             .into_iter()
@@ -529,7 +533,7 @@ impl TcpNetwork {
                         tcp.shutdown().await.unwrap();
                         Ok(())
                     }
-                    Err(e) => Err(NetworkError {
+                    Err(e) => Err(NetworkError::Outgoing {
                         id: i as u32,
                         source: e,
                     }),

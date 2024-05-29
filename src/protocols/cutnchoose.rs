@@ -90,9 +90,7 @@ mod test {
     use crate::{
         algebra::element::Element32,
         net::{
-            agency::Broadcast,
-            connection::{self, DuplexConnection},
-            Channel, SplitChannel,
+            agency::Broadcast, connection::{self, ConnectionError, DuplexConnection}, Channel, RecvBytes, SendBytes, SplitChannel
         },
         protocols::cutnchoose::{choose, cut},
         schemes::{
@@ -143,21 +141,29 @@ mod test {
         }
     }
 
+    impl SendBytes for SingleBroadcast {
+        type SendError = ConnectionError;
+
+        fn send_bytes(
+            &mut self,
+            bytes: tokio_util::bytes::Bytes,
+        ) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send {
+            self.inner.send_bytes(bytes)
+        }
+    }
+
+    impl RecvBytes for SingleBroadcast {
+        type RecvError = ConnectionError;
+
+        fn recv_bytes(
+            &mut self,
+        ) -> impl std::future::Future<Output = Result<tokio_util::bytes::BytesMut, Self::RecvError>> + Send {
+            self.inner.recv_bytes()
+        }
+    }
+
     impl Channel for SingleBroadcast {
         type Error = <DuplexConnection as Channel>::Error;
-
-        fn send<T: serde::Serialize + Sync>(
-            &mut self,
-            msg: &T,
-        ) -> impl futures::prelude::Future<Output = Result<(), Self::Error>> {
-            self.inner.send(msg)
-        }
-
-        fn recv<T: serde::de::DeserializeOwned>(
-            &mut self,
-        ) -> impl futures::prelude::Future<Output = Result<T, Self::Error>> {
-            self.inner.recv()
-        }
     }
 
     #[tokio::test]
