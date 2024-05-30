@@ -149,8 +149,8 @@ pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: &Path)
     Ok(engine)
 }
 
-pub fn do_preproc(){
-    let file_names = vec![Path::new("src/context1.bin"), Path::new("src/context2.bin")];
+pub fn do_preproc(filenames: Vec<&str>){
+    let file_names = vec![Path::new(filenames[0]), Path::new(filenames[1])];
     let known_to_each = vec![2, 2];
     let number_of_triplets = 2;
     let num = to_offset(0.0);
@@ -184,7 +184,7 @@ mod test {
     #[test]
     fn sunshine() {
         use std::thread;
-        do_preproc();
+        do_preproc(vec!["src/context1.bin", "src/context2.bin"]);
         let t1 = thread::spawn(|| {
             println!("[1] Setting up...");
             let mut engine = setup_engine("127.0.0.1:1234", &["127.0.0.1:1235"], Path::new("src/context1.bin") ).unwrap();
@@ -213,10 +213,11 @@ mod test {
     #[test]
     fn sunshine_for_two() {
         use std::thread;
-        do_preproc();
+        //do_preproc();
+        do_preproc(vec!["src/context3.bin", "src/context4.bin"]);
         let t1 = thread::spawn(|| {
             println!("[1] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:2234", &["127.0.0.1:2235"], Path::new("src/context1.bin") ).unwrap();
+            let mut engine = setup_engine("127.0.0.1:2234", &["127.0.0.1:2235"], Path::new("src/context3.bin") ).unwrap();
             println!("[1] Ready");
             let res = mpc_sum(&mut engine, &[32.0, 11.9]).unwrap();
             println!("[1] Done");
@@ -226,7 +227,7 @@ mod test {
         std::thread::sleep(Duration::from_millis(50));
         let t2 = thread::spawn(|| {
             println!("[2] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:2235", &["127.0.0.1:2234"], Path::new("src/context2.bin") ).unwrap();
+            let mut engine = setup_engine("127.0.0.1:2235", &["127.0.0.1:2234"], Path::new("src/context4.bin") ).unwrap();
             println!("[2] Ready");
             let res = mpc_sum(&mut engine, &[32.0, 24.1]).unwrap();
             println!("[2] Done");

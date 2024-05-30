@@ -1,11 +1,4 @@
 // Preprocessing
-// Making triplets
-// Making random values known to some specific party
-// MAC'ing elements
-
-// To do the preprosessing we need some HE scheme
-
-// This has to be done interactivly - look at triplets for inspiration
 
 use ff::PrimeField;
 use rand::SeedableRng;
@@ -57,11 +50,9 @@ pub struct Triplets<F:PrimeField>{
     multiplication_triplets: Vec<MultiplicationTriple<F>>,
 }
 
-// TODO: return error instead - a "not enogh preproced elm"-error
 impl<F:PrimeField> Triplets<F> {
     pub fn get_triplet(&mut self) -> Result<MultiplicationTriple<F>, MissingPreProcError>{
         self.multiplication_triplets.pop().ok_or(MissingPreProcError{e_type: MissingPreProcErrorType::MissingTriplet})
-        //.expect("Not enough triplets")
     }
 }
 
@@ -105,31 +96,30 @@ pub fn write_preproc_to_file<F:PrimeField + serde::Serialize + serde::de::Deseri
     let (contexts,_): (Vec<SpdzContext<F>>, _) = dealer_prepross(rng, known_to_each, number_of_triplets, number_of_parties);
     let names_and_contexts = file_names.iter().zip(contexts);
     for (name, context) in names_and_contexts{
-        let data: Vec<u8> = bincode::serialize(&context).unwrap();
-        let mut buffer = File::create(name).unwrap();
-        let _ = buffer.write_all(&data)?;
+        let data: Vec<u8> = bincode::serialize(&context)?;
+        let mut file = File::create(name)?;
+        let _ = file.write_all(&data)?;
+        file.sync_all()?;
+
     }
     Ok(())
 }
 pub fn read_preproc_from_file<F:PrimeField +serde::Serialize + serde::de::DeserializeOwned>(
     file_name: &Path, 
 ) -> SpdzContext<F>{
-    let mut new_buffer = Vec::new();
+    let mut data = Vec::new();
     let mut file = File::open(file_name).expect("open file");
-    file.read_to_end(&mut new_buffer).expect("read to end");
-    let new_context: SpdzContext<F> = bincode::deserialize(&new_buffer).expect("deserialize");
+    file.read_to_end(&mut data).expect("read to end");
+    let new_context: SpdzContext<F> = bincode::deserialize(&data).expect("deserialize");
     new_context
 }
 pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
-    //mut rng: rand::rngs::mock::StepRng,
-    //mut rng: rand::rngs::ThreadRng,
     mut rng: impl rand::Rng,
     known_to_each: Vec<usize>,
     number_of_triplets: usize,
     number_of_parties: usize,
 ) -> (Vec<SpdzContext<F>>, SecretValues<F>) {
     // TODO: tjek that the arguments are consistent
-    //type F = Element32;
     let mac_keys:Vec<F> = (0..number_of_parties).map(|_| F::random(&mut rng)).collect();
     let mut contexts: Vec<SpdzContext<F>> = (0..number_of_parties).map(|i| SpdzContext::empty(number_of_parties, mac_keys[i], i)).collect();
     let mac_key = mac_keys.into_iter().sum();
@@ -184,12 +174,6 @@ pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::Deserialize
         me += 1;
     }
     // Now filling in triplets
-
-    ////eksperiment ... but it does not seem to simplify anything - it rather seems to complecate it... - atleast with a lot of clones ... 
-    //let master_triplets: Vec<MultiplicationTriple<F>> = (0..number_of_triplets).map(|_| generate_random_triplet(F::random(&mut rng), F::random(&mut rng), &mac_key)).collect();
-    //let mut party_triplets:Vec<Vec<MultiplicationTriple<F>>> = (0..number_of_parties-1).map(|_| (0..number_of_triplets).map(|_| generate_random_triplet(F::random(&mut rng), F::random(&mut rng), &mac_key)).collect_vec()).collect();
-    //let last_party_triplet: Vec<MultiplicationTriple<F>> = (0..number_of_triplets).map(|i| compute_last_triplet_i(i, party_triplets.clone(), master_triplets.clone())).collect();
-    //party_triplets.push(last_party_triplet);
 
     for _ in 0..number_of_triplets {
         let mut a = F::random(&mut rng);
@@ -281,29 +265,3 @@ fn generate_empty_context<F: PrimeField>(number_of_parties: usize, mac_key_share
         preprocessed_values: p_preprosvals,
     }
 }
-
-//fn generate_random_triplet<F:PrimeField>(a: F, b: F , mac_key: &F)-> MultiplicationTriple<F> {
-    ////let mut a = F::random(&mut rng);
-    ////let mut b = F::random(&mut rng);
-    //let c = a * b;
-
-    //let a_mac = a * mac_key;
-    //let b_mac = b * mac_key;
-    //let c_mac = c * mac_key;
-
-    //make_multiplicationtriplet(spdz::Share { val: a, mac: a_mac }, spdz::Share { val: b, mac: b_mac }, spdz::Share { val: c, mac: c_mac })
-//}
-//fn compute_last_triplet_i<F:PrimeField>(i:usize, party_triplets:Vec<Vec<MultiplicationTriple<F>>>, master_triplets: Vec<MultiplicationTriple<F>>)-> MultiplicationTriple<F>{
-    //let mut relevant_triplets = vec![];
-    //for triplets in party_triplets {
-        //relevant_triplets.push(triplets[i].clone());
-    //}
-    //let mut relevant_master_triplet = master_triplets[i].clone();
-    ////let mut a = relevant_master_triplet.a;
-    ////let mut b = relevant_master_triplet.b;
-    ////let mut c = relevant_master_triplet.c;
-
-    ////let a_final = relevant_triplets.iter().fold(a, |acc, t| acc - t.a);
-    //relevant_triplets.iter().fold(relevant_master_triplet, |acc, t| MultiplicationTriple{a:acc.a - t.a, b:acc.b-t.b, c:acc.c-t.c})
-
-//}
