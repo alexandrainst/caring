@@ -4,7 +4,7 @@ import caring
 # However for starters, and testing purposses ONLY we will allow party 1 to do it 
 # and save it where both party one and party two can find it. 
 
-# TODO: pycare.do_preproc
+caring.preproc(12, "./context1.bin,./context2.bin")
 engine = caring.setup("./context1.bin", "127.0.0.1:1234", "127.0.0.1:1235")
 
 res = engine.sum(2.5)

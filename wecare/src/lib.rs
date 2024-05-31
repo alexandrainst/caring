@@ -149,10 +149,11 @@ pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: &Path)
     Ok(engine)
 }
 
-pub fn do_preproc(filenames: Vec<&str>){
+pub fn do_preproc(filenames: Vec<&str>, number_of_shares: Vec<usize>){
+    assert_eq!(filenames.len(), number_of_shares.len());
     let file_names = vec![Path::new(filenames[0]), Path::new(filenames[1])];
-    let known_to_each = vec![2, 2];
-    let number_of_triplets = 2;
+    let known_to_each = vec![number_of_shares[0], number_of_shares[1]];
+    let number_of_triplets = 0;
     let num = to_offset(0.0);
     preprocessing::write_preproc_to_file(
         file_names,
@@ -184,7 +185,7 @@ mod test {
     #[test]
     fn sunshine() {
         use std::thread;
-        do_preproc(vec!["src/context1.bin", "src/context2.bin"]);
+        do_preproc(vec!["src/context1.bin", "src/context2.bin"], vec![1,1]);
         let t1 = thread::spawn(|| {
             println!("[1] Setting up...");
             let mut engine = setup_engine("127.0.0.1:1234", &["127.0.0.1:1235"], Path::new("src/context1.bin") ).unwrap();
@@ -213,8 +214,7 @@ mod test {
     #[test]
     fn sunshine_for_two() {
         use std::thread;
-        //do_preproc();
-        do_preproc(vec!["src/context3.bin", "src/context4.bin"]);
+        do_preproc(vec!["src/context3.bin", "src/context4.bin"], vec![2,2]);
         let t1 = thread::spawn(|| {
             println!("[1] Setting up...");
             let mut engine = setup_engine("127.0.0.1:2234", &["127.0.0.1:2235"], Path::new("src/context3.bin") ).unwrap();
