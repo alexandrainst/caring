@@ -365,34 +365,30 @@ pub async fn check_all_d<F>(
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    // TODO: make nice.
-    let number_of_ds = partially_opened_vals.len();
-    let mut partially_opened_vals_copy = partially_opened_vals.to_vec();
-    let new_vec = &mut vec![];
-    new_vec.append(partially_opened_vals);
-    new_vec.append(&mut vec![random_element]);
-    partially_opened_vals_copy.append(&mut vec![random_element]);
-    let (c, s) = commit_many(new_vec);
-    let cs = network.symmetric_broadcast((c, s)).await.unwrap();
-    let mut dss = network
-        .symmetric_broadcast(partially_opened_vals_copy)
-        .await
-        .unwrap();
-    let csdss = cs.iter().zip(dss.iter());
-    let this_went_well = csdss.fold(true, |acc, ((c,s),ds)| acc && verify_many(ds, c, s));
-    
-    // From each of the vectors we resived from the other parties, we pop of the random element in the end and use it to construct a shared random element.
-    let r_elm = (&mut dss).iter_mut().fold(F::from_u128(0), |acc, ds| acc + ds.pop().expect("there is atleast one elm"));
-    // From one shared random element we construct a number of elements that are hard to predict:
-    let r_elms: Vec<F> = (1..number_of_ds+1).map(|i| power(r_elm.clone(), i)).collect();
+    //first we need to pick a random value together
+    let random_elms_commitments = network.symmetric_broadcast(commit(&random_element)).await.unwrap();
+    let random_val_shares = network.symmetric_broadcast(random_element).await.unwrap();
+    let rv_c = random_val_shares.clone().into_iter().zip(random_elms_commitments);
+    if !rv_c.fold(true, |acc, (v,(c,s))| acc && verify_commit(&v, &c, &s)){return false}
 
-    let mut sum = F::from_u128(0);
+    // Then we make a random linearcombination of all the values, commit, broadcast, verify that it is zero
+    let lin_comp = make_linarcombination(random_val_shares.into_iter().sum(), partially_opened_vals);
+    partially_opened_vals.clear();
+    let lin_comps_commitments = network.symmetric_broadcast(commit(&lin_comp)).await.unwrap();
+    let lin_comps = network.symmetric_broadcast(lin_comp).await.unwrap();
+    let lc_c = lin_comps.clone().into_iter().zip(lin_comps_commitments);
+    if !lc_c.fold(true, |acc, (lc, (c,s)) | acc && verify_commit(&lc, &c, &s)){return false}
     
-    for ds in dss {
-        let rds = r_elms.iter().zip(ds.clone());
-        sum = rds.fold(sum, |acc, (r, d)| acc + d*r);
-    }
-    this_went_well && (sum == F::from_u128(0))
+    let zero: F = lin_comps.into_iter().sum();
+    zero == F::from_u128(0)
+}
+
+fn make_linarcombination<F: PrimeField>(
+    random_element: F,
+    elements: &mut Vec<F>,
+) -> F {
+    let r_elms: Vec<F> = (1..elements.len()+1).map(|i| power(random_element.clone(), i)).collect();
+    elements.into_iter().zip(r_elms).fold(F::from_u128(0), |acc, (e, r)| acc + r*(*e))
 }
 
 // TODO: find a more efficent way to to take the power of an element.

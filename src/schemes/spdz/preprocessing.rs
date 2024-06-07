@@ -92,7 +92,9 @@ pub fn write_preproc_to_file<F:PrimeField + serde::Serialize + serde::de::Deseri
     _ : F,
 )-> Result<(), Box<dyn Error>> {
     let number_of_parties = file_names.len();
+    assert!(number_of_parties == known_to_each.len());
     let rng = rand_chacha::ChaCha20Rng::from_entropy();
+    // Notice here that the secret values are not written to the file, No party is allowed to know the value.
     let (contexts,_): (Vec<SpdzContext<F>>, _) = dealer_prepross(rng, known_to_each, number_of_triplets, number_of_parties);
     let names_and_contexts = file_names.iter().zip(contexts);
     for (name, context) in names_and_contexts{
@@ -107,6 +109,7 @@ pub fn write_preproc_to_file<F:PrimeField + serde::Serialize + serde::de::Deseri
 pub fn read_preproc_from_file<F:PrimeField +serde::Serialize + serde::de::DeserializeOwned>(
     file_name: &Path, 
 ) -> SpdzContext<F>{
+    // TODO: return Result instead.
     let mut data = Vec::new();
     let mut file = File::open(file_name).expect("open file");
     file.read_to_end(&mut data).expect("read to end");
@@ -227,7 +230,8 @@ pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::Deserialize
             .push(triplet)
     }
 
-    let secret_values = SecretValues { mac_key };
+    // TODO: The secret values are only there for testing/ develompent purposes, consider removing it.
+    let secret_values = SecretValues { mac_key }; 
     (contexts, secret_values)
 
 
