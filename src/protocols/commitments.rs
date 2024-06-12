@@ -1,11 +1,10 @@
 /// This is a simple commitment scheme.
 /// It is outsorsed to a module, so it can be easily relapaced
 use ff::PrimeField;
+use rand::thread_rng;
 use rand::Rng;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use rand::thread_rng;
-
 
 // TODO: Find a hashing algorithm of cryptograpic standart to use in commitments
 // TODO: Consider whether we need a "real" commitment scheme
@@ -32,22 +31,20 @@ fn calculate_hash<T: Hash>(t: &T) -> u64 {
     t.hash(&mut s);
     s.finish()
 }
-// TODO: consider whether the randomness should be chosen by the user instead, allowing the user controle over which randomness generator is used.  
-pub fn commit<F: PrimeField  + serde::Serialize>(val: &F) -> (Commitment, Salt) {
+// TODO: consider whether the randomness should be chosen by the user instead, allowing the user controle over which randomness generator is used.
+pub fn commit<F: PrimeField + serde::Serialize>(val: &F) -> (Commitment, Salt) {
     let mut rng = thread_rng();
     let r_salt: u64 = rng.gen();
-    let salt = Salt {
-        salt: r_salt,
+    let salt = Salt { salt: r_salt };
+    let vals = Values {
+        values: bincode::serialize(val).unwrap(),
     };
-    let vals = Values{values: bincode::serialize(val).unwrap()};
     (make_commit(vals, salt), salt)
 }
 pub fn commit_many<F: PrimeField + serde::Serialize>(vals: &Vec<F>) -> (Commitment, Salt) {
     let mut rng = thread_rng();
     let r_salt: u64 = rng.gen();
-    let salt = Salt {
-        salt: r_salt,
-    };
+    let salt = Salt { salt: r_salt };
     let mut values = vec![];
     for v in vals {
         values.append(&mut bincode::serialize(v).unwrap());
@@ -73,7 +70,7 @@ pub fn verify_commit<F: PrimeField + serde::Serialize>(
     *commitment == commitment_2
 }
 
-pub fn verify_many<F: PrimeField+ serde::Serialize>(
+pub fn verify_many<F: PrimeField + serde::Serialize>(
     vals: &Vec<F>,
     commitment: &Commitment,
     salt: &Salt,
