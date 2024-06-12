@@ -87,12 +87,11 @@ where
         Err(e) => return Err(e),
     };
     let is_chosen_party = params.who_am_i == 0;
-    //let mac_key_share = params.mac_key_share;
 
     let e = s1 - triplet.a;
     let d = s2 - triplet.b;
-    let e = partial_opening(&e, &params, network, opened_values).await;
-    let d = partial_opening(&d, &params, network, opened_values).await;
+    let e = partial_opening(&e, params, network, opened_values).await;
+    let d = partial_opening(&d, params, network, opened_values).await;
     let res =
         (triplet.c + triplet.b * e + triplet.a * d).add_public(e * d, is_chosen_party, params);
     Ok(res)
@@ -273,7 +272,7 @@ pub async fn open_res_many<F>(
     shares_to_open: Vec<Share<F>>,
     network: &mut impl Broadcast,
     params: &SpdzParams<F>,
-    prev_opened_values: &Vec<F>,
+    prev_opened_values: &[F],
     random_element: F,
 ) -> Vec<F>
 where
@@ -294,7 +293,7 @@ where
     let mut opened_vals_sum: Vec<F> = opened_vals
         .pop()
         .expect("Atleast one element must be opened");
-    while opened_vals.len() > 0 {
+    while !opened_vals.is_empty() {
         let ov = opened_vals
             .pop()
             .expect("we just verified that there are elements left");
@@ -427,7 +426,6 @@ mod test {
     use ff::Field;
     use rand::thread_rng;
     use rand::SeedableRng;
-    use rand_chacha::ChaCha20Rng;
 
     use crate::{algebra::element::Element32, net::network::InMemoryNetwork};
 
