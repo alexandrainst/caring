@@ -213,7 +213,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
         // 3. Hash the hashes together and broadcast that
         event!(Level::INFO, "Broadcast sum of all commits");
         let mut digest = D::new();
-        for hash in msg_hashes.iter() {
+        for hash in &msg_hashes {
             digest.update(hash);
         }
         let sum: Box<[u8]> = digest.finalize().to_vec().into_boxed_slice();

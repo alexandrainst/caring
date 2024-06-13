@@ -19,9 +19,10 @@
 use std::error::Error;
 
 use futures::{SinkExt, StreamExt};
+use futures_concurrency::future::Join;
 use thiserror::Error;
 use tokio::{
-    io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
@@ -201,8 +202,17 @@ impl DuplexConnection {
         (Self::new(r1, w1), Self::new(r2, w2))
     }
 
+    /// Gracefully shutdown the connection.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the connection could not be shutdown cleanly.
     pub async fn shutdown(self) -> Result<(), std::io::Error> {
-        let (r,w) = self.destroy();
+        let (mut r, mut w) = self.destroy();
+        // HACK: A single read/write so we don't exit too early.
+        // We ignore the errors, since we don't care if we can't send or receive,
+        // it is supposed to be closed.
+        let (_, _) = (r.read_u8(), w.write_u8(0)).join().await;
         let mut stream = r.unsplit(w);
         stream.shutdown().await
     }

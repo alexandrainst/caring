@@ -151,7 +151,7 @@ impl<C: SplitChannel> Network<C> {
     {
         let my_id = self.index;
         let (mut tx, mut rx): (Vec<_>, Vec<_>) =
-            self.connections.iter_mut().map(|c| c.split()).unzip();
+            self.connections.iter_mut().map(super::SplitChannel::split).unzip();
 
         let packet: Bytes = bincode::serialize(&msg).unwrap().into();
         let outgoing = tx.iter_mut().enumerate().map(|(id, conn)| {
@@ -199,6 +199,11 @@ impl<C: SplitChannel> Network<C> {
     /// will be send to party `i`.
     ///
     /// * `msg`: message to send and receive
+    ///
+    /// # Errors
+    ///
+    ///  Returns a [``NetworkError``] with an ``id`` if the underlying connection to that ``id`` fails.
+    ///
     pub async fn symmetric_unicast<T>(&mut self, mut msgs: Vec<T>) -> NetResult<Vec<T>, C>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
@@ -207,7 +212,7 @@ impl<C: SplitChannel> Network<C> {
         let my_own_msg = msgs.remove(my_id);
 
         let (mut tx, mut rx): (Vec<_>, Vec<_>) =
-            self.connections.iter_mut().map(|c| c.split()).unzip();
+            self.connections.iter_mut().map(super::SplitChannel::split).unzip();
 
         let outgoing = tx
             .iter_mut()

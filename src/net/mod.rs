@@ -67,8 +67,8 @@ impl<R: RecvBytes> RecvBytes for &mut R {
 /// A communication medium between you and another party.
 ///
 /// Allows you to send and receive arbitrary messages.
-pub trait Channel: SendBytes + RecvBytes {
-    type Error: Error + Send;
+pub trait Channel: SendBytes<SendError = Self::Error> + RecvBytes<RecvError = Self::Error> {
+    type Error: Error + Send + Sync + 'static;
 }
 impl<C: Channel> Channel for &mut C {
     type Error = C::Error;

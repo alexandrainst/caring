@@ -9,7 +9,8 @@ use std::error::Error;
 use std::sync::Arc;
 
 
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
+use num_traits::ToPrimitive;
 use thiserror::Error;
 use tokio::sync::{mpsc::{self, unbounded_channel, UnboundedSender}, oneshot};
 use tokio_util::bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -51,7 +52,7 @@ impl MultiplexedMessage {
         let bytes = self.0;
         let id = self.1;
         let mut msg = BytesMut::new();
-        msg.put_u32(id as u32);
+        msg.put_u32(id.to_u32().expect("Too many multiplexed connections!"));
         msg.put(bytes);
         msg.freeze()
     }
@@ -95,7 +96,7 @@ impl RecvBytes for MuxedReceiver {
 //
 /// Multiplexed Connection
 ///
-/// Aqquirred by constructing a [Gateway] using [Gateway::multiplex]
+/// Aqquirred by constructing a [Gateway] using [``Gateway::multiplex``]
 pub struct MuxConn(MuxedSender, MuxedReceiver);
 
 impl Channel for MuxConn {
@@ -135,7 +136,7 @@ impl SplitChannel for MuxConn {
 ///
 /// Enables splitting a channel into multiple multiplexed channels.
 /// The multiplexed channels must be *driven* by the gateway
-/// (see [Gateway::drive]) otherwise the multiplexed channels won't
+/// (see [``Gateway::drive``]) otherwise the multiplexed channels won't
 /// be able to communicate.
 /// 
 /// ## Example:
@@ -154,7 +155,7 @@ impl SplitChannel for MuxConn {
 ///     tokio::spawn(async move {
 ///         m2.send(&"Hello MUX2!".to_owned()).await.unwrap();
 ///     });
-///     gateway.drive().await;
+///     gateway.drive().await.unwrap();
 /// });
 ///
 /// tokio::spawn( async {// party 2
@@ -169,7 +170,7 @@ impl SplitChannel for MuxConn {
 ///         let msg : String = m2.recv().await.unwrap();
 ///         assert_eq!(msg, "Hello MUX2!");
 ///     });
-///     gateway.drive().await;
+///     gateway.drive().await.unwrap();
 /// });
 /// })
 /// ```
@@ -184,17 +185,37 @@ where
     outbox: mpsc::WeakUnboundedSender<MultiplexedMessage>
 }
 
+
+#[derive(Debug, Error)]
+pub enum GatewayError<E: Error + Send + 'static> {
+    #[error("Multiplexed connection {0} disappered")]
+    MailboxNotFound(usize),
+    #[error("Underlying connection died: {0}")]
+    DeadConnection(#[from] Arc<E>)
+}
+
 impl<C: SplitChannel + Send> Gateway<C> {
-    pub async fn drive(self) -> Self {
-        let mut gateway = self;
-        {
-            let (sending, recving) = gateway.channel.split();
+    /// Drive a gateway until all multiplexed connections are complete
+    ///
+    /// # Errors
+    /// 
+    /// - [``GatewayError::MailboxNotFound``] if a given multiplexed connections has been
+    /// dropped and is receiving messages.
+    /// - [``GatewayError::DeadConnection``] if the underlying connection have failed.
+    ///
+    pub async fn drive(mut self) -> Result<Self, GatewayError<C::Error>> {
+            let (sending, recving) = self.channel.split();
 
             let send_out = async {
-                while let Some(msg) = gateway.inbox.recv().await {
-                    // TODO: Error propagation.
-                    sending.send_bytes(msg.make_bytes()).await.unwrap();
-                }
+                    loop {
+                        if let Some(msg) = self.inbox.recv().await {
+                            match sending.send_bytes(msg.make_bytes()).await {
+                                Ok(()) => continue,
+                                Err(e) => break Err(e),
+                            }
+                        } 
+                        break Ok(());
+                    }
             };
 
             let recv_in = async {
@@ -203,29 +224,49 @@ impl<C: SplitChannel + Send> Gateway<C> {
                         Ok(mut msg) => {
                             let id = msg.get_u32() as usize;
                             let bytes = msg;
-                            gateway.mailboxes[id].send(bytes).unwrap();
+                            let Some(mailbox) = self.mailboxes.get_mut(id) else {
+                                break Err(GatewayError::MailboxNotFound(id))
+                            };
+                            let Ok(()) = mailbox.send(bytes) else {
+                                break Err(GatewayError::MailboxNotFound(id))
+                            };
                         }
-                        Err(e) => break e,
+                        Err(e) => break Ok(e),
                     }
                 }
             };
 
+
             tokio::select! { // Drive both futures to completion.
-                () = send_out => {},
-                err = recv_in => {
-                    let err = Arc::new(err);
-                    for [c1, c2] in gateway.errors.drain(..) {
-                        // ignore dropped connections,
-                        // they can't handle errors when they don't exist.
-                        let _ = c1.send(MuxError::Connection(err.clone()));
-                        let _ = c2.send(MuxError::Connection(err.clone()));
+                res = send_out => {
+                    match res {
+                        Ok(()) => {
+                            Ok(self)
+                        },
+                        Err(err) => {
+                            Err(self.propogate_error(err))
+                        }
                     }
                 },
-            };
-        }
-
-        gateway
+                err = recv_in => {
+                    let err : C::Error = err?; // return early on missing mailbox.
+                    println!("Got an error! {err:?}");
+                    Err(self.propogate_error(err))
+                },
+            }
     }
+
+    fn propogate_error<E: Error + Send + Sync + 'static>(mut self, err: E) -> GatewayError<E> {
+        let err = Arc::new(err);
+        for [c1, c2] in self.errors.drain(..) {
+            // ignore dropped connections,
+            // they can't handle errors when they don't exist.
+            let _ = c1.send(MuxError::Connection(err.clone()));
+            let _ = c2.send(MuxError::Connection(err.clone()));
+        }
+        GatewayError::DeadConnection(err)
+    } 
+
 
     pub fn single(channel: C) -> (Self, MuxConn) {
         let (outbox, inbox) = unbounded_channel();
@@ -252,7 +293,7 @@ impl<C: SplitChannel + Send> Gateway<C> {
     /// * `net`: Connection to use as a gateway for multiplexing
     /// * `n`: Number of new connections to multiplex into
     ///
-    /// Returns a gateway which the MuxConn communicate through, along with the MuxConn
+    /// Returns a gateway which the ``MuxConn`` communicate through, along with the MuxConn
      pub fn multiplex(con: C, n: usize) -> (Self, Vec<MuxConn>) {
         let (mut gateway, con) =  Self::single(con);
         let mut muxes = vec![con];
@@ -300,7 +341,7 @@ impl<C> NetworkGateway<C>
 where
     C: SplitChannel + Send,
 {
-    pub fn multiplex(net: Network<C>, n: usize) -> (NetworkGateway<C>, Vec<MuxNet>) {
+    #[must_use] pub fn multiplex(net: Network<C>, n: usize) -> (NetworkGateway<C>, Vec<MuxNet>) {
         let mut gateways = Vec::new();
         let mut matrix = Vec::new();
         let index = net.index;
@@ -327,19 +368,20 @@ where
         NetworkGateway::<&mut C>::multiplex(net, n)
     }
 
-    pub async fn drive(self) -> Self {
-        let gateways = join_all(self.gateways.into_iter().map(|c| c.drive())).await;
-        Self { gateways, index: self.index }
+    pub async fn drive(self) -> Result<Self, GatewayError<C::Error>> {
+        let gateways = try_join_all(self.gateways.into_iter().map(Gateway::drive)).await?;
+        Ok(Self { gateways, index: self.index })
     }
 
+    #[must_use]
     pub fn destroy(mut self) -> Network<C> {
         let index= self.index;
-        let connections : Vec<_> = self.gateways.drain(..).map(|g| g.destroy()).collect();
+        let connections : Vec<_> = self.gateways.drain(..).map(Gateway::destroy).collect();
         Network { connections, index }
     }
 
     pub fn new_mux(&mut self) -> MuxNet {
-        let connections = self.gateways.iter_mut().map(|g| g.muxify() ).collect();
+        let connections = self.gateways.iter_mut().map(Gateway::muxify ).collect();
         MuxNet { connections, index: self.index }
     }
 }
@@ -385,7 +427,8 @@ mod test {
                 s1 + &s2 + &s3
             };
 
-            let (s, mut gateway) = join!(s, gateway.drive());
+            let (s, gateway) = join!(s, gateway.drive());
+            let mut gateway = gateway.unwrap();
             gateway.channel.send(&"bye".to_owned()).await.unwrap();
             gateway.channel.shutdown().await.unwrap();
             s
@@ -402,7 +445,8 @@ mod test {
                 );
                 s1 + &s2 + &s3
             };
-            let (s, mut gateway) = (s, gateway.drive()).join().await;
+            let (s, gateway) = (s, gateway.drive()).join().await;
+            let mut gateway = gateway.unwrap();
             let _ : String = gateway.channel.recv().await.unwrap();
             gateway.channel.shutdown().await.unwrap();
             s
@@ -438,7 +482,7 @@ mod test {
             drop(c2);
         };
 
-        let (_, _) = futures::join!(p1, p2);
+        let (_, ()) = futures::join!(p1, p2);
     }
 
     #[tokio::test]
@@ -458,6 +502,7 @@ mod test {
                     assert_eq!(res, vec!["World"; 3]);
                 });
                 let (r1, r2, gateway) = futures::join!(h1, h2, gateway.drive());
+                let gateway = gateway.unwrap();
                 gateway.destroy().shutdown().await.unwrap();
                 r1.unwrap();
                 r2.unwrap();
