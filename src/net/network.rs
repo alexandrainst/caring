@@ -298,7 +298,7 @@ impl<C: SplitChannel> Network<C> {
     }
 
 
-    pub(crate) fn as_mut<'a>(&'a mut self) -> Network<&'a mut C> {
+    pub(crate) fn as_mut(&mut self) -> Network<&mut C> {
         let connections = self.connections.iter_mut().collect();
         Network { connections, index: self.index }
     }
