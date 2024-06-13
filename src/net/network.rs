@@ -150,8 +150,11 @@ impl<C: SplitChannel> Network<C> {
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
     {
         let my_id = self.index;
-        let (mut tx, mut rx): (Vec<_>, Vec<_>) =
-            self.connections.iter_mut().map(super::SplitChannel::split).unzip();
+        let (mut tx, mut rx): (Vec<_>, Vec<_>) = self
+            .connections
+            .iter_mut()
+            .map(super::SplitChannel::split)
+            .unzip();
 
         let packet: Bytes = bincode::serialize(&msg).unwrap().into();
         let outgoing = tx.iter_mut().enumerate().map(|(id, conn)| {
@@ -211,8 +214,11 @@ impl<C: SplitChannel> Network<C> {
         let my_id = self.index;
         let my_own_msg = msgs.remove(my_id);
 
-        let (mut tx, mut rx): (Vec<_>, Vec<_>) =
-            self.connections.iter_mut().map(super::SplitChannel::split).unzip();
+        let (mut tx, mut rx): (Vec<_>, Vec<_>) = self
+            .connections
+            .iter_mut()
+            .map(super::SplitChannel::split)
+            .unzip();
 
         let outgoing = tx
             .iter_mut()
@@ -302,10 +308,12 @@ impl<C: SplitChannel> Network<C> {
         todo!("Initiate a drop vote");
     }
 
-
     pub(crate) fn as_mut(&mut self) -> Network<&mut C> {
         let connections = self.connections.iter_mut().collect();
-        Network { connections, index: self.index }
+        Network {
+            connections,
+            index: self.index,
+        }
     }
 }
 
@@ -483,9 +491,7 @@ impl InMemoryNetwork {
         let futs = self
             .connections
             .into_iter()
-            .map(|conn| async move {
-                conn.shutdown().await
-            });
+            .map(|conn| async move { conn.shutdown().await });
         join_all(futs).await.into_iter().map_ok(|_| {}).collect()
     }
 }
@@ -534,7 +540,10 @@ impl TcpNetwork {
             stream.set_nodelay(true).unwrap();
         }
 
-        let connections = parties.into_iter().map(Connection::from_tcp_stream).collect();
+        let connections = parties
+            .into_iter()
+            .map(Connection::from_tcp_stream)
+            .collect();
 
         let mut network = Self {
             connections,
@@ -549,9 +558,7 @@ impl TcpNetwork {
         let futs = self
             .connections
             .into_iter()
-            .map(|conn| async move {
-                conn.shutdown().await
-            });
+            .map(|conn| async move { conn.shutdown().await });
         join_all(futs).await.into_iter().map_ok(|_| {}).collect()
     }
 }

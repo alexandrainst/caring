@@ -160,7 +160,6 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> SplitChannel for
     fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver) {
         (&mut self.sender, &mut self.receiver)
     }
-
 }
 
 pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;
@@ -173,7 +172,7 @@ impl TcpConnection {
         Self::new(reader, writer)
     }
 
-    pub fn to_tcp_stream(self) -> TcpStream  {
+    pub fn to_tcp_stream(self) -> TcpStream {
         let (r, w) = self.destroy();
         // UNWRAP: Should never fail, as we build the connection from two
         // streams before. However! One could construct TcpConnection manually
@@ -186,7 +185,6 @@ impl TcpConnection {
         self.to_tcp_stream().shutdown().await
     }
 }
-
 
 /// Connection to a in-memory data stream.
 /// This always have a corresponding other connection in the same process.
