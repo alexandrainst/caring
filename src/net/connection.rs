@@ -21,7 +21,7 @@ use std::error::Error;
 use futures::{SinkExt, StreamExt};
 use thiserror::Error;
 use tokio::{
-    io::{AsyncRead, AsyncWrite, DuplexStream, ReadHalf, WriteHalf},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
@@ -70,11 +70,11 @@ impl<R: AsyncRead, W: AsyncWrite> Connection<R, W> {
     }
 
     /// Destroy the connection, returning the internal reader and writer.
-    pub async fn destroy(self) -> Result<(R, W), ConnectionError> {
+    pub fn destroy(self) -> (R, W) {
         let Self { sender, receiver } = self;
         // Should not wait much here since we drop input
         // it is really only unsent packages holding us back
-        Ok((receiver.0.into_inner(), sender.0.into_inner()))
+        (receiver.0.into_inner(), sender.0.into_inner())
     }
 }
 
@@ -159,6 +159,7 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> SplitChannel for
     fn split(&mut self) -> (&mut Self::Sender, &mut Self::Receiver) {
         (&mut self.sender, &mut self.receiver)
     }
+
 }
 
 pub type TcpConnection = Connection<OwnedReadHalf, OwnedWriteHalf>;
@@ -166,20 +167,25 @@ impl TcpConnection {
     /// New TCP-based connection from a stream
     ///
     /// * `stream`: TCP stream to use
-    pub fn from_tcp(stream: TcpStream) -> Self {
+    pub fn from_tcp_stream(stream: TcpStream) -> Self {
         let (reader, writer) = stream.into_split();
         Self::new(reader, writer)
     }
 
-    pub async fn to_tcp(self) -> Result<TcpStream, ConnectionError> {
-        let (r, w) = self.destroy().await?;
+    pub fn to_tcp_stream(self) -> TcpStream  {
+        let (r, w) = self.destroy();
         // UNWRAP: Should never fail, as we build the connection from two
         // streams before. However! One could construct TcpConnection manually
         // suing `Connection::new`, thus it 'can' fail.
         // But just don't do that.
-        Ok(r.reunite(w).expect("TCP Streams didn't match"))
+        r.reunite(w).expect("TCP Streams didn't match")
+    }
+
+    pub async fn shutdown(self) -> Result<(), std::io::Error> {
+        self.to_tcp_stream().shutdown().await
     }
 }
+
 
 /// Connection to a in-memory data stream.
 /// This always have a corresponding other connection in the same process.
@@ -193,6 +199,12 @@ impl DuplexConnection {
         let (r2, w2) = tokio::io::split(s2);
 
         (Self::new(r1, w1), Self::new(r2, w2))
+    }
+
+    pub async fn shutdown(self) -> Result<(), std::io::Error> {
+        let (r,w) = self.destroy();
+        let mut stream = r.unsplit(w);
+        stream.shutdown().await
     }
 }
 
@@ -239,7 +251,7 @@ mod test {
         let listener = TcpListener::bind(addr).await.unwrap();
         let h1 = async move {
             let stream = TcpStream::connect(addr).await.unwrap();
-            let mut conn = Connection::from_tcp(stream);
+            let mut conn = Connection::from_tcp_stream(stream);
             conn.send(&"Hello").await.unwrap();
             println!("[1] Message sent");
             conn.send(&"Buddy").await.unwrap();
@@ -250,7 +262,7 @@ mod test {
         };
         let h2 = async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let mut conn = Connection::from_tcp(stream);
+            let mut conn = Connection::from_tcp_stream(stream);
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Hello".into());

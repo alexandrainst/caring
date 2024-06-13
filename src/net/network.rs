@@ -5,7 +5,6 @@ use futures::future::join_all;
 use futures::prelude::*;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
-use tokio::io::AsyncWriteExt;
 use tokio_util::bytes::Bytes;
 
 use crate::net::{
@@ -297,6 +296,12 @@ impl<C: SplitChannel> Network<C> {
     async fn drop_party(_id: usize) -> Result<(), ()> {
         todo!("Initiate a drop vote");
     }
+
+
+    pub(crate) fn as_mut<'a>(&'a mut self) -> Network<&'a mut C> {
+        let connections = self.connections.iter_mut().collect();
+        Network { connections, index: self.index }
+    }
 }
 
 // TODO: Implement a handler system, such we can handle ad-hoc requests from other parties,
@@ -468,6 +473,16 @@ impl InMemoryNetwork {
         }
         networks
     }
+
+    pub async fn shutdown(self) -> Result<(), std::io::Error> {
+        let futs = self
+            .connections
+            .into_iter()
+            .map(|conn| async move {
+                conn.shutdown().await
+            });
+        join_all(futs).await.into_iter().map_ok(|_| {}).collect()
+    }
 }
 
 /// TCP Network based on TCP Streams.
@@ -514,7 +529,7 @@ impl TcpNetwork {
             stream.set_nodelay(true).unwrap();
         }
 
-        let connections = parties.into_iter().map(Connection::from_tcp).collect();
+        let connections = parties.into_iter().map(Connection::from_tcp_stream).collect();
 
         let mut network = Self {
             connections,
@@ -525,22 +540,12 @@ impl TcpNetwork {
         Ok(network)
     }
 
-    pub async fn shutdown(self) -> NetResult<(), TcpConnection> {
+    pub async fn shutdown(self) -> Result<(), std::io::Error> {
         let futs = self
             .connections
             .into_iter()
-            .enumerate()
-            .map(|(i, conn)| async move {
-                match conn.to_tcp().await {
-                    Ok(mut tcp) => {
-                        tcp.shutdown().await.unwrap();
-                        Ok(())
-                    }
-                    Err(e) => Err(NetworkError::Outgoing {
-                        id: i as u32,
-                        source: e,
-                    }),
-                }
+            .map(|conn| async move {
+                conn.shutdown().await
             });
         join_all(futs).await.into_iter().map_ok(|_| {}).collect()
     }
