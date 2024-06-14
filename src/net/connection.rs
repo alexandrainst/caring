@@ -18,11 +18,11 @@
 
 use std::error::Error;
 
-use futures::{Future, SinkExt, StreamExt};
-use serde::{de::DeserializeOwned, Serialize};
+use futures::{SinkExt, StreamExt};
+use futures_concurrency::future::Join;
 use thiserror::Error;
 use tokio::{
-    io::{AsyncRead, AsyncWrite, DuplexStream, ReadHalf, WriteHalf},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
@@ -35,7 +35,7 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
 
-use crate::net::SplitChannel;
+use crate::net::{Channel, RecvBytes, SendBytes, SplitChannel};
 
 pub struct Connection<R: AsyncRead, W: AsyncWrite> {
     sender: Sending<W>,
@@ -71,107 +71,36 @@ impl<R: AsyncRead, W: AsyncWrite> Connection<R, W> {
     }
 
     /// Destroy the connection, returning the internal reader and writer.
-    pub async fn destroy(self) -> Result<(R, W), ConnectionError> {
+    pub fn destroy(self) -> (R, W) {
         let Self { sender, receiver } = self;
         // Should not wait much here since we drop input
         // it is really only unsent packages holding us back
-        Ok((receiver.0.into_inner(), sender.0.into_inner()))
-    }
-}
-
-pub trait SendBytes: Send {
-    type SendError: Error + Send;
-
-    fn send_bytes(
-        &mut self,
-        bytes: Bytes,
-    ) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send;
-
-    fn send_thing<T: Serialize + Sync>(
-        &mut self,
-        msg: &T,
-    ) -> impl Future<Output = Result<(), Self::SendError>> + Send {
-        async {
-            let msg = bincode::serialize(msg).unwrap();
-            self.send_bytes(msg.into()).await
-        }
-    }
-}
-
-impl<W: AsyncWrite + Unpin + Send> SendBytes for FramedWrite<W, LengthDelimitedCodec> {
-    type SendError = ConnectionError;
-    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), Self::SendError> {
-        self.send(bytes).await.map_err(|_| ConnectionError::Closed)
-    }
-}
-
-pub trait RecvBytes: Send {
-    type RecvError: Error + Send;
-    fn recv_bytes(
-        &mut self,
-    ) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send;
-
-    fn recv_thing<T: DeserializeOwned>(
-        &mut self,
-    ) -> impl Future<Output = Result<T, Self::RecvError>> + Send {
-        async {
-            let msg = self.recv_bytes().await?;
-            Ok(bincode::deserialize(&msg).unwrap())
-        }
-    }
-}
-
-impl<R: AsyncRead + Unpin + Send> RecvBytes for FramedRead<R, LengthDelimitedCodec> {
-    type RecvError = ConnectionError;
-    async fn recv_bytes(&mut self) -> Result<BytesMut, Self::RecvError> {
-        self.next()
-            .await
-            .ok_or(ConnectionError::Closed)?
-            .map_err(|e| ConnectionError::Unknown(Box::new(e)))
+        (receiver.0.into_inner(), sender.0.into_inner())
     }
 }
 
 pub struct Sending<W: AsyncWrite>(FramedWrite<W, LengthDelimitedCodec>);
 pub struct Receiving<R: AsyncRead>(FramedRead<R, LengthDelimitedCodec>);
 
-impl<R: AsyncRead + Unpin + Send> Receiving<R> {
-    pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
-        self.0.recv_thing().await
-    }
-
-    pub async fn recv_bytes(&mut self) -> Result<BytesMut, ConnectionError> {
-        self.0.recv_bytes().await
-    }
-}
-
-impl<W: AsyncWrite + Unpin + Send> Sending<W> {
-    pub async fn send(&mut self, msg: &(impl Serialize + Sync)) -> Result<(), ConnectionError> {
-        self.0.send_thing(msg).await
-    }
-
-    pub async fn send_bytes(&mut self, msg: Bytes) -> Result<(), ConnectionError> {
-        self.0.send_bytes(msg).await
-    }
-}
-
 impl<W: AsyncWrite + Unpin + Send> SendBytes for Sending<W> {
     type SendError = ConnectionError;
 
-    fn send_bytes(
-        &mut self,
-        bytes: Bytes,
-    ) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send {
-        self.0.send_bytes(bytes)
+    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), Self::SendError> {
+        SinkExt::<_>::send(&mut self.0, bytes)
+            .await
+            .map_err(|_| ConnectionError::Closed)
     }
 }
 
 impl<R: AsyncRead + Unpin + Send> RecvBytes for Receiving<R> {
     type RecvError = ConnectionError;
 
-    fn recv_bytes(
-        &mut self,
-    ) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send {
-        self.0.recv_bytes()
+    async fn recv_bytes(&mut self) -> Result<BytesMut, Self::RecvError> {
+        self.0
+            .next()
+            .await
+            .ok_or(ConnectionError::Closed)?
+            .map_err(|e| ConnectionError::Unknown(Box::new(e)))
     }
 }
 
@@ -190,14 +119,38 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Connection<R, W>
     pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
         self.receiver.recv().await
     }
+}
 
-    pub async fn recv_bytes(&mut self) -> Result<BytesMut, ConnectionError> {
-        self.receiver.recv_bytes().await
-    }
+impl<
+        R: tokio::io::AsyncRead + std::marker::Unpin + Send,
+        W: tokio::io::AsyncWrite + std::marker::Unpin + Send,
+    > SendBytes for Connection<R, W>
+{
+    type SendError = ConnectionError;
 
-    pub async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), ConnectionError> {
-        self.sender.send_bytes(bytes).await
+    fn send_bytes(
+        &mut self,
+        bytes: Bytes,
+    ) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send {
+        self.sender.send_bytes(bytes)
     }
+}
+impl<
+        R: tokio::io::AsyncRead + std::marker::Unpin + Send,
+        W: tokio::io::AsyncWrite + std::marker::Unpin + Send,
+    > RecvBytes for Connection<R, W>
+{
+    type RecvError = ConnectionError;
+
+    fn recv_bytes(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send {
+        self.receiver.recv_bytes()
+    }
+}
+
+impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Channel for Connection<R, W> {
+    type Error = ConnectionError;
 }
 
 impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> SplitChannel for Connection<R, W> {
@@ -214,18 +167,22 @@ impl TcpConnection {
     /// New TCP-based connection from a stream
     ///
     /// * `stream`: TCP stream to use
-    pub fn from_tcp(stream: TcpStream) -> Self {
+    pub fn from_tcp_stream(stream: TcpStream) -> Self {
         let (reader, writer) = stream.into_split();
         Self::new(reader, writer)
     }
 
-    pub async fn to_tcp(self) -> Result<TcpStream, ConnectionError> {
-        let (r, w) = self.destroy().await?;
+    pub fn to_tcp_stream(self) -> TcpStream {
+        let (r, w) = self.destroy();
         // UNWRAP: Should never fail, as we build the connection from two
         // streams before. However! One could construct TcpConnection manually
         // suing `Connection::new`, thus it 'can' fail.
         // But just don't do that.
-        Ok(r.reunite(w).expect("TCP Streams didn't match"))
+        r.reunite(w).expect("TCP Streams didn't match")
+    }
+
+    pub async fn shutdown(self) -> Result<(), std::io::Error> {
+        self.to_tcp_stream().shutdown().await
     }
 }
 
@@ -241,6 +198,21 @@ impl DuplexConnection {
         let (r2, w2) = tokio::io::split(s2);
 
         (Self::new(r1, w1), Self::new(r2, w2))
+    }
+
+    /// Gracefully shutdown the connection.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the connection could not be shutdown cleanly.
+    pub async fn shutdown(self) -> Result<(), std::io::Error> {
+        let (mut r, mut w) = self.destroy();
+        // HACK: A single read/write so we don't exit too early.
+        // We ignore the errors, since we don't care if we can't send or receive,
+        // it is supposed to be closed.
+        let (_, _) = (r.read_u8(), w.write_u8(0)).join().await;
+        let mut stream = r.unsplit(w);
+        stream.shutdown().await
     }
 }
 
@@ -287,7 +259,7 @@ mod test {
         let listener = TcpListener::bind(addr).await.unwrap();
         let h1 = async move {
             let stream = TcpStream::connect(addr).await.unwrap();
-            let mut conn = Connection::from_tcp(stream);
+            let mut conn = Connection::from_tcp_stream(stream);
             conn.send(&"Hello").await.unwrap();
             println!("[1] Message sent");
             conn.send(&"Buddy").await.unwrap();
@@ -298,7 +270,7 @@ mod test {
         };
         let h2 = async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let mut conn = Connection::from_tcp(stream);
+            let mut conn = Connection::from_tcp_stream(stream);
             let msg: Box<str> = conn.recv().await.unwrap();
             println!("[2] Message received");
             assert_eq!(msg, "Hello".into());

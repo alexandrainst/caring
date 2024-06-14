@@ -2,6 +2,7 @@
 #![allow(refining_impl_trait)]
 #![allow(dead_code)]
 #![feature(async_fn_traits)]
+#![allow(clippy::cast_possible_truncation)]
 
 mod algebra;
 pub mod net;

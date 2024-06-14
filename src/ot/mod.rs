@@ -64,7 +64,7 @@ impl<C: Channel> ObliviousTransfer<C> for MockOT {
 struct MockOTSender();
 
 impl<C: Channel> ObliviousSend<C> for MockOTSender {
-    type Error = C::Error;
+    type Error = C::SendError;
 
     async fn send<T: serde::Serialize + Sync>(
         pkg0: &T,
@@ -79,7 +79,7 @@ impl<C: Channel> ObliviousSend<C> for MockOTSender {
 struct MockOTReceiver();
 
 impl<C: Channel> ObliviousReceive<C> for MockOTReceiver {
-    type Error = C::Error;
+    type Error = C::RecvError;
 
     async fn choose<T: serde::de::DeserializeOwned>(
         choice: bool,
