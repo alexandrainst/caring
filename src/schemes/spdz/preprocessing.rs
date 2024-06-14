@@ -8,8 +8,7 @@ use std::{
     error::Error,
     fmt,
     fs::File,
-    io::{self, Read, Write},
-    path::Path,
+    io::{self, Write},
 };
 #[derive(Debug, Clone, PartialEq)]
 pub enum MissingPreProcErrorType {
@@ -89,37 +88,31 @@ pub struct SecretValues<F> {
     pub mac_key: F,
 }
 pub fn write_preproc_to_file<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
-    file_names: &[&Path],
+    files: &mut [File],
     known_to_each: Vec<usize>,
     number_of_triplets: usize,
     _: F,
 ) -> Result<(), Box<dyn Error>> {
-    let number_of_parties = file_names.len();
+    let number_of_parties = files.len();
     assert!(number_of_parties == known_to_each.len());
     let rng = rand_chacha::ChaCha20Rng::from_entropy();
     // Notice here that the secret values are not written to the file, No party is allowed to know the value.
     let (contexts, _): (Vec<SpdzContext<F>>, _) =
         dealer_prepross(rng, known_to_each, number_of_triplets, number_of_parties);
-    let names_and_contexts = file_names.iter().zip(contexts);
-    for (name, context) in names_and_contexts {
+    let names_and_contexts = files.iter_mut().zip(contexts);
+    for (file, context) in names_and_contexts {
         let data: Vec<u8> = bincode::serialize(&context)?;
-        let mut file = File::create(name)?;
         file.write_all(&data)?;
-        file.sync_all()?;
     }
     Ok(())
 }
 
 
 pub fn read_preproc_from_file<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
-    file_name: &Path,
+    file: &mut File,
 ) -> SpdzContext<F> {
     // TODO: return Result instead.
-    let mut data = Vec::new();
-    let mut file = File::open(file_name).expect("open file");
-    file.read_to_end(&mut data).expect("read to end");
-    let new_context: SpdzContext<F> = bincode::deserialize(&data).expect("deserialize");
-    new_context
+    bincode::deserialize_from(file).unwrap()
 }
 
 
@@ -259,8 +252,8 @@ impl<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned> SpdzContext
         generate_empty_context(number_of_parties, mac_key_share, who_am_i)
     }
 
-    pub fn from_file(path: &Path) -> Result<Self, io::Error> {
-        Ok(read_preproc_from_file(path))
+    pub fn from_file(mut file: File) -> Result<Self, io::Error> {
+        Ok(read_preproc_from_file(&mut file))
     }
 }
 

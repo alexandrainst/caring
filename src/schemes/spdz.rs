@@ -421,7 +421,7 @@ fn power<F: std::ops::MulAssign + Clone + std::ops::Mul<Output = F>>(base: F, ex
 #[cfg(test)]
 mod test {
 
-    use std::path::Path;
+    use std::io::Seek;
     use ff::Field;
     use rand::thread_rng;
     use rand::SeedableRng;
@@ -1454,21 +1454,23 @@ mod test {
     fn test_dealer_writing_to_file() {
         // preprosessing by dealer
         type F = Element32;
-        let file_names = vec![
-            Path::new("/tmp/context2.bin"),
-            Path::new("/tmp/context1.bin"),
+        let mut files = [
+            tempfile::tempfile().unwrap(),
+            tempfile::tempfile().unwrap(),
         ];
         let known_to_each = vec![1, 2];
         let number_of_triplets = 2;
         preprocessing::write_preproc_to_file(
-            &file_names,
+            &mut files,
             known_to_each,
             number_of_triplets,
             F::from_u128(0u128),
         )
         .unwrap();
-        let p1_context: SpdzContext<F> = preprocessing::read_preproc_from_file(file_names[0]);
-        let p2_context: SpdzContext<F> = preprocessing::read_preproc_from_file(file_names[1]);
+        files[0].rewind().unwrap();
+        files[1].rewind().unwrap();
+        let p1_context: SpdzContext<F> = preprocessing::read_preproc_from_file(&mut files[0]);
+        let p2_context: SpdzContext<F> = preprocessing::read_preproc_from_file(&mut files[1]);
         // unpacking
         let p1_params = p1_context.params;
         let p2_params = p2_context.params;
