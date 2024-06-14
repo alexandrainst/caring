@@ -1,4 +1,4 @@
-//! (Some version of) SPDZ
+//
 //! This SPDZ implementation is primarely based on the following lecture by Ivan Damgård:
 //! (part one:) https://www.youtube.com/watch?v=N80DV3Brds0 (and part two:) https://www.youtube.com/watch?v=Ce45hp24b2E
 //!
@@ -12,14 +12,15 @@ use crate::{net::Communicate, schemes::interactive::InteractiveShared};
 use ff::PrimeField;
 use rand::RngCore;
 use crate::{
-    net::agency::Broadcast, protocols::commitments::{commit, commit_many, verify_commit, verify_many}
+    net::agency::Broadcast,
+    protocols::commitments::{commit, verify_commit},
 };
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 
 use self::preprocessing::ForSharing;
 
 pub mod preprocessing;
-use std::{error, path::Path};
+use std::error;
 
 // Should we allow Field or use PrimeField?
 #[derive(
@@ -105,28 +106,28 @@ where F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::conv
     type Error = ();
 
     async fn share(
-            ctx: Self::Context,
-            secret: Self::Value,
-            rng: impl RngCore + Send,
-            coms: impl Communicate,
+            _ctx: Self::Context,
+            _secret: Self::Value,
+            _rng: impl RngCore + Send,
+            _coms: impl Communicate,
         ) -> Result<Self, ()> {
         todo!()
     }
 
 
     async fn symmetric_share(
-        ctx: Self::Context,
-        secret: Self::Value,
-        rng: impl RngCore + Send,
-        coms: impl Communicate,
+        _ctx: Self::Context,
+        _secret: Self::Value,
+        _rng: impl RngCore + Send,
+        _coms: impl Communicate,
     ) -> Result<Vec<Self>, Self::Error> {
         todo!()
     }
     
     async fn receive_share(
-            ctx: Self::Context,
-            coms: impl Communicate,
-            from: usize,
+            _ctx: Self::Context,
+            _coms: impl Communicate,
+            _from: usize,
         ) -> Result<Self, ()> {
         todo!()
     }
@@ -293,10 +294,8 @@ where
     let mut opened_vals_sum: Vec<F> = opened_vals
         .pop()
         .expect("Atleast one element must be opened");
-    while !opened_vals.is_empty() {
-        let ov = opened_vals
-            .pop()
-            .expect("we just verified that there are elements left");
+    while let Some(ov) = opened_vals.pop() {
+        
         for i in 0..n {
             opened_vals_sum[i] += ov[i];
         }
@@ -318,7 +317,7 @@ pub async fn open_res<F>(
     share_to_open: Share<F>,
     network: &mut impl Broadcast,
     params: &SpdzParams<F>,
-    opened_values: &Vec<F>,
+    opened_values: &[F],
 ) -> F
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
@@ -403,12 +402,12 @@ where
     zero == F::from_u128(0)
 }
 
-fn make_linarcombination<F: PrimeField>(random_element: F, elements: &mut Vec<F>) -> F {
+fn make_linarcombination<F: PrimeField>(random_element: F, elements: &mut [F]) -> F {
     let r_elms: Vec<F> = (1..elements.len() + 1)
-        .map(|i| power(random_element.clone(), i))
+        .map(|i| power(random_element, i))
         .collect();
     elements
-        .into_iter()
+        .iter_mut()
         .zip(r_elms)
         .fold(F::from_u128(0), |acc, (e, r)| acc + r * (*e))
 }
@@ -421,8 +420,8 @@ fn power<F: std::ops::MulAssign + Clone + std::ops::Mul<Output = F>>(base: F, ex
 
 #[cfg(test)]
 mod test {
-    use std::os::unix::net;
 
+    use std::path::Path;
     use ff::Field;
     use rand::thread_rng;
     use rand::SeedableRng;
@@ -620,17 +619,15 @@ mod test {
 
         let mut taskset = tokio::task::JoinSet::new();
         let cluster = InMemoryNetwork::in_memory(number_of_parties); //asuming two players
-        let mut i = 0;
 
         contexts.reverse();
-        for network in cluster {
+        for (i, network) in cluster.into_iter().enumerate() {
             taskset.spawn(do_mpc(
                 network,
                 elms[i].clone(),
                 values[i],
                 contexts.pop().unwrap(),
             ));
-            i += 1;
         }
 
         while let Some(res) = taskset.join_next().await {
@@ -687,7 +684,7 @@ mod test {
         let p1_partially_opened_vals = p1_context.opened_values;
         let p2_partially_opened_vals = p2_context.opened_values;
         let mut partially_opened_vals = vec![p1_partially_opened_vals, p2_partially_opened_vals];
-        let params = vec![p1_context.params, p2_context.params];
+        let params = [p1_context.params, p2_context.params];
         async fn do_mpc(
             network: InMemoryNetwork,
             elm: Share<F>,
@@ -711,10 +708,9 @@ mod test {
 
         let mut taskset = tokio::task::JoinSet::new();
         let cluster = InMemoryNetwork::in_memory(2); //asuming two players
-        let elm1_v = vec![elm1_1, elm1_2];
-        let mut i = 0;
+        let elm1_v = [elm1_1, elm1_2];
         partially_opened_vals.reverse();
-        for network in cluster {
+        for (i, network) in cluster.into_iter().enumerate() {
             taskset.spawn(do_mpc(
                 network,
                 elm1_v[i],
@@ -722,7 +718,6 @@ mod test {
                 partially_opened_vals.pop().unwrap(),
                 params[i].clone(),
             ));
-            i += 1;
         }
         while let Some(res) = taskset.join_next().await {
             res.unwrap();
@@ -778,7 +773,7 @@ mod test {
         let p1_partially_opened_vals = p1_context.opened_values;
         let p2_partially_opened_vals = p2_context.opened_values;
         let mut partially_opened_vals = vec![p1_partially_opened_vals, p2_partially_opened_vals];
-        let params = vec![p1_context.params, p2_context.params];
+        let params = [p1_context.params, p2_context.params];
         async fn do_mpc(
             network: InMemoryNetwork,
             elm: Share<F>,
@@ -801,10 +796,9 @@ mod test {
 
         let mut taskset = tokio::task::JoinSet::new();
         let cluster = InMemoryNetwork::in_memory(2); //asuming two players
-        let elm1_v = vec![elm1_1, elm1_2];
-        let mut i = 0;
+        let elm1_v = [elm1_1, elm1_2];
         partially_opened_vals.reverse();
-        for network in cluster {
+        for (i, network) in cluster.into_iter().enumerate() {
             taskset.spawn(do_mpc(
                 network,
                 elm1_v[i],
@@ -812,7 +806,6 @@ mod test {
                 partially_opened_vals.pop().unwrap(),
                 params[i].clone(),
             ));
-            i += 1;
         }
         while let Some(res) = taskset.join_next().await {
             res.unwrap();
@@ -1057,11 +1050,10 @@ mod test {
 
         let mut taskset = tokio::task::JoinSet::new();
         let cluster = InMemoryNetwork::in_memory(2); //asuming two players
-        let elm1_v = vec![elm1_1, elm1_2];
-        let elm2_v = vec![elm2_1, elm2_2];
+        let elm1_v = [elm1_1, elm1_2];
+        let elm2_v = [elm2_1, elm2_2];
         let mut context = vec![p1_context, p2_context];
-        let mut i = 0;
-        for network in cluster {
+        for (i, network) in cluster.into_iter().enumerate() {
             let context_here = context.pop().unwrap();
             taskset.spawn(do_mpc(
                 network,
@@ -1070,7 +1062,6 @@ mod test {
                 context_here,
                 expected_res,
             ));
-            i += 1;
         }
         while let Some(res) = taskset.join_next().await {
             res.unwrap();
@@ -1268,17 +1259,15 @@ mod test {
         }
         let mut taskset = tokio::task::JoinSet::new();
         let cluster = InMemoryNetwork::in_memory(number_of_parties); //asuming two players
-        let mut i = 0;
         contexts.reverse();
         values_both.reverse();
-        for network in cluster {
+        for (i, network) in cluster.into_iter().enumerate() {
             taskset.spawn(do_mpc(
                 network,
                 contexts.pop().unwrap(),
                 values_both.pop().unwrap(),
                 constants[i],
             ));
-            i += 1;
         }
 
         while let Some(res) = taskset.join_next().await {

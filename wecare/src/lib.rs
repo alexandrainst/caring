@@ -1,6 +1,5 @@
 use std::{net::SocketAddr, time::Duration};
-use caring::{net::network::TcpNetwork, schemes::{feldman, shamir::ShamirParams, spdz::{self, preprocessing}}};
-use rand::thread_rng;
+use caring::{net::network::TcpNetwork, schemes::spdz::{self, preprocessing}};
 use std::path::Path;
 
 pub struct AdderEngine {
@@ -38,7 +37,7 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
     let AdderEngine {
         network,
         runtime,
-        threshold,
+        threshold: _,
         context,
     } = engine;
     let nums: Vec<_> = nums
@@ -59,7 +58,7 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
 
 
         let number_of_parties = parties.len();
-        let vals: Vec<_> = nums.iter().map(|&n| curve25519_dalek::Scalar::from(n)).collect();
+        let vals: Vec<_> = nums.clone();
         let who_am_i = context.params.who_am_i();
         let mut shares: Vec<Vec<spdz::Share<_>>> = vec![];
         for i in 0..number_of_parties{
@@ -165,7 +164,7 @@ pub fn do_preproc(filenames: Vec<&str>, number_of_shares: Vec<usize>){
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
+    use std::{os::fd::AsFd, time::Duration};
 
     use super::*;
 

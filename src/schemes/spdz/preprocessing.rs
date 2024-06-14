@@ -60,7 +60,6 @@ impl<F: PrimeField> Triplets<F> {
     }
 }
 
-// TODO: make a getter, they don't need to be set from anywhere else.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MultiplicationTriple<F: PrimeField> {
     pub a: spdz::Share<F>,
@@ -105,11 +104,13 @@ pub fn write_preproc_to_file<F: PrimeField + serde::Serialize + serde::de::Deser
     for (name, context) in names_and_contexts {
         let data: Vec<u8> = bincode::serialize(&context)?;
         let mut file = File::create(name)?;
-        let _ = file.write_all(&data)?;
+        file.write_all(&data)?;
         file.sync_all()?;
     }
     Ok(())
 }
+
+
 pub fn read_preproc_from_file<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     file_name: &Path,
 ) -> SpdzContext<F> {
@@ -120,6 +121,8 @@ pub fn read_preproc_from_file<F: PrimeField + serde::Serialize + serde::de::Dese
     let new_context: SpdzContext<F> = bincode::deserialize(&data).expect("deserialize");
     new_context
 }
+
+
 pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     mut rng: impl rand::Rng,
     known_to_each: Vec<usize>,
@@ -136,8 +139,7 @@ pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::Deserialize
     let mac_key = mac_keys.into_iter().sum();
     // Filling the context
     // First with values used for easy sharing
-    let mut me = 0; // TODO: find a nicer way to have a loop counter.
-    for kte in known_to_each {
+    for (me, kte) in known_to_each.into_iter().enumerate() {
         for _ in 0..kte {
             let r = F::random(&mut rng);
             let mut r_mac = r * mac_key;
@@ -187,7 +189,6 @@ pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::Deserialize
                     .push(r);
             }
         }
-        me += 1;
     }
     // Now filling in triplets
 
@@ -200,6 +201,7 @@ pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::Deserialize
         let mut b_mac = b * mac_key;
         let mut c_mac = c * mac_key;
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..number_of_parties - 1 {
             let ai = F::random(&mut rng);
             let bi = F::random(&mut rng);
