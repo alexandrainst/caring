@@ -109,7 +109,7 @@ overload!((a: &mut Mod11) *= (b: ?Mod11) {
 
 impl ConstantTimeEq for Mod11 {
     fn ct_eq(&self, other: &Self) -> Choice {
-        ((self == other) as u8).into()
+        u8::from(self == other).into()
     }
 }
 
