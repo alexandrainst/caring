@@ -148,14 +148,13 @@ pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: &Path)
     Ok(engine)
 }
 
-pub fn do_preproc(filenames: Vec<&str>, number_of_shares: Vec<usize>){
+pub fn do_preproc(filenames: &[&Path], number_of_shares: Vec<usize>){
     assert_eq!(filenames.len(), number_of_shares.len());
-    let file_names = vec![Path::new(filenames[0]), Path::new(filenames[1])];
     let known_to_each = vec![number_of_shares[0], number_of_shares[1]];
     let number_of_triplets = 0;
     let num = to_offset(0.0);
     preprocessing::write_preproc_to_file(
-        file_names,
+        filenames,
         known_to_each,
         number_of_triplets,
         curve25519_dalek::Scalar::from(num),
@@ -164,7 +163,7 @@ pub fn do_preproc(filenames: Vec<&str>, number_of_shares: Vec<usize>){
 
 #[cfg(test)]
 mod test {
-    use std::{os::fd::AsFd, time::Duration};
+    use std::time::Duration;
 
     use super::*;
 
@@ -184,10 +183,10 @@ mod test {
     #[test]
     fn sunshine() {
         use std::thread;
-        do_preproc(vec!["src/context1.bin", "src/context2.bin"], vec![1,1]);
+        do_preproc(&[Path::new("/tmp/context1.bin"), Path::new("/tmp/context2.bin")], vec![1,1]);
         let t1 = thread::spawn(|| {
             println!("[1] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:1234", &["127.0.0.1:1235"], Path::new("src/context1.bin") ).unwrap();
+            let mut engine = setup_engine("127.0.0.1:1234", &["127.0.0.1:1235"], Path::new("/tmp/context1.bin") ).unwrap();
             println!("[1] Ready");
             let res = mpc_sum(&mut engine, &[32.0]).unwrap();
             println!("[1] Done");
@@ -197,7 +196,7 @@ mod test {
         std::thread::sleep(Duration::from_millis(50));
         let t2 = thread::spawn(|| {
             println!("[2] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:1235", &["127.0.0.1:1234"], Path::new("src/context2.bin") ).unwrap();
+            let mut engine = setup_engine("127.0.0.1:1235", &["127.0.0.1:1234"], Path::new("/tmp/context2.bin") ).unwrap();
             println!("[2] Ready");
             let res = mpc_sum(&mut engine, &[32.0]).unwrap();
             println!("[2] Done");
@@ -213,10 +212,10 @@ mod test {
     #[test]
     fn sunshine_for_two() {
         use std::thread;
-        do_preproc(vec!["src/context3.bin", "src/context4.bin"], vec![2,2]);
+        do_preproc(&[Path::new("/tmp/context3.bin"), Path::new("/tmp/context4.bin")], vec![2,2]);
         let t1 = thread::spawn(|| {
             println!("[1] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:2234", &["127.0.0.1:2235"], Path::new("src/context3.bin") ).unwrap();
+            let mut engine = setup_engine("127.0.0.1:2234", &["127.0.0.1:2235"], Path::new("/tmp/context3.bin") ).unwrap();
             println!("[1] Ready");
             let res = mpc_sum(&mut engine, &[32.0, 11.9]).unwrap();
             println!("[1] Done");
@@ -226,7 +225,7 @@ mod test {
         std::thread::sleep(Duration::from_millis(50));
         let t2 = thread::spawn(|| {
             println!("[2] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:2235", &["127.0.0.1:2234"], Path::new("src/context4.bin") ).unwrap();
+            let mut engine = setup_engine("127.0.0.1:2235", &["127.0.0.1:2234"], Path::new("/tmp/context4.bin") ).unwrap();
             println!("[2] Ready");
             let res = mpc_sum(&mut engine, &[32.0, 24.1]).unwrap();
             println!("[2] Done");

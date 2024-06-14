@@ -89,7 +89,7 @@ pub struct SecretValues<F> {
     pub mac_key: F,
 }
 pub fn write_preproc_to_file<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
-    file_names: Vec<&Path>,
+    file_names: &[&Path],
     known_to_each: Vec<usize>,
     number_of_triplets: usize,
     _: F,

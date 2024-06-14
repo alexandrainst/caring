@@ -1455,13 +1455,13 @@ mod test {
         // preprosessing by dealer
         type F = Element32;
         let file_names = vec![
-            Path::new("src/schemes/spdz/context2.bin"),
-            Path::new("src/schemes/spdz/context1.bin"),
+            Path::new("/tmp/context2.bin"),
+            Path::new("/tmp/context1.bin"),
         ];
         let known_to_each = vec![1, 2];
         let number_of_triplets = 2;
         preprocessing::write_preproc_to_file(
-            file_names.clone(),
+            &file_names,
             known_to_each,
             number_of_triplets,
             F::from_u128(0u128),
