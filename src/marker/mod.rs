@@ -42,11 +42,7 @@ impl<S> Unverified<S> {
 }
 
 impl<'ctx, S: InteractiveShared<'ctx>> Verified<S> {
-    pub async fn open(
-        self,
-        ctx: S::Context,
-        coms: impl Communicate,
-    ) -> Result<S::Value, S::Error> {
+    pub async fn open(self, ctx: S::Context, coms: impl Communicate) -> Result<S::Value, S::Error> {
         S::recombine(ctx, self.0, coms).await
     }
 

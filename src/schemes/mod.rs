@@ -35,7 +35,6 @@ use rand::RngCore;
 
 use crate::net::Communicate;
 
-
 /// Currently unused trait, but might be a better way to represent that a share
 /// can be multiplied by a const, however, it could also just be baked into 'Shared' directly.
 pub trait MulByConst<A>:

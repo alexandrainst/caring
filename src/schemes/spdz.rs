@@ -6,16 +6,15 @@
 //! But for now that is handled by a dealer.
 //!
 
-
 // TODO: make costum errors.
-use crate::{net::Communicate, schemes::interactive::InteractiveShared};
-use ff::PrimeField;
-use rand::RngCore;
 use crate::{
     net::agency::Broadcast,
     protocols::commitments::{commit, verify_commit},
 };
+use crate::{net::Communicate, schemes::interactive::InteractiveShared};
 use derive_more::{Add, AddAssign, Sub, SubAssign};
+use ff::PrimeField;
+use rand::RngCore;
 
 use self::preprocessing::ForSharing;
 
@@ -99,21 +98,21 @@ where
 }
 
 impl<'ctx, F> InteractiveShared<'ctx> for Share<F>
-where F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
+where
+    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
 {
     type Context = &'ctx mut SpdzContext<F>;
     type Value = F;
     type Error = ();
 
     async fn share(
-            _ctx: Self::Context,
-            _secret: Self::Value,
-            _rng: impl RngCore + Send,
-            _coms: impl Communicate,
-        ) -> Result<Self, ()> {
+        _ctx: Self::Context,
+        _secret: Self::Value,
+        _rng: impl RngCore + Send,
+        _coms: impl Communicate,
+    ) -> Result<Self, ()> {
         todo!()
     }
-
 
     async fn symmetric_share(
         _ctx: Self::Context,
@@ -123,23 +122,27 @@ where F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::conv
     ) -> Result<Vec<Self>, Self::Error> {
         todo!()
     }
-    
+
     async fn receive_share(
-            _ctx: Self::Context,
-            _coms: impl Communicate,
-            _from: usize,
-        ) -> Result<Self, ()> {
+        _ctx: Self::Context,
+        _coms: impl Communicate,
+        _from: usize,
+    ) -> Result<Self, ()> {
         todo!()
     }
 
     // This might not be the propper way to do recombine - it depends on what exanctly recombine is suppose to mean :)
-    async fn recombine(ctx: Self::Context, share: Self, mut network: impl Communicate) -> Result<F, ()> {
-        Ok(open_res(share, &mut network, &ctx.params, todo!("opened values")).await)
+    async fn recombine(
+        ctx: Self::Context,
+        share: Self,
+        mut network: impl Communicate,
+    ) -> Result<F, ()> {
+        Ok(open_res(share, &mut network, &ctx.params, &ctx.opened_values).await)
     }
 }
 
-// This impl of share_many only works if the party is either sending or resiving all the elements. 
-// This is by design, as only the sender needs to broadcast, and that is where there are something to be won by doing it in bulk. 
+// This impl of share_many only works if the party is either sending or resiving all the elements.
+// This is by design, as only the sender needs to broadcast, and that is where there are something to be won by doing it in bulk.
 pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     op_vals: Option<Vec<F>>,
     for_sharing: &mut ForSharing<F>,
@@ -295,7 +298,6 @@ where
         .pop()
         .expect("Atleast one element must be opened");
     while let Some(ov) = opened_vals.pop() {
-        
         for i in 0..n {
             opened_vals_sum[i] += ov[i];
         }
@@ -421,10 +423,10 @@ fn power<F: std::ops::MulAssign + Clone + std::ops::Mul<Output = F>>(base: F, ex
 #[cfg(test)]
 mod test {
 
-    use std::io::Seek;
     use ff::Field;
     use rand::thread_rng;
     use rand::SeedableRng;
+    use std::io::Seek;
 
     use crate::{algebra::element::Element32, net::network::InMemoryNetwork};
 
@@ -1454,10 +1456,7 @@ mod test {
     fn test_dealer_writing_to_file() {
         // preprosessing by dealer
         type F = Element32;
-        let mut files = [
-            tempfile::tempfile().unwrap(),
-            tempfile::tempfile().unwrap(),
-        ];
+        let mut files = [tempfile::tempfile().unwrap(), tempfile::tempfile().unwrap()];
         let known_to_each = vec![1, 2];
         let number_of_triplets = 2;
         preprocessing::write_preproc_to_file(

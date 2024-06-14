@@ -107,14 +107,12 @@ pub fn write_preproc_to_file<F: PrimeField + serde::Serialize + serde::de::Deser
     Ok(())
 }
 
-
 pub fn read_preproc_from_file<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     file: &mut File,
 ) -> SpdzContext<F> {
     // TODO: return Result instead.
     bincode::deserialize_from(file).unwrap()
 }
-
 
 pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     mut rng: impl rand::Rng,
