@@ -16,8 +16,9 @@
 // TODO: Consider smallvec or tinyvec
 // TODO: Make parallel version it's own type switch on them using cfg..
 
+use std::ops::{Add, AddAssign, Sub, SubAssign};
+
 use ff::Field;
-use rayon::prelude::*;
 
 /// Represention of a mathematical vector of type `F`.
 ///
@@ -26,7 +27,7 @@ use rayon::prelude::*;
 ///
 /// If the rayon feature is enabled the operations will be parallelized.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Vector<F: Send + Sync>(Box<[F]>);
+pub struct Vector<F>(Box<[F]>);
 
 impl<F: Send + Sync> Vector<F> {
     pub const fn from_boxed_slice(slice: Box<[F]>) -> Self {
@@ -50,7 +51,7 @@ impl<F: Send + Sync> Vector<F> {
     }
 }
 
-impl<F: Send + Sync> std::ops::Deref for Vector<F> {
+impl<F> std::ops::Deref for Vector<F> {
     type Target = [F];
 
     fn deref(&self) -> &Self::Target {
@@ -58,7 +59,7 @@ impl<F: Send + Sync> std::ops::Deref for Vector<F> {
     }
 }
 
-impl<F: Send + Sync> std::ops::Index<usize> for Vector<F> {
+impl<F> std::ops::Index<usize> for Vector<F> {
     type Output = F;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -66,13 +67,13 @@ impl<F: Send + Sync> std::ops::Index<usize> for Vector<F> {
     }
 }
 
-impl<F: Send + Sync> std::ops::IndexMut<usize> for Vector<F> {
+impl<F> std::ops::IndexMut<usize> for Vector<F> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.0[index]
     }
 }
 
-impl<F: Send + Sync> IntoIterator for Vector<F> {
+impl<F> IntoIterator for Vector<F> {
     type Item = F;
 
     type IntoIter = std::vec::IntoIter<F>;
@@ -82,28 +83,9 @@ impl<F: Send + Sync> IntoIterator for Vector<F> {
     }
 }
 
-impl<F: Send + Sync> FromIterator<F> for Vector<F> {
+impl<F> FromIterator<F> for Vector<F> {
     fn from_iter<T: IntoIterator<Item = F>>(iter: T) -> Self {
         let boxed = iter.into_iter().collect();
-        Self(boxed)
-    }
-}
-
-impl<'a, F: Send + Sync> IntoParallelIterator for &'a Vector<F> {
-    type Item = &'a F;
-    type Iter = rayon::slice::Iter<'a, F>;
-
-    fn into_par_iter(self) -> Self::Iter {
-        self.0.par_iter()
-    }
-}
-
-impl<F: Send + Sync> FromParallelIterator<F> for Vector<F> {
-    fn from_par_iter<I>(par_iter: I) -> Self
-    where
-        I: IntoParallelIterator<Item = F>,
-    {
-        let boxed = par_iter.into_par_iter().collect();
         Self(boxed)
     }
 }
@@ -120,170 +102,82 @@ impl<T: Send + Sync> AsMut<[T]> for Vector<T> {
     }
 }
 
-// // Inefficient.
-// impl<A: Send + Sync + Copy> std::ops::Add for &Vector<A>
-// where
-//     A: std::ops::Add<Output = A>,
-// {
-//     type Output = Vector<A>;
-
-//     fn add(self, rhs: Self) -> Self::Output {
-//         let internal = if cfg!(feature = "rayon") {
-//             self.0
-//                 .par_iter()
-//                 .zip(rhs.0.par_iter())
-//                 .map(|(&a, &b)| a + b)
-//                 .collect()
-//         } else {
-//             self.0
-//                 .iter()
-//                 .zip(rhs.0.iter())
-//                 .map(|(&a, &b)| a + b)
-//                 .collect()
-//         };
-//         Vector(internal)
-//     }
-// }
-
-impl<A: Send + Sync> std::ops::AddAssign<&Vector<A>> for Vector<A>
-where
-    A: for<'a> std::ops::AddAssign<&'a A>,
-{
-    fn add_assign(&mut self, rhs: &Vector<A>) {
-        if cfg!(feature = "rayon") {
-            self.0
-                .par_iter_mut()
-                .zip(rhs.0.par_iter())
-                .for_each(|(a, b)| *a += b)
-        } else {
-            self.0
-                .iter_mut()
-                .zip(rhs.0.iter())
-                .for_each(|(a, b)| *a += b)
+macro_rules! inherent {
+    ($trait2:ident, $fun2:ident, $trait1:ident, $fun1:ident) => {
+        impl<A> $trait1<&Vector<A>> for Vector<A>
+        where
+            A: for<'a> std::ops::$trait1<&'a A>,
+        {
+            fn $fun1(&mut self, rhs: &Self) {
+                self.0
+                    .iter_mut()
+                    .zip(rhs.0.iter())
+                    .for_each(|(a, b)| $trait1::$fun1(a, b));
+            }
         }
-    }
-}
 
-impl<A: Send + Sync> std::ops::AddAssign for Vector<A>
-where
-    for<'a> A: std::ops::AddAssign<&'a A>,
-{
-    fn add_assign(&mut self, rhs: Self) {
-        *self += &rhs;
-    }
-}
-
-impl<A: Send + Sync> std::ops::Add<&Self> for Vector<A>
-where
-    A: for<'a> std::ops::AddAssign<&'a A>,
-{
-    type Output = Vector<A>;
-
-    fn add(mut self, rhs: &Self) -> Self::Output {
-        self += rhs;
-        self
-    }
-}
-
-impl<A: Send + Sync> std::ops::Add<Self> for Vector<A>
-where
-    A: for<'a> std::ops::AddAssign<&'a A>,
-{
-    type Output = Vector<A>;
-
-    fn add(mut self, rhs: Self) -> Self::Output {
-        self += &rhs;
-        self
-    }
-}
-
-// Inefficient
-// impl<A: Send + Sync, B: Send + Sync> std::ops::Sub for &Vector<A>
-// where
-//     for<'a> &'a A: std::ops::Sub<Output = B>,
-// {
-//     type Output = Vector<B>;
-
-//     fn sub(self, rhs: Self) -> Self::Output {
-//         let internal = if cfg!(feature = "rayon") {
-//             self.0
-//                 .par_iter()
-//                 .zip(rhs.0.par_iter())
-//                 .map(|(a, b)| a - b)
-//                 .collect()
-//         } else {
-//             self.0
-//                 .iter()
-//                 .zip(rhs.0.iter())
-//                 .map(|(a, b)| a - b)
-//                 .collect()
-//         };
-//         Vector(internal)
-//     }
-// }
-
-impl<A: Send + Sync> std::ops::SubAssign<&Vector<A>> for Vector<A>
-where
-    A: for<'a> std::ops::SubAssign<&'a A>,
-{
-    fn sub_assign(&mut self, rhs: &Vector<A>) {
-        if cfg!(feature = "rayon") {
-            self.0
-                .par_iter_mut()
-                .zip(rhs.0.par_iter())
-                .for_each(|(a, b)| *a -= b)
-        } else {
-            self.0
-                .iter_mut()
-                .zip(rhs.0.iter())
-                .for_each(|(a, b)| *a -= b)
+        impl<A> $trait1 for Vector<A>
+        where
+            for<'a> A: $trait1<&'a A>,
+        {
+            fn $fun1(&mut self, rhs: Self) {
+                $trait1::$fun1(self, &rhs)
+            }
         }
-    }
+
+        impl<A> $trait2<&Self> for Vector<A>
+        where
+            A: for<'a> $trait1<&'a A>,
+        {
+            type Output = Vector<A>;
+
+            fn $fun2(mut self, rhs: &Self) -> Self::Output {
+                $trait1::$fun1(&mut self, rhs);
+                self
+            }
+        }
+
+        impl<A> $trait2<Self> for Vector<A>
+        where
+            A: for<'a> $trait1<&'a A>,
+        {
+            type Output = Vector<A>;
+
+            fn $fun2(mut self, rhs: Self) -> Self::Output {
+                $trait1::$fun1(&mut self, rhs);
+                self
+            }
+        }
+
+        impl<A> $trait2<Vector<A>> for &Vector<A>
+        where
+            A: for<'a> $trait1<&'a A>,
+        {
+            type Output = Vector<A>;
+
+            fn $fun2(self, mut rhs: Vector<A>) -> Self::Output {
+                $trait1::$fun1(&mut rhs, self);
+                rhs
+            }
+        }
+    };
 }
 
-impl<A: Send + Sync> std::ops::Sub<&Self> for Vector<A>
-where
-    A: for<'a> std::ops::SubAssign<&'a A>,
-{
-    type Output = Vector<A>;
-
-    fn sub(mut self, rhs: &Self) -> Self::Output {
-        self -= rhs;
-        self
-    }
-}
-
-impl<A: Send + Sync> std::ops::Sub<Self> for Vector<A>
-where
-    A: for<'a> std::ops::SubAssign<&'a A>,
-{
-    type Output = Vector<A>;
-
-    fn sub(mut self, rhs: Self) -> Self::Output {
-        self -= &rhs;
-        self
-    }
-}
+inherent!(Add, add, AddAssign, add_assign);
+inherent!(Sub, sub, SubAssign, sub_assign);
 
 /// Generic implementation of row-wise mult-assign
 ///
 /// Vector<A> =* B
 /// if A *= B exists
 ///
-impl<A: Send + Sync, B: Send + Sync> std::ops::MulAssign<&B> for Vector<A>
+impl<A, B> std::ops::MulAssign<&B> for Vector<A>
 where
     for<'b> A: std::ops::MulAssign<&'b B>,
 {
     fn mul_assign(&mut self, rhs: &B) {
         let b = rhs;
-        if cfg!(feature = "rayon") {
-            // self.0
-            //     .par_iter_mut()
-            //     .for_each(|a| *a *= b)
-            todo!("error")
-        } else {
-            self.0.iter_mut().for_each(|a| *a *= b)
-        }
+        self.0.iter_mut().for_each(|a| *a *= b)
     }
 }
 
@@ -296,7 +190,7 @@ where
 ///
 /// This is actually super-useful
 ///
-impl<A: Send + Sync, B: Send + Sync> std::ops::Mul<B> for &Vector<A>
+impl<A, B> std::ops::Mul<B> for &Vector<A>
 where
     for<'a, 'b> &'a A: std::ops::Mul<&'b B, Output = B>,
 {
@@ -304,11 +198,7 @@ where
 
     fn mul(self, rhs: B) -> Self::Output {
         let b = rhs;
-        let internal = if cfg!(feature = "rayon") {
-            self.0.par_iter().map(|a| a * &b).collect()
-        } else {
-            self.0.iter().map(|a| a * &b).collect()
-        };
+        let internal = self.0.iter().map(|a| a * &b).collect();
         Vector(internal)
     }
 }
@@ -318,7 +208,7 @@ where
 /// Vector<A> * B -> Vector<A>
 /// if A *= B exists
 ///
-impl<A: Send + Sync, B: Send + Sync> std::ops::Mul<B> for Vector<A>
+impl<A, B> std::ops::Mul<B> for Vector<A>
 where
     for<'b> A: std::ops::MulAssign<&'b B>,
 {
@@ -350,7 +240,7 @@ where
 
 impl<F: Field> Vector<F> {
     pub fn inner_product(&self, other: &Self) -> F {
-        self.par_iter().zip(other).map(|(&a, &b)| a * b).sum()
+        self.iter().zip(other.iter()).map(|(&a, &b)| a * b).sum()
     }
 }
 
