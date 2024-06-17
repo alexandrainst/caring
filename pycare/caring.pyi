@@ -28,4 +28,6 @@ class Engine:
     :param my_addr: the address to listen on
     :param horsepower: the addresses to connect to
 """
-def setup(my_addr: str, *others: str) -> Engine: ...
+def setup(path_to_pre: str, my_addr: str, *others: str) -> Engine: ...
+
+def preproc(num_of_shares: int, paths_to_pre: list[str])

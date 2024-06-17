@@ -7,6 +7,8 @@ license = "MIT OR Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-backtrace = "0.2.6"
+async-trait = "0.1.80"
 bincode = "1.3.3"
 derive_more = "0.99.17"
 digest = "0.10.7"
@@ -15,10 +17,11 @@ fixed = "2.0.0-alpha.11"
 futures = "0.3.28"
 futures-concurrency = "7.6.0"
 group = "0.13.0"
-itertools = "0.12"
+itertools = "0.13"
 num-traits = "0.2.16"
 overload = "0.1.1"
 rand = "0.8.5"
+rand_chacha = "0.3.1"
 rayon = "1.8.0"
 serde = { version = "1.0.188", features = ["derive"] }
 thiserror = "1.0.50"
@@ -27,6 +30,7 @@ tokio-util = { version = "0.7.9", features = ["io", "net", "io-util", "codec", "
 tracing = "0.1.40"
 
 [dev-dependencies]
+tempfile = "3.10.1"
 tokio-test = "0.4.4"
 curve25519-dalek = { version = "4.1.1", features = ["group", "serde"] }
 sha2 = "0.10.8"

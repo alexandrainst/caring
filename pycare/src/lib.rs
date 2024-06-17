@@ -1,20 +1,31 @@
 use pyo3::{prelude::*, types::PyTuple, exceptions::PyIOError};
 
 use wecare::*;
+use std::path::Path;
 
 #[pyclass]
 struct Engine(Option<AdderEngine>);
 
 /// Setup a MPC addition engine connected to the given sockets.
 #[pyfunction]
-#[pyo3(signature = (my_addr, *others))]
-fn setup(my_addr: &str, others: &Bound<'_, PyTuple>) -> PyResult<Engine> {
+#[pyo3(signature = (path_to_pre, my_addr, *others))]
+
+fn setup(path_to_pre: &str, my_addr: &str, others: &Bound<'_, PyTuple>) -> PyResult<Engine> {
     let others : Vec<_> = others.iter().map(|x| x.extract::<String>().unwrap().clone())
         .collect();
-    match setup_engine(my_addr, &others) {
+    let file_name = Path::new(path_to_pre);
+    match setup_engine(my_addr, &others, file_name) {
         Ok(e) => Ok(Engine(Some(e))),
         Err(e) => Err(PyIOError::new_err(e.0))
     }
+}
+
+/// Calculate and save the preprocessing
+#[pyfunction]
+#[pyo3(signature = (number_of_shares, paths_to_pre))]
+fn preproc( number_of_shares: usize, paths_to_pre: &str){
+    let paths_to_pre = paths_to_pre.split(",").collect();
+    do_preproc(paths_to_pre, vec![number_of_shares, number_of_shares]);
 }
 
 
@@ -43,6 +54,7 @@ impl Engine {
 #[pymodule]
 fn caring(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setup, m)?)?;
+    m.add_function(wrap_pyfunction!(preproc, m)?)?;
     m.add_class::<Engine>()?;
     Ok(())
 }
