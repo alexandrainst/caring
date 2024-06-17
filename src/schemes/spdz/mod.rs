@@ -305,7 +305,7 @@ where
     // TODO: consider just calling check all - needs a random element though - either a generator or an element.
     //check_all_d(opened_values, network, random_element)
     assert!(
-        !prev_opened_values.is_empty(),
+        prev_opened_values.is_empty(),
         "don't open if there are unchecked open values"
     );
 
@@ -350,7 +350,7 @@ where
     // TODO: consider just calling check all - needs a random element though - either a generator or an element.
     //check_all_d(opened_values, network, random_element)
     assert!(
-        !opened_values.is_empty(),
+        opened_values.is_empty(),
         "don't open if there are unchecked open values"
     );
 
