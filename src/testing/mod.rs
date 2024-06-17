@@ -10,21 +10,46 @@ pub struct Cluster<Arg = ()> {
     args: Vec<Arg>,
 }
 impl Cluster {
-    pub fn new(size: usize) -> Self {
-        let players = InMemoryNetwork::in_memory(size);
+    /// Create a new cluster with `n` parties
+    pub fn new(n: usize) -> Self {
+        let players = InMemoryNetwork::in_memory(n);
         Self {
-            args: vec![(); size],
+            args: vec![(); n],
             players,
         }
     }
 
+    /// Provide arguments of type `A` to the cluster as a list with each networked party.
+    /// The arguments are to be provided as a list of size eqaul to the clister
+    ///
+    /// # Example
+    /// ```rust
+    /// use caring::testing::*;             //      party 1      party 2
+    ///                                     //    v--------v   v--------v
+    /// let cluster = Cluster::new(2).with_args([(1, "alice"), (2, "bob")])
+    /// cluster.run_with_args(|net, (id, name)| async move {
+    ///     println!("[{id}] hello from {name}");
+    /// }).await.unwrap();
+    ///
+    /// ```
     pub fn with_args<A>(self, args: impl Into<Vec<A>>) -> Cluster<A> {
+        let args: Vec<A> = args.into();
+        let m = args.len();
+        let n = self.players.len();
+        assert_eq!(m, n, "Cluster of size {n} requies {n} arguments, got {m}");
         Cluster {
-            args: args.into(),
+            args,
             players: self.players,
         }
     }
 
+    /// Run a cluster
+    ///
+    /// # Returns
+    /// A vector of results from the parties
+    ///
+    /// # Errors
+    /// Returns a `[tokio::task::JoinError]` upon a any panic'ed party.
     pub async fn run<T, P, F>(self, prg: P) -> Result<Vec<T>, JoinError>
     where
         T: Send + 'static,
@@ -36,6 +61,18 @@ impl Cluster {
 }
 
 impl<Arg: Clone> Cluster<Arg> {
+    /// Run a cluster with arguments
+    ///
+    /// # Example
+    /// ```rust
+    /// use caring::testing::*;             //      party 1      party 2
+    ///                                     //    v--------v   v--------v
+    /// let cluster = Cluster::new(2).with_args([(1, "alice"), (2, "bob")])
+    /// cluster.run_with_args(|net, (id, name)| async move {
+    ///     println!("[{id}] hello from {name}");
+    /// }).await.unwrap();
+    ///
+    /// ```
     pub async fn run_with_args<T, P, F>(self, prg: P) -> Result<Vec<T>, JoinError>
     where
         T: Send + 'static,
@@ -65,9 +102,6 @@ mod test {
 
     #[tokio::test]
     async fn hello() {
-        // Yes this is a problem.
-        // We really need scoped async tasks, but those don't really exist.
-
         let c: u32 = Cluster::new(32)
             .run(|mut network| async move {
                 let msg = "Joy to the world!".to_owned();

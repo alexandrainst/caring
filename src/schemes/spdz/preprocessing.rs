@@ -41,17 +41,20 @@ pub struct PreprocessedValues<F: PrimeField> {
     pub for_sharing: ForSharing<F>,
 }
 
+// TODO: Document this
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForSharing<F: PrimeField> {
     pub rand_known_to_i: RandomKnownToPi<F>, // consider boxed slices for the outer vec
     pub rand_known_to_me: RandomKnownToMe<F>,
 }
 
+/// Multiplication triplet fuel tank
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Triplets<F: PrimeField> {
     multiplication_triplets: Vec<MultiplicationTriple<F>>,
 }
 
+// TODO: Use beaver module
 impl<F: PrimeField> Triplets<F> {
     pub fn get_triplet(&mut self) -> Result<MultiplicationTriple<F>, PreProcError> {
         self.multiplication_triplets

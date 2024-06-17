@@ -15,11 +15,12 @@ use crate::{net::Communicate, schemes::interactive::InteractiveShared};
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 use ff::PrimeField;
 use rand::RngCore;
+use serde::{de::DeserializeOwned, Serialize};
 
 use self::preprocessing::ForSharing;
 
 pub mod preprocessing;
-use std::error;
+use std::error::{self, Error};
 
 // Should we allow Field or use PrimeField?
 #[derive(
@@ -107,12 +108,17 @@ where
     type Error = ();
 
     async fn share(
-        _ctx: Self::Context,
-        _secret: Self::Value,
+        ctx: Self::Context,
+        secret: Self::Value,
         _rng: impl RngCore + Send,
-        _coms: impl Communicate,
+        mut coms: impl Communicate,
     ) -> Result<Self, ()> {
-        todo!()
+        let params = &ctx.params;
+        let for_sharing = &mut ctx.preprocessed_values.for_sharing;
+        let res = send_new_shares(vec![secret], for_sharing, params, &mut coms)
+            .await
+            .unwrap();
+        Ok(res[0])
     }
 
     async fn symmetric_share(
@@ -125,14 +131,18 @@ where
     }
 
     async fn receive_share(
-        _ctx: Self::Context,
-        _coms: impl Communicate,
-        _from: usize,
+        ctx: Self::Context,
+        mut coms: impl Communicate,
+        from: usize,
     ) -> Result<Self, ()> {
-        todo!()
+        let params = &ctx.params;
+        let for_sharing = &mut ctx.preprocessed_values.for_sharing;
+        let res = receive_new_shares(&mut coms, from, for_sharing, params)
+            .await
+            .unwrap();
+        Ok(res[0])
     }
 
-    // This might not be the propper way to do recombine - it depends on what exanctly recombine is suppose to mean :)
     async fn recombine(
         ctx: Self::Context,
         share: Self,
@@ -142,10 +152,15 @@ where
     }
 }
 
-// This impl of share_many only works if the party is either sending or resiving all the elements.
-// This is by design, as only the sender needs to broadcast, and that is where there are something to be won by doing it in bulk.
+/// Share a vector of values with the other parties.
+///
+/// This impl of share_many only works if the party is either sending or resiving all the elements.
+/// This is by design, as only the sender needs to broadcast, and that is where there are something to be won by doing it in bulk.
+///
+/// # Returns
+/// A vector of shares corresponding to your shared vector.
 pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
-    op_vals: Option<Vec<F>>,
+    secrets: Option<Vec<F>>, // TODO: remove option.
     for_sharing: &mut ForSharing<F>,
     params: &SpdzParams<F>,
     who_is_sending: usize,
@@ -153,33 +168,50 @@ pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwne
 ) -> Result<Vec<Share<F>>, Box<dyn error::Error>> {
     let is_chosen_one = params.who_am_i == who_is_sending;
     if is_chosen_one {
-        let values = op_vals.expect("The sender needs to enter the value to be send");
-        // TODO: return some error
-        let res = send_shares(values, for_sharing, params);
-        let (shares, corrections) = match res {
-            Ok((shares, corrections)) => (shares, corrections),
-            Err(e) => return Err(e.into()),
-        };
-        match network.broadcast(&corrections).await {
-            Ok(_) => (),
-            Err(e) => return Err(e.into()),
-        };
-        Ok(shares)
+        send_new_shares(secrets.unwrap(), for_sharing, params, network).await
     } else {
-        let corrections = match network.recv_from(who_is_sending).await {
-            Ok(vec) => vec,
-            Err(e) => return Err(e.into()),
-        };
-        Ok(receive_shares_from(
-            corrections,
-            for_sharing,
-            who_is_sending,
-            params,
-        )?)
+        receive_new_shares(network, who_is_sending, for_sharing, params).await
     }
 }
 
-fn send_shares<F: PrimeField>(
+async fn receive_new_shares<F: PrimeField + Serialize + DeserializeOwned>(
+    network: &mut impl Broadcast,
+    who_is_sending: usize,
+    for_sharing: &mut ForSharing<F>,
+    params: &SpdzParams<F>,
+) -> Result<Vec<Share<F>>, Box<dyn Error>> {
+    let corrections = match network.recv_from(who_is_sending).await {
+        Ok(vec) => vec,
+        Err(e) => return Err(e.into()),
+    };
+    Ok(create_shares_from(
+        corrections,
+        for_sharing,
+        who_is_sending,
+        params,
+    )?)
+}
+
+async fn send_new_shares<F: PrimeField + Serialize + DeserializeOwned>(
+    secrets: Vec<F>,
+    for_sharing: &mut ForSharing<F>,
+    params: &SpdzParams<F>,
+    network: &mut impl Broadcast,
+) -> Result<Vec<Share<F>>, Box<dyn Error>> {
+    // TODO: return some error
+    let res = create_shares(secrets, for_sharing, params);
+    let (shares, corrections) = match res {
+        Ok((shares, corrections)) => (shares, corrections),
+        Err(e) => return Err(e.into()),
+    };
+    match network.broadcast(&corrections).await {
+        Ok(_) => (),
+        Err(e) => return Err(e.into()),
+    };
+    Ok(shares)
+}
+
+fn create_shares<F: PrimeField>(
     vals: Vec<F>,
     for_sharing: &mut ForSharing<F>,
     params: &SpdzParams<F>,
@@ -208,7 +240,7 @@ fn send_shares<F: PrimeField>(
 }
 
 // When receiving a share, the party receiving it needs to know who send it.
-fn receive_shares_from<F: PrimeField>(
+fn create_shares_from<F: PrimeField>(
     corrections: Vec<F>,
     for_sharing: &mut ForSharing<F>,
     who_is_sending: usize,
@@ -230,7 +262,7 @@ fn receive_shares_from<F: PrimeField>(
     Ok(shares)
 }
 
-// partiel opening that handles the broadcasting and pushing to opended values. All that is partially opened needs to be checked later.
+// partial opening that handles the broadcasting and pushing to opended values. All that is partially opened needs to be checked later.
 async fn partial_opening<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     candidate_share: &Share<F>,
     params: &SpdzParams<F>,
@@ -245,6 +277,7 @@ async fn partial_opening<F: PrimeField + serde::Serialize + serde::de::Deseriali
     partially_opened_vals.push(candidate_val * params.mac_key_share - candidate_share.mac);
     candidate_val
 }
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpdzParams<F: PrimeField> {
     mac_key_share: F,
@@ -384,7 +417,7 @@ where
         return false;
     }
 
-    // Then we make a random linearcombination of all the values, commit, broadcast, verify that it is zero
+    // Then we make a random linear combination of all the values, commit, broadcast, verify that it is zero
     let lin_comp = linear_combinations(random_val_shares.into_iter().sum(), partially_opened_vals);
     partially_opened_vals.clear();
     let lin_comps_commitments = network
@@ -425,12 +458,12 @@ mod test {
     use rand::SeedableRng;
     use std::io::Seek;
 
-    use crate::{algebra::element::Element32, net::network::InMemoryNetwork};
+    use crate::{algebra::element::Element32, net::network::InMemoryNetwork, testing::Cluster};
 
     use super::*;
 
     // All these tests use dealer preprosessing
-    fn dummie_prepross() -> (
+    fn dummie_preproc() -> (
         SpdzContext<Element32>,
         SpdzContext<Element32>,
         preprocessing::SecretValues<Element32>,
@@ -450,6 +483,7 @@ mod test {
         let c0 = contexts.pop().unwrap();
         (c0, c1, secret_values)
     }
+
     #[test]
     fn test_dealer() {
         //let rng = rand::rngs::mock::StepRng::new(42, 7);
@@ -529,22 +563,23 @@ mod test {
         assert!(b2.val * mac == b2.mac);
         assert!(c2.val * mac == c2.mac);
     }
+
     #[test]
     fn test_sharing_using_send_and_resive() {
         type F = Element32;
-        let (p1_context, p2_context, secret_values) = dummie_prepross();
+        let (p1_context, p2_context, secret_values) = dummie_preproc();
         assert!(p1_context.params.who_am_i == 0);
         assert!(p2_context.params.who_am_i == 1);
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
         let (elm1_1_v, correction_v) =
-            send_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params)
+            create_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params)
                 .expect("Something went wrong while P1 was sending the share.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = receive_shares_from(
+        let elm1_2 = create_shares_from(
             vec![correction],
             &mut p2_prepros.for_sharing,
             0,
@@ -557,11 +592,11 @@ mod test {
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
         let (elm2_2_v, correction_v) =
-            send_shares(vec![elm2], &mut p2_prepros.for_sharing, &p2_context.params)
+            create_shares(vec![elm2], &mut p2_prepros.for_sharing, &p2_context.params)
                 .expect("Something went wrong when P2 was sending the share");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
-        let elm2_1 = receive_shares_from(
+        let elm2_1 = create_shares_from(
             vec![correction],
             &mut p1_prepros.for_sharing,
             1,
@@ -571,6 +606,7 @@ mod test {
         assert!((elm2_1.val + elm2_2.val) == elm2);
         assert!(elm2_1.mac + elm2_2.mac == elm2 * secret_values.mac_key);
     }
+
     #[tokio::test]
     async fn test_sharing_using_share_many() {
         type F = Element32;
@@ -633,15 +669,16 @@ mod test {
             res.unwrap();
         }
     }
+
     #[tokio::test]
     async fn test_partial_opening_and_check_all_partial_values_one_by_one() {
         use crate::net::network::InMemoryNetwork;
         type F = Element32;
-        let (mut p1_context, mut p2_context, secret_values) = dummie_prepross();
+        let (mut p1_context, mut p2_context, secret_values) = dummie_preproc();
 
         // P1 shares an element
         let elm1 = F::from_u128(56u128);
-        let (elm1_1_v, correction_v) = send_shares(
+        let (elm1_1_v, correction_v) = create_shares(
             vec![elm1],
             &mut p1_context.preprocessed_values.for_sharing,
             &p1_context.params,
@@ -649,7 +686,7 @@ mod test {
         .expect("Something went wrong when P1 was sending the element.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
-        let elm1_2 = receive_shares_from(
+        let elm1_2 = create_shares_from(
             vec![correction],
             &mut (p2_context.preprocessed_values.for_sharing),
             0,
@@ -661,7 +698,7 @@ mod test {
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2_v, correction_v) = send_shares(
+        let (elm2_2_v, correction_v) = create_shares(
             vec![elm2],
             &mut p2_context.preprocessed_values.for_sharing,
             &p2_context.params,
@@ -669,7 +706,7 @@ mod test {
         .expect("Something went wrong when P2 was sending the element.");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
-        let elm2_1 = receive_shares_from(
+        let elm2_1 = create_shares_from(
             vec![correction],
             &mut p1_context.preprocessed_values.for_sharing,
             1,
@@ -705,32 +742,39 @@ mod test {
             }
         }
 
-        let mut taskset = tokio::task::JoinSet::new();
-        let cluster = InMemoryNetwork::in_memory(2); //asuming two players
-        let elm1_v = [elm1_1, elm1_2];
         partially_opened_vals.reverse();
-        for (i, network) in cluster.into_iter().enumerate() {
-            taskset.spawn(do_mpc(
-                network,
-                elm1_v[i],
+        let cluster = Cluster::new(2).with_args([
+            (
+                elm1_1,
                 elm1,
                 partially_opened_vals.pop().unwrap(),
-                params[i].clone(),
-            ));
-        }
-        while let Some(res) = taskset.join_next().await {
-            res.unwrap();
-        }
+                params[0].clone(),
+            ),
+            (
+                elm1_2,
+                elm1,
+                partially_opened_vals.pop().unwrap(),
+                params[1].clone(),
+            ),
+        ]);
+
+        cluster
+            .run_with_args(|network, (elm, val, par_op, params)| {
+                do_mpc(network, elm, val, par_op, params)
+            })
+            .await
+            .unwrap();
     }
+
     #[tokio::test]
     async fn test_partial_opening_and_check_all_partial_values_using_check_all() {
         use crate::net::network::InMemoryNetwork;
         type F = Element32;
-        let (mut p1_context, mut p2_context, secret_values) = dummie_prepross();
+        let (mut p1_context, mut p2_context, secret_values) = dummie_preproc();
 
         // P1 shares an element
         let elm1 = F::from_u128(56u128);
-        let (elm1_1_v, correction_v) = send_shares(
+        let (elm1_1_v, correction_v) = create_shares(
             vec![elm1],
             &mut p1_context.preprocessed_values.for_sharing,
             &p1_context.params,
@@ -738,7 +782,7 @@ mod test {
         .expect("Something went wrong when P1 was sending the element.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
-        let elm1_2 = receive_shares_from(
+        let elm1_2 = create_shares_from(
             vec![correction],
             &mut (p2_context.preprocessed_values.for_sharing),
             0,
@@ -750,7 +794,7 @@ mod test {
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2_v, correction_v) = send_shares(
+        let (elm2_2_v, correction_v) = create_shares(
             vec![elm2],
             &mut p2_context.preprocessed_values.for_sharing,
             &p2_context.params,
@@ -758,7 +802,7 @@ mod test {
         .expect("Something went wrong when P2 was sending the element.");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
-        let elm2_1 = receive_shares_from(
+        let elm2_1 = create_shares_from(
             vec![correction],
             &mut p1_context.preprocessed_values.for_sharing,
             1,
@@ -810,21 +854,22 @@ mod test {
             res.unwrap();
         }
     }
+
     #[test]
     fn test_addition() {
         type F = Element32;
-        let (p1_context, p2_context, secret_values) = dummie_prepross();
+        let (p1_context, p2_context, secret_values) = dummie_preproc();
 
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
         let (elm1_1_v, correction_v) =
-            send_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params)
+            create_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params)
                 .expect("Something went wrong when P1 was sending the element.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = receive_shares_from(
+        let elm1_2 = create_shares_from(
             vec![correction],
             &mut p2_prepros.for_sharing,
             0,
@@ -837,11 +882,11 @@ mod test {
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
         let (elm2_2_v, correction_v) =
-            send_shares(vec![elm2], &mut p2_prepros.for_sharing, &p2_context.params)
+            create_shares(vec![elm2], &mut p2_prepros.for_sharing, &p2_context.params)
                 .expect("Something went wrong when P2 was sending the element.");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
-        let elm2_1 = receive_shares_from(
+        let elm2_1 = create_shares_from(
             vec![correction],
             &mut p1_prepros.for_sharing,
             1,
@@ -859,22 +904,23 @@ mod test {
         assert!(elm1 + elm2 == elm3_1.val + elm3_2.val);
         assert!(elm3_1.mac + elm3_2.mac == (elm1 + elm2) * secret_values.mac_key);
     }
+
     #[test]
     fn test_subtracting() {
         type F = Element32;
-        let (p1_context, p2_context, secret_values) = dummie_prepross();
+        let (p1_context, p2_context, secret_values) = dummie_preproc();
 
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
         let (elm1_1, correction) =
-            match send_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
+            match create_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
                 Ok((e, c)) => (e[0], c[0]),
                 Err(_) => panic!(),
             };
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match receive_shares_from(
+        let elm1_2 = match create_shares_from(
             vec![correction],
             &mut p2_prepros.for_sharing,
             0,
@@ -889,12 +935,12 @@ mod test {
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
         let (elm2_2, correction) =
-            match send_shares(vec![elm2], &mut p2_prepros.for_sharing, &p2_context.params) {
+            match create_shares(vec![elm2], &mut p2_prepros.for_sharing, &p2_context.params) {
                 Ok((e, c)) => (e[0], c[0]),
                 Err(_) => panic!(),
             };
 
-        let elm2_1 = match receive_shares_from(
+        let elm2_1 = match create_shares_from(
             vec![correction],
             &mut p1_prepros.for_sharing,
             1,
@@ -914,16 +960,17 @@ mod test {
         assert!(elm1 - elm2 == elm3_1.val + elm3_2.val);
         assert!(elm3_1.mac + elm3_2.mac == (elm1 - elm2) * secret_values.mac_key);
     }
+
     #[test]
     fn test_multiplication_with_pub_constant() {
         type F = Element32;
-        let (p1_context, p2_context, secret_values) = dummie_prepross();
+        let (p1_context, p2_context, secret_values) = dummie_preproc();
         let pub_constant = F::from_u128(8711u128);
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
         let (elm1_1, correction) =
-            match send_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
+            match create_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
                 Ok((e, c)) => (e[0], c[0]),
                 Err(e) => {
                     println!("Error: {}", e);
@@ -932,7 +979,7 @@ mod test {
             };
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match receive_shares_from(
+        let elm1_2 = match create_shares_from(
             vec![correction],
             &mut p2_prepros.for_sharing,
             0,
@@ -952,22 +999,23 @@ mod test {
         assert!(elm1 * pub_constant == elm3_1.val + elm3_2.val);
         assert!(elm3_1.mac + elm3_2.mac == (elm1 * pub_constant) * secret_values.mac_key);
     }
+
     #[tokio::test]
     async fn test_secret_shared_multipllication() {
         type F = Element32;
-        let (mut p1_context, mut p2_context, secret_values) = dummie_prepross();
+        let (mut p1_context, mut p2_context, secret_values) = dummie_preproc();
 
         // P1 shares an element
         let p1_prepros = &mut p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
         let (elm1_1, correction) =
-            match send_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
+            match create_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
                 Ok((e, c)) => (e[0], c[0]),
                 Err(_) => panic!(),
             };
 
         let p2_prepros = &mut p2_context.preprocessed_values;
-        let elm1_2 = match receive_shares_from(
+        let elm1_2 = match create_shares_from(
             vec![correction],
             &mut p2_prepros.for_sharing,
             0,
@@ -982,12 +1030,12 @@ mod test {
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
         let (elm2_2, correction) =
-            match send_shares(vec![elm2], &mut p2_prepros.for_sharing, &p2_context.params) {
+            match create_shares(vec![elm2], &mut p2_prepros.for_sharing, &p2_context.params) {
                 Ok((e, c)) => (e[0], c[0]),
                 Err(_) => panic!(),
             };
 
-        let elm2_1 = match receive_shares_from(
+        let elm2_1 = match create_shares_from(
             vec![correction],
             &mut p1_prepros.for_sharing,
             1,
@@ -1066,22 +1114,23 @@ mod test {
             res.unwrap();
         }
     }
+
     #[test]
     fn test_add_with_public_constant() {
         type F = Element32;
-        let (p1_context, p2_context, secret_values) = dummie_prepross();
+        let (p1_context, p2_context, secret_values) = dummie_preproc();
         let pub_constant = F::from_u128(8711u128);
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
         let (elm1_1, correction) =
-            match send_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
+            match create_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
                 Ok((e, c)) => (e[0], c[0]),
                 Err(_) => panic!(),
             };
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match receive_shares_from(
+        let elm1_2 = match create_shares_from(
             vec![correction],
             &mut p2_prepros.for_sharing,
             0,
@@ -1109,22 +1158,23 @@ mod test {
         assert!(elm1 + pub_constant == elm3_1.val + elm3_2.val);
         assert!(elm3_1.mac + elm3_2.mac == (elm1 + pub_constant) * secret_values.mac_key);
     }
+
     #[test]
     fn test_sub_with_public_constant() {
         type F = Element32;
-        let (p1_context, p2_context, secret_values) = dummie_prepross();
+        let (p1_context, p2_context, secret_values) = dummie_preproc();
         let pub_constant = F::from_u128(8711u128);
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
         let (elm1_1, correction) =
-            match send_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
+            match create_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
                 Ok((e, c)) => (e[0], c[0]),
                 Err(_) => panic!(),
             };
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match receive_shares_from(
+        let elm1_2 = match create_shares_from(
             vec![correction],
             &mut p2_prepros.for_sharing,
             0,
@@ -1152,6 +1202,7 @@ mod test {
         assert!(elm1 - pub_constant == elm3_1.val + elm3_2.val);
         assert!(elm3_1.mac + elm3_2.mac == (elm1 - pub_constant) * secret_values.mac_key);
     }
+
     #[tokio::test]
     async fn test_all_with_dealer() {
         // p1 supplies val_p1_1 and val_p1_2
@@ -1273,6 +1324,7 @@ mod test {
             res.unwrap();
         }
     }
+
     #[tokio::test]
     async fn test_share_many() {
         type F = Element32;
@@ -1342,6 +1394,7 @@ mod test {
             res.unwrap();
         }
     }
+
     #[tokio::test]
     async fn test_missingpreprocerror() {
         type F = Element32;
@@ -1433,6 +1486,7 @@ mod test {
             res.unwrap();
         }
     }
+
     #[test]
     fn test_power() {
         type F = Element32;
@@ -1449,6 +1503,7 @@ mod test {
         let aaaaaa = a * a * a * a * a * a;
         assert!(aaaaaa == power(a, 6));
     }
+
     #[test]
     fn test_dealer_writing_to_file() {
         // preprosessing by dealer
