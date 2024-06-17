@@ -1,6 +1,6 @@
 //
 //! This SPDZ implementation is primarely based on the following lecture by Ivan Damgård:
-//! (part one:) https://www.youtube.com/watch?v=N80DV3Brds0 (and part two:) https://www.youtube.com/watch?v=Ce45hp24b2E
+//! (part one:) <https://www.youtube.com/watch?v=N80DV3Brds0> (and part two:) <https://www.youtube.com/watch?v=Ce45hp24b2E>
 //!
 //! We will need some homomorphic encryption or oblivious transfer to enable preprocessing.
 //! But for now that is handled by a dealer.
@@ -41,6 +41,7 @@ pub struct Share<F: PrimeField> {
 }
 
 impl<F: PrimeField> Share<F> {
+    #[must_use]
     pub fn add_public(self, val: F, is_chosen_party: bool, params: &SpdzParams<F>) -> Self {
         let mac_key_share = params.mac_key_share;
         let val_val = if is_chosen_party { val } else { F::ZERO };
@@ -50,6 +51,7 @@ impl<F: PrimeField> Share<F> {
         }
     }
 
+    #[must_use]
     pub fn sub_public(self, val: F, chosen_one: bool, params: &SpdzParams<F>) -> Self {
         let mac_key_share = params.mac_key_share;
         let val_val = if chosen_one { val } else { F::ZERO };
@@ -154,7 +156,7 @@ where
 
 /// Share a vector of values with the other parties.
 ///
-/// This impl of share_many only works if the party is either sending or resiving all the elements.
+/// This impl of `[share_many]` only works if the party is either sending or resiving all the elements.
 /// This is by design, as only the sender needs to broadcast, and that is where there are something to be won by doing it in bulk.
 ///
 /// # Returns
@@ -205,7 +207,7 @@ async fn send_new_shares<F: PrimeField + Serialize + DeserializeOwned>(
         Err(e) => return Err(e.into()),
     };
     match network.broadcast(&corrections).await {
-        Ok(_) => (),
+        Ok(()) => (),
         Err(e) => return Err(e.into()),
     };
     Ok(shares)
@@ -219,17 +221,11 @@ fn create_shares<F: PrimeField>(
     let mut res_share: Vec<Share<F>> = vec![];
     let mut res_correction: Vec<F> = vec![];
     for val in vals {
-        let r = match for_sharing.rand_known_to_me.vals.pop() {
-            Some(elm) => elm,
-            None => {
-                return Err(preprocessing::PreProcError::MissingForSharingElement);
-            }
+        let Some(r) = for_sharing.rand_known_to_me.vals.pop() else {
+            return Err(preprocessing::PreProcError::MissingForSharingElement);
         };
-        let r_share = match for_sharing.rand_known_to_i.shares[params.who_am_i].pop() {
-            Some(r_share) => r_share,
-            None => {
-                return Err(preprocessing::PreProcError::MissingForSharingElement);
-            }
+        let Some(r_share) = for_sharing.rand_known_to_i.shares[params.who_am_i].pop() else {
+            return Err(preprocessing::PreProcError::MissingForSharingElement);
         };
         let correction = val - r;
         let share = r_share.add_public(correction, params.who_am_i == 0, params);
@@ -311,12 +307,14 @@ pub async fn open_res_many<F>(
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    if !prev_opened_values.is_empty() {
-        panic!("don't open if there are unchecked open values")
-        // TODO rerun error instead
-        // TODO: consider just calling check all - needs a random element though - either a generator or an element.
-        //check_all_d(opened_values, network, random_element)
-    }
+    // TODO: rerun error instead
+    // TODO: consider just calling check all - needs a random element though - either a generator or an element.
+    //check_all_d(opened_values, network, random_element)
+    assert!(
+        !prev_opened_values.is_empty(),
+        "don't open if there are unchecked open values"
+    );
+
     let n = shares_to_open.len();
     let (vals_to_open, macs_to_shares): (Vec<F>, Vec<F>) = shares_to_open
         .iter()
@@ -354,12 +352,14 @@ pub async fn open_res<F>(
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    if !opened_values.is_empty() {
-        panic!("don't open if there are unchecked open values")
-        // TODO rerun error instead
-        // TODO: consider just calling check all - needs a random element though - either a generator or an element.
-        //check_all_d(opened_values, network, random_element)
-    }
+    // TODO rerun error instead
+    // TODO: consider just calling check all - needs a random element though - either a generator or an element.
+    //check_all_d(opened_values, network, random_element)
+    assert!(
+        !opened_values.is_empty(),
+        "don't open if there are unchecked open values"
+    );
+
     // TODO: it might be meaningfull to verify that open_values are empty - and cast an error otherwise.
     // As one are not allowed to open the result if not all partially opened values have been checked.
     let opened_shares = network
@@ -435,8 +435,8 @@ where
 }
 
 fn linear_combinations<F: PrimeField>(random_element: F, elements: &mut [F]) -> F {
-    let r_elms: Vec<F> = (1..elements.len() + 1)
-        .map(|i| power(random_element, i))
+    let r_elms: Vec<F> = (1..=elements.len())
+        .map(|i| power(&random_element, i))
         .collect();
     elements
         .iter_mut()
@@ -445,7 +445,7 @@ fn linear_combinations<F: PrimeField>(random_element: F, elements: &mut [F]) -> 
 }
 
 // TODO: find a more efficent way to to take the power of an element.
-fn power<F: std::ops::MulAssign + Clone + std::ops::Mul<Output = F>>(base: F, exp: usize) -> F {
+fn power<F: std::ops::MulAssign + Clone + std::ops::Mul<Output = F>>(base: &F, exp: usize) -> F {
     assert!(exp > 0);
     (0..exp - 1).fold(base.clone(), |acc, _| acc * base.clone())
 }
@@ -1167,22 +1167,20 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed_values;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) =
-            match create_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
-                Ok((e, c)) => (e[0], c[0]),
-                Err(_) => panic!(),
-            };
+        let (elm1_1, correction) = {
+            let (e, c) =
+                create_shares(vec![elm1], &mut p1_prepros.for_sharing, &p1_context.params).unwrap();
+            (e[0], c[0])
+        };
 
         let mut p2_prepros = p2_context.preprocessed_values;
-        let elm1_2 = match create_shares_from(
+        let elm1_2 = create_shares_from(
             vec![correction],
             &mut p2_prepros.for_sharing,
             0,
             &p2_context.params,
-        ) {
-            Ok(s) => s[0],
-            Err(_) => panic!(),
-        };
+        )
+        .unwrap()[0];
         assert!((elm1_1.val + elm1_2.val) == elm1);
         assert!(elm1_1.mac + elm1_2.mac == elm1 * secret_values.mac_key);
 
@@ -1491,17 +1489,17 @@ mod test {
     fn test_power() {
         type F = Element32;
         let a: F = F::from_u128(12u128);
-        assert!(a == power(a, 1));
+        assert!(a == power(&a, 1));
         let aa = a * a;
-        assert!(aa == power(a, 2));
+        assert!(aa == power(&a, 2));
         let aaa = a * a * a;
-        assert!(aaa == power(a, 3));
+        assert!(aaa == power(&a, 3));
         let aaaa = a * a * a * a;
-        assert!(aaaa == power(a, 4));
+        assert!(aaaa == power(&a, 4));
         let aaaaa = a * a * a * a * a;
-        assert!(aaaaa == power(a, 5));
+        assert!(aaaaa == power(&a, 5));
         let aaaaaa = a * a * a * a * a * a;
-        assert!(aaaaaa == power(a, 6));
+        assert!(aaaaaa == power(&a, 6));
     }
 
     #[test]
