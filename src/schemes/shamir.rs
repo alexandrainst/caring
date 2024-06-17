@@ -471,17 +471,11 @@ pub fn share_many<F: Field>(
     let mut shares: Vec<VecShare<F>> = Vec::with_capacity(n);
     for x in ids {
         let x = *x;
-        let vecshare = if cfg!(feature = "rayon") {
-            vs.par_iter()
-                .enumerate()
-                .map(|(i, _)| polynomials[i].eval(&x))
-                .collect()
-        } else {
-            vs.iter()
-                .enumerate()
-                .map(|(i, _)| polynomials[i].eval(&x))
-                .collect()
-        };
+        let vecshare = vs
+            .iter()
+            .enumerate()
+            .map(|(i, _)| polynomials[i].eval(&x))
+            .collect();
         shares.push(VecShare { ys: vecshare })
     }
 

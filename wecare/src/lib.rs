@@ -79,7 +79,7 @@ pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
             } else {
                 let s: Vec<spdz::Share<_>> = spdz::share(
                     None,
-                    &mut context.preprocessed_values.for_sharing,
+                    &mut context.preprocessed.for_sharing,
                     &context.params,
                     i,
                     network,

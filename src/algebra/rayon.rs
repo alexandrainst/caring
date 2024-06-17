@@ -70,6 +70,12 @@ inherent!(Add, add, AddAssign, add_assign);
 inherent!(Sub, sub, SubAssign, sub_assign);
 inherent!(Div, div, DivAssign, div_assign);
 
+impl<T: Send + Sync> super::math::Vector<T> {
+    fn parallelize(self) -> Vector<T> {
+        Vector(self.into_boxed_slice())
+    }
+}
+
 impl<'a, F: Send + Sync> IntoParallelIterator for &'a Vector<F> {
     type Item = &'a F;
     type Iter = rayon::slice::Iter<'a, F>;

@@ -29,7 +29,7 @@ use ff::Field;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Vector<F>(Box<[F]>);
 
-impl<F: Send + Sync> Vector<F> {
+impl<F> Vector<F> {
     pub const fn from_boxed_slice(slice: Box<[F]>) -> Self {
         Self(slice)
     }
@@ -48,6 +48,10 @@ impl<F: Send + Sync> Vector<F> {
 
     pub fn iter(&self) -> std::slice::Iter<F> {
         self.0.iter()
+    }
+
+    pub fn into_boxed_slice(self) -> Box<[F]> {
+        self.0
     }
 }
 
@@ -99,6 +103,18 @@ impl<T: Send + Sync> AsRef<[T]> for Vector<T> {
 impl<T: Send + Sync> AsMut<[T]> for Vector<T> {
     fn as_mut(&mut self) -> &mut [T] {
         &mut self.0
+    }
+}
+
+impl<T> From<Vec<T>> for Vector<T> {
+    fn from(value: Vec<T>) -> Self {
+        Self(value.into_boxed_slice())
+    }
+}
+
+impl<T> From<Vector<T>> for Vec<T> {
+    fn from(value: Vector<T>) -> Self {
+        value.0.into()
     }
 }
 

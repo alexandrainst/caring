@@ -148,15 +148,10 @@ pub fn dealer_preproc<F: PrimeField + serde::Serialize + serde::de::DeserializeO
                     val: ri,
                     mac: r_mac_i,
                 };
-                contexts[i]
-                    .preprocessed_values
-                    .for_sharing
-                    .rand_known_to_i
-                    .shares[me]
-                    .push(ri_share);
+                contexts[i].preprocessed.for_sharing.rand_known_to_i.shares[me].push(ri_share);
                 if me == i {
                     contexts[me]
-                        .preprocessed_values
+                        .preprocessed
                         .for_sharing
                         .rand_known_to_me
                         .vals
@@ -170,14 +165,14 @@ pub fn dealer_preproc<F: PrimeField + serde::Serialize + serde::de::DeserializeO
                 mac: r_mac,
             };
             contexts[number_of_parties - 1]
-                .preprocessed_values
+                .preprocessed
                 .for_sharing
                 .rand_known_to_i
                 .shares[me]
                 .push(r2_share);
             if me == number_of_parties - 1 {
                 contexts[me]
-                    .preprocessed_values
+                    .preprocessed
                     .for_sharing
                     .rand_known_to_me
                     .vals
@@ -227,7 +222,7 @@ pub fn dealer_preproc<F: PrimeField + serde::Serialize + serde::de::DeserializeO
             let triplet = MultiplicationTriple::new(ai_share, bi_share, ci_share);
 
             contexts[i]
-                .preprocessed_values
+                .preprocessed
                 .triplets
                 .multiplication_triplets
                 .push(triplet);
@@ -238,7 +233,7 @@ pub fn dealer_preproc<F: PrimeField + serde::Serialize + serde::de::DeserializeO
         let triplet = MultiplicationTriple::new(ai_share, bi_share, ci_share);
 
         contexts[number_of_parties - 1]
-            .preprocessed_values
+            .preprocessed
             .triplets
             .multiplication_triplets
             .push(triplet)
@@ -284,6 +279,6 @@ fn generate_empty_context<F: PrimeField>(
             mac_key_share,
             who_am_i,
         },
-        preprocessed_values: p_preprosvals,
+        preprocessed: p_preprosvals,
     }
 }

@@ -143,7 +143,10 @@ pub trait InteractiveMult: Shared {
 pub mod interactive {
     use thiserror::Error;
 
-    use crate::net::{Communicate, Tuneable};
+    use crate::{
+        algebra::math::Vector,
+        net::{Communicate, Tuneable},
+    };
 
     #[derive(Debug, Error)]
     #[error("Communication failure: {0}")]
