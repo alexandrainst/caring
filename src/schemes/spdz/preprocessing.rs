@@ -10,28 +10,29 @@ use std::{
     fs::File,
     io::{self, Write},
 };
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum MissingPreProcErrorType {
+pub enum PreProcError {
     MissingTriplet,
     MissingForSharingElement,
 }
-#[derive(Debug, Clone)]
-pub struct MissingPreProcError {
-    pub e_type: MissingPreProcErrorType,
-} // TODO: consider ways to show what type of preproc there is missing
 
-impl fmt::Display for MissingPreProcError {
+impl fmt::Display for PreProcError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.e_type == MissingPreProcErrorType::MissingTriplet {
-            write!(f, "Not enough preprocessed triplets.")
-        } else if self.e_type == MissingPreProcErrorType::MissingForSharingElement {
-            write!(f, "Not enough pre shared random elements.")
-        } else {
-            write!(f, "Not enough preprocessing available")
+        match self {
+            PreProcError::MissingTriplet => {
+                write!(f, "Not enough preprocessed triplets.")
+            }
+            PreProcError::MissingForSharingElement => {
+                write!(f, "Not enough pre shared random elements.")
+            } // _ => {
+              //     write!(f, "Not enough preprocessing available")
+              // }
         }
     }
 }
-impl Error for MissingPreProcError {}
+
+impl Error for PreProcError {}
 
 // ToDo: we should probably make getters for all the fields, and make them private, spdz needs to use the values, but not alter them.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -39,23 +40,23 @@ pub struct PreprocessedValues<F: PrimeField> {
     pub triplets: Triplets<F>,
     pub for_sharing: ForSharing<F>,
 }
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForSharing<F: PrimeField> {
     pub rand_known_to_i: RandomKnownToPi<F>, // consider boxed slices for the outer vec
     pub rand_known_to_me: RandomKnownToMe<F>,
 }
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Triplets<F: PrimeField> {
     multiplication_triplets: Vec<MultiplicationTriple<F>>,
 }
 
 impl<F: PrimeField> Triplets<F> {
-    pub fn get_triplet(&mut self) -> Result<MultiplicationTriple<F>, MissingPreProcError> {
+    pub fn get_triplet(&mut self) -> Result<MultiplicationTriple<F>, PreProcError> {
         self.multiplication_triplets
             .pop()
-            .ok_or(MissingPreProcError {
-                e_type: MissingPreProcErrorType::MissingTriplet,
-            })
+            .ok_or(PreProcError::MissingTriplet)
     }
 }
 
@@ -66,12 +67,10 @@ pub struct MultiplicationTriple<F: PrimeField> {
     pub c: spdz::Share<F>,
 }
 
-pub fn make_multiplicationtriplet<F: PrimeField>(
-    a: spdz::Share<F>,
-    b: spdz::Share<F>,
-    c: spdz::Share<F>,
-) -> MultiplicationTriple<F> {
-    MultiplicationTriple { a, b, c }
+impl<F: PrimeField> MultiplicationTriple<F> {
+    pub fn new(a: spdz::Share<F>, b: spdz::Share<F>, c: spdz::Share<F>) -> Self {
+        MultiplicationTriple { a, b, c }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -87,6 +86,7 @@ pub struct RandomKnownToMe<F: PrimeField> {
 pub struct SecretValues<F> {
     pub mac_key: F,
 }
+
 pub fn write_preproc_to_file<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     files: &mut [File],
     known_to_each: Vec<usize>,
@@ -98,7 +98,7 @@ pub fn write_preproc_to_file<F: PrimeField + serde::Serialize + serde::de::Deser
     let rng = rand_chacha::ChaCha20Rng::from_entropy();
     // Notice here that the secret values are not written to the file, No party is allowed to know the value.
     let (contexts, _): (Vec<SpdzContext<F>>, _) =
-        dealer_prepross(rng, known_to_each, number_of_triplets, number_of_parties);
+        dealer_preproc(rng, known_to_each, number_of_triplets, number_of_parties);
     let names_and_contexts = files.iter_mut().zip(contexts);
     for (file, context) in names_and_contexts {
         let data: Vec<u8> = bincode::serialize(&context)?;
@@ -114,7 +114,7 @@ pub fn read_preproc_from_file<F: PrimeField + serde::Serialize + serde::de::Dese
     bincode::deserialize_from(file).unwrap()
 }
 
-pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
+pub fn dealer_preproc<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     mut rng: impl rand::Rng,
     known_to_each: Vec<usize>,
     number_of_triplets: usize,
@@ -128,6 +128,7 @@ pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::Deserialize
         .map(|i| SpdzContext::empty(number_of_parties, mac_keys[i], i))
         .collect();
     let mac_key = mac_keys.into_iter().sum();
+
     // Filling the context
     // First with values used for easy sharing
     for (me, kte) in known_to_each.into_iter().enumerate() {
@@ -220,7 +221,7 @@ pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::Deserialize
                 val: ci,
                 mac: c_mac_i,
             };
-            let triplet = make_multiplicationtriplet(ai_share, bi_share, ci_share);
+            let triplet = MultiplicationTriple::new(ai_share, bi_share, ci_share);
 
             contexts[i]
                 .preprocessed_values
@@ -231,7 +232,7 @@ pub fn dealer_prepross<F: PrimeField + serde::Serialize + serde::de::Deserialize
         let ai_share = spdz::Share { val: a, mac: a_mac };
         let bi_share = spdz::Share { val: b, mac: b_mac };
         let ci_share = spdz::Share { val: c, mac: c_mac };
-        let triplet = make_multiplicationtriplet(ai_share, bi_share, ci_share);
+        let triplet = MultiplicationTriple::new(ai_share, bi_share, ci_share);
 
         contexts[number_of_parties - 1]
             .preprocessed_values

@@ -71,6 +71,7 @@ impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
         }
     }
 }
+
 pub async fn secret_mult<F>(
     s1: Share<F>,
     s2: Share<F>,
@@ -78,7 +79,7 @@ pub async fn secret_mult<F>(
     params: &SpdzParams<F>,
     opened_values: &mut Vec<F>,
     network: &mut impl Broadcast,
-) -> Result<Share<F>, preprocessing::MissingPreProcError>
+) -> Result<Share<F>, preprocessing::PreProcError>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
@@ -182,24 +183,20 @@ fn send_shares<F: PrimeField>(
     vals: Vec<F>,
     for_sharing: &mut ForSharing<F>,
     params: &SpdzParams<F>,
-) -> Result<(Vec<Share<F>>, Vec<F>), preprocessing::MissingPreProcError> {
+) -> Result<(Vec<Share<F>>, Vec<F>), preprocessing::PreProcError> {
     let mut res_share: Vec<Share<F>> = vec![];
     let mut res_correction: Vec<F> = vec![];
     for val in vals {
         let r = match for_sharing.rand_known_to_me.vals.pop() {
             Some(elm) => elm,
             None => {
-                return Err(preprocessing::MissingPreProcError {
-                    e_type: preprocessing::MissingPreProcErrorType::MissingForSharingElement,
-                })
+                return Err(preprocessing::PreProcError::MissingForSharingElement);
             }
         };
         let r_share = match for_sharing.rand_known_to_i.shares[params.who_am_i].pop() {
             Some(r_share) => r_share,
             None => {
-                return Err(preprocessing::MissingPreProcError {
-                    e_type: preprocessing::MissingPreProcErrorType::MissingForSharingElement,
-                });
+                return Err(preprocessing::PreProcError::MissingForSharingElement);
             }
         };
         let correction = val - r;
@@ -216,13 +213,11 @@ fn receive_shares_from<F: PrimeField>(
     for_sharing: &mut ForSharing<F>,
     who_is_sending: usize,
     params: &SpdzParams<F>,
-) -> Result<Vec<Share<F>>, preprocessing::MissingPreProcError> {
+) -> Result<Vec<Share<F>>, preprocessing::PreProcError> {
     let prep_rand_len = for_sharing.rand_known_to_i.shares[who_is_sending].len();
     let n = corrections.len();
     if n > for_sharing.rand_known_to_i.shares[who_is_sending].len() {
-        return Err(preprocessing::MissingPreProcError {
-            e_type: preprocessing::MissingPreProcErrorType::MissingForSharingElement,
-        });
+        return Err(preprocessing::PreProcError::MissingForSharingElement);
     }
     let mut randoms =
         for_sharing.rand_known_to_i.shares[who_is_sending].split_off(prep_rand_len - n);
@@ -271,7 +266,8 @@ pub struct SpdzContext<F: PrimeField> {
     pub preprocessed_values: preprocessing::PreprocessedValues<F>,
 }
 
-// Consider keeping both open_res and open_res_many, as open_res_many needs a random element to be picked, which is a non negligible overhead when only one element is verified.
+// Consider keeping both open_res and open_res_many, as open_res_many needs a random element to be picked,
+// which is a non negligible overhead when only one element is verified.
 pub async fn open_res_many<F>(
     shares_to_open: Vec<Share<F>>,
     network: &mut impl Broadcast,
@@ -283,9 +279,10 @@ where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
     if !prev_opened_values.is_empty() {
-        panic!("don't open if there are unchecked open values") // TODO rerun error instead
-                                                                // TODO: consider just calling check all - needs a random element though - either a generator or an element.
-                                                                //check_all_d(opened_values, network, random_element)
+        panic!("don't open if there are unchecked open values")
+        // TODO rerun error instead
+        // TODO: consider just calling check all - needs a random element though - either a generator or an element.
+        //check_all_d(opened_values, network, random_element)
     }
     let n = shares_to_open.len();
     let (vals_to_open, macs_to_shares): (Vec<F>, Vec<F>) = shares_to_open
@@ -325,9 +322,10 @@ where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
     if !opened_values.is_empty() {
-        panic!("don't open if there are unchecked open values") // TODO rerun error instead
-                                                                // TODO: consider just calling check all - needs a random element though - either a generator or an element.
-                                                                //check_all_d(opened_values, network, random_element)
+        panic!("don't open if there are unchecked open values")
+        // TODO rerun error instead
+        // TODO: consider just calling check all - needs a random element though - either a generator or an element.
+        //check_all_d(opened_values, network, random_element)
     }
     // TODO: it might be meaningfull to verify that open_values are empty - and cast an error otherwise.
     // As one are not allowed to open the result if not all partially opened values have been checked.
@@ -387,8 +385,7 @@ where
     }
 
     // Then we make a random linearcombination of all the values, commit, broadcast, verify that it is zero
-    let lin_comp =
-        make_linarcombination(random_val_shares.into_iter().sum(), partially_opened_vals);
+    let lin_comp = linear_combinations(random_val_shares.into_iter().sum(), partially_opened_vals);
     partially_opened_vals.clear();
     let lin_comps_commitments = network
         .symmetric_broadcast(commit(&lin_comp))
@@ -404,7 +401,7 @@ where
     zero == F::from_u128(0)
 }
 
-fn make_linarcombination<F: PrimeField>(random_element: F, elements: &mut [F]) -> F {
+fn linear_combinations<F: PrimeField>(random_element: F, elements: &mut [F]) -> F {
     let r_elms: Vec<F> = (1..elements.len() + 1)
         .map(|i| power(random_element, i))
         .collect();
@@ -443,7 +440,7 @@ mod test {
         let known_to_each = vec![1, 1];
         let number_of_triplets = 1;
         let number_of_parties = 2;
-        let (mut contexts, secret_values) = preprocessing::dealer_prepross(
+        let (mut contexts, secret_values) = preprocessing::dealer_preproc(
             rng,
             known_to_each,
             number_of_triplets,
@@ -460,7 +457,7 @@ mod test {
         let known_to_each = vec![1, 2];
         let number_of_triplets = 2;
         let number_of_parties = 2;
-        let (mut contexts, secret_values) = preprocessing::dealer_prepross(
+        let (mut contexts, secret_values) = preprocessing::dealer_preproc(
             rng,
             known_to_each,
             number_of_triplets,
@@ -583,7 +580,7 @@ mod test {
         let known_to_each = vec![1, 0];
         let number_of_triplets = 0;
         let number_of_parties = 2;
-        let (mut contexts, _) = preprocessing::dealer_prepross(
+        let (mut contexts, _) = preprocessing::dealer_preproc(
             rng,
             known_to_each,
             number_of_triplets,
@@ -1173,7 +1170,7 @@ mod test {
         let known_to_each = vec![2, 1];
         let number_of_triplets = 1;
         let number_of_parties = 2;
-        let (mut contexts, _secret_values) = preprocessing::dealer_prepross(
+        let (mut contexts, _secret_values) = preprocessing::dealer_preproc(
             rng,
             known_to_each,
             number_of_triplets,
@@ -1284,7 +1281,7 @@ mod test {
         let known_to_each = vec![2, 0];
         let number_of_triplets = 0;
         let number_of_parties = 2;
-        let (mut contexts, _secret_values) = preprocessing::dealer_prepross(
+        let (mut contexts, _secret_values) = preprocessing::dealer_preproc(
             rng,
             known_to_each,
             number_of_triplets,
@@ -1352,7 +1349,7 @@ mod test {
         let known_to_each = vec![2, 0];
         let number_of_triplets = 0;
         let number_of_parties = 2;
-        let (mut contexts, _secret_values) = preprocessing::dealer_prepross(
+        let (mut contexts, _secret_values) = preprocessing::dealer_preproc(
             rng,
             known_to_each,
             number_of_triplets,
