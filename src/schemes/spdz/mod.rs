@@ -22,7 +22,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use self::preprocessing::ForSharing;
 
 pub mod preprocessing;
-use std::error::{self, Error};
+use std::{
+    convert::Infallible,
+    error::{self, Error},
+};
 
 // Should we allow Field or use PrimeField?
 #[derive(
@@ -127,16 +130,16 @@ impl<'ctx, F> InteractiveShared<'ctx> for Share<F>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    type Context = &'ctx mut SpdzContext<F>;
+    type Context = SpdzContext<F>;
     type Value = F;
-    type Error = ();
+    type Error = Infallible;
 
     async fn share(
-        ctx: Self::Context,
+        ctx: &mut Self::Context,
         secret: Self::Value,
         _rng: impl RngCore + Send,
         mut coms: impl Communicate,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, Infallible> {
         let params = &ctx.params;
         let for_sharing = &mut ctx.preprocessed.for_sharing;
         let res = send_shares(&[secret], for_sharing, params, &mut coms)
@@ -146,7 +149,7 @@ where
     }
 
     async fn symmetric_share(
-        ctx: Self::Context,
+        ctx: &mut Self::Context,
         secret: Self::Value,
         _rng: impl RngCore + Send,
         mut coms: impl Communicate,
@@ -182,10 +185,10 @@ where
     }
 
     async fn receive_share(
-        ctx: Self::Context,
+        ctx: &mut Self::Context,
         mut coms: impl Communicate,
         from: usize,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, Infallible> {
         let params = &ctx.params;
         let for_sharing = &mut ctx.preprocessed.for_sharing;
         let res = receive_shares(&mut coms, from, for_sharing, params)
@@ -195,10 +198,10 @@ where
     }
 
     async fn recombine(
-        ctx: Self::Context,
+        ctx: &mut Self::Context,
         share: Self,
         mut network: impl Communicate,
-    ) -> Result<F, ()> {
+    ) -> Result<F, Infallible> {
         Ok(open_res(share, &mut network, &ctx.params, &ctx.opened_values).await)
     }
 }
@@ -210,7 +213,7 @@ where
     type VectorShare = crate::algebra::math::Vector<Share<F>>;
 
     async fn share_many(
-        ctx: Self::Context,
+        ctx: &mut Self::Context,
         secret: &[Self::Value],
         _rng: impl RngCore + Send,
         mut coms: impl Communicate,
@@ -224,7 +227,7 @@ where
     }
 
     async fn symmetric_share_many(
-        ctx: Self::Context,
+        ctx: &mut Self::Context,
         secret: &[Self::Value],
         _rng: impl RngCore + Send,
         mut coms: impl Communicate,
@@ -261,7 +264,7 @@ where
     }
 
     async fn receive_share_many(
-        ctx: Self::Context,
+        ctx: &mut Self::Context,
         mut coms: impl Communicate,
         from: usize,
     ) -> Result<Self::VectorShare, Self::Error> {
@@ -274,7 +277,7 @@ where
     }
 
     async fn recombine_many(
-        ctx: Self::Context,
+        ctx: &mut Self::Context,
         secrets: Self::VectorShare,
         mut coms: impl Communicate,
     ) -> Result<Vector<Self::Value>, Self::Error> {

@@ -1,24 +1,108 @@
 use caring::{
     algebra::math::Vector,
     net::network::TcpNetwork,
-    schemes::spdz::{self, preprocessing},
+    schemes::{
+        interactive::InteractiveSharedMany,
+        spdz::{self, preprocessing},
+    },
 };
 use rand::{thread_rng, SeedableRng};
-use std::{fs::File, net::SocketAddr, time::Duration};
+use std::{fs::File, mem, net::SocketAddr, time::Duration};
 
-pub struct AdderEngine {
+type F = curve25519_dalek::Scalar;
+
+pub struct AdderEngine<'a, S: InteractiveSharedMany<'a>> {
     network: TcpNetwork,
     runtime: tokio::runtime::Runtime,
-    context: spdz::SpdzContext<F>,
+    context: S::Context,
 }
 
-impl AdderEngine {
+impl<'a, S> AdderEngine<'a, S>
+where
+    S: InteractiveSharedMany<'a, Value = curve25519_dalek::Scalar>,
+{
+    //pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: String) -> Result<AdderEngine<F>, MpcError> {
+    pub fn setup(
+        my_addr: &str,
+        others: &[impl AsRef<str>],
+        context: S::Context,
+    ) -> Result<Self, MpcError> {
+        let my_addr: SocketAddr = my_addr.parse().unwrap();
+        let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
+
+        //let threshold = ((others.len() + 1) / 2 + 1) as u64;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let network = TcpNetwork::connect(my_addr, &others);
+        let network = runtime
+            .block_on(network)
+            .map_err(|_| MpcError("Failed to setup network"))?;
+        let engine = AdderEngine {
+            network,
+            runtime,
+            context,
+        };
+        Ok(engine)
+    }
+
     pub fn shutdown(self) {
         let AdderEngine {
             network, runtime, ..
         } = self;
         runtime.spawn(network.shutdown());
         runtime.shutdown_timeout(Duration::from_secs(5));
+    }
+
+    pub fn mpc_sum(&mut self, nums: &[f64]) -> Option<Vec<f64>>
+    where
+        <S as InteractiveSharedMany<'a>>::VectorShare: std::iter::Sum,
+    {
+        let AdderEngine {
+            network,
+            runtime,
+            context,
+        } = self;
+
+        let nums: Vec<_> = nums
+            .iter()
+            .map(|&num| {
+                let num = to_offset(num);
+                F::from(num)
+            })
+            .collect();
+        let rng = rand::rngs::StdRng::from_rng(thread_rng()).unwrap();
+        let res: Option<_> = runtime.block_on(async move {
+            let ctx = context;
+            let mut network = network;
+            // construct
+            let shares: Vec<S::VectorShare> =
+                S::symmetric_share_many(ctx, &nums, rng, &mut network)
+                    .await
+                    .unwrap();
+            let sum: S::VectorShare = shares.into_iter().sum();
+            let res: Vector<F> = S::recombine_many(ctx, sum, network).await.unwrap();
+
+            let res = res
+                .into_iter()
+                .map(|x| u128::from_le_bytes(x.as_bytes()[0..128 / 8].try_into().unwrap()))
+                .map(from_offset)
+                .collect();
+            Some(res)
+        });
+        res
+    }
+}
+
+impl<'ctx> AdderEngine<'ctx, spdz::Share<curve25519_dalek::Scalar>> {
+    pub fn load_preprocess(&mut self, file: &mut File) {
+        let mut context = preprocessing::read_preproc_from_file(file);
+        // Notice: This is a hack and only works as long as the parties share the same number of elements.
+        // To make a propper solotion, the id must be known befor the preprocessing is made.
+        // To ensure that the right number of elements are made for each party.
+        context.params.who_am_i = self.network.index;
+        self.context = context;
     }
 }
 
@@ -37,44 +121,7 @@ fn from_offset(num: u128) -> f64 {
     num.to_num()
 }
 
-use caring::schemes::interactive::InteractiveSharedMany;
-
-type F = curve25519_dalek::Scalar;
-type Share = caring::schemes::spdz::Share<F>;
-
 // We start allowing just one element.
-pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
-    let AdderEngine {
-        network,
-        runtime,
-        context: ctx,
-    } = engine;
-    let nums: Vec<_> = nums
-        .iter()
-        .map(|&num| {
-            let num = to_offset(num);
-            F::from(num)
-        })
-        .collect();
-    let rng = rand::rngs::StdRng::from_rng(thread_rng()).unwrap();
-    let res: Option<_> = runtime.block_on(async {
-        let mut network = network;
-        // construct
-        let shares: Vec<Vector<Share>> = Share::symmetric_share_many(ctx, &nums, rng, &mut network)
-            .await
-            .unwrap();
-        let sum: Vector<Share> = shares.into_iter().sum();
-        let res: Vector<F> = Share::recombine_many(ctx, sum, network).await.unwrap();
-
-        let res = res
-            .into_iter()
-            .map(|x| u128::from_le_bytes(x.as_bytes()[0..128 / 8].try_into().unwrap()))
-            .map(from_offset)
-            .collect();
-        Some(res)
-    });
-    res
-}
 
 #[derive(Debug)]
 pub struct MpcError(pub &'static str);
@@ -87,37 +134,6 @@ impl std::fmt::Display for MpcError {
 }
 
 impl std::error::Error for MpcError {}
-
-//pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: String) -> Result<AdderEngine<F>, MpcError> {
-pub fn setup_engine(
-    my_addr: &str,
-    others: &[impl AsRef<str>],
-    mut file: File,
-) -> Result<AdderEngine, MpcError> {
-    let my_addr: SocketAddr = my_addr.parse().unwrap();
-    let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
-
-    //let threshold = ((others.len() + 1) / 2 + 1) as u64;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let network = TcpNetwork::connect(my_addr, &others);
-    let network = runtime
-        .block_on(network)
-        .map_err(|_| MpcError("Failed to setup network"))?;
-    let mut context = preprocessing::read_preproc_from_file(&mut file);
-    // Notice: This is a hack and only works as long as the parties share the same number of elements.
-    // To make a propper solotion, the id must be known befor the preprocessing is made.
-    // To ensure that the right number of elements are made for each party.
-    context.params.who_am_i = network.index;
-    let engine = AdderEngine {
-        network,
-        runtime,
-        context,
-    };
-    Ok(engine)
-}
 
 pub fn do_preproc(files: &mut [File], number_of_shares: Vec<usize>) {
     assert_eq!(files.len(), number_of_shares.len());

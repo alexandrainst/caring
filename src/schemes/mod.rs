@@ -164,12 +164,12 @@ pub mod interactive {
         V: Send + Clone,
         C: Send + Sync + Clone + 'ctx,
     {
-        type Context = &'ctx S::Context;
+        type Context = S::Context;
         type Value = V;
         type Error = CommunicationError;
 
         async fn share(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             mut coms: impl Communicate,
@@ -183,7 +183,7 @@ pub mod interactive {
         }
 
         async fn recombine(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             secret: Self,
             mut coms: impl Communicate,
         ) -> Result<V, Self::Error> {
@@ -191,11 +191,11 @@ pub mod interactive {
                 .symmetric_broadcast(secret)
                 .await
                 .map_err(CommunicationError::new)?;
-            Ok(Shared::recombine(ctx, &shares).unwrap())
+            Ok(Shared::recombine(&*ctx, &shares).unwrap())
         }
 
         async fn symmetric_share(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             mut coms: impl Communicate,
@@ -209,7 +209,7 @@ pub mod interactive {
         }
 
         async fn receive_share(
-            _ctx: Self::Context,
+            _ctx: &mut Self::Context,
             mut coms: impl Communicate,
             from: usize,
         ) -> Result<Self, Self::Error> {
@@ -230,30 +230,34 @@ pub mod interactive {
     {
         type Context: Sync + Send + 'ctx;
         type Value: Clone + Send;
-        type Error: Send + Sized + 'static;
+        type Error: Send + Sized + Error + 'static;
 
+        // Note: Not sure if ctx should be passed as a move or as a mutable reference.
+        // Some schemes require bookkeeping (spdz) so we need the mutability.
+        // Another method could be to swap Context and Share<_>,
+        // however that would probably just result in the same issues.
         fn share(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
 
         fn symmetric_share(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>>;
 
         fn receive_share(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             coms: impl Communicate,
             from: usize,
         ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
 
         fn recombine(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             secrets: Self,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>>;
@@ -263,27 +267,27 @@ pub mod interactive {
         type VectorShare;
 
         fn share_many(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             secrets: &[Self::Value],
             rng: impl RngCore + Send,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>>;
 
         fn symmetric_share_many(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             secrets: &[Self::Value],
             rng: impl RngCore + Send,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Vec<Self::VectorShare>, Self::Error>>;
 
         fn receive_share_many(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             coms: impl Communicate,
             from: usize,
         ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>>;
 
         fn recombine_many(
-            ctx: Self::Context,
+            ctx: &mut Self::Context,
             secrets: Self::VectorShare,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Vector<Self::Value>, Self::Error>>;
