@@ -15,3 +15,4 @@ pub mod marker;
 
 #[cfg(test)]
 mod testing;
+pub mod vm;
