@@ -3,11 +3,15 @@ use std::iter;
 use itertools::{izip, multiunzip};
 use rand::RngCore;
 
-use crate::{algebra::field::Field, net::agency::Broadcast, schemes::Shared};
+use crate::{
+    algebra::field::Field,
+    net::{agency::Broadcast, Communicate},
+    schemes::{interactive::InteractiveShared, Shared},
+};
 
 /// Beaver (Multiplication) Triple
 #[derive(Clone)]
-pub struct BeaverTriple<S: Shared> {
+pub struct BeaverTriple<S> {
     pub shares: (S, S, S),
 }
 
@@ -17,7 +21,7 @@ pub struct BeaverPower<S: Shared> {
     powers: Vec<S>,
 }
 
-impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
+impl<F: Field, C: Clone, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
     /// Fake a set of beaver triples.
     ///
     /// This produces `n` shares corresponding to a shared beaver triple,
@@ -82,29 +86,24 @@ impl<F: Field, C, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
 /// * `triple`: beaver triple
 /// * `network`: unicasting network
 pub async fn beaver_multiply<
-    C,
     F: Field,
-    S: Shared<Value = F, Context = C> + Copy + std::ops::Mul<S::Value, Output = S>,
+    S: InteractiveShared<Value = F> + std::ops::Mul<S::Value, Output = S>,
 >(
-    ctx: &C,
+    ctx: &mut S::Context,
     x: S,
     y: S,
     triple: BeaverTriple<S>,
-    agent: &mut impl Broadcast,
-) -> Option<S> {
-    // TODO: Better error handling.
+    mut coms: impl Communicate,
+) -> Result<S, S::Error> {
     let BeaverTriple { shares: (a, b, c) } = triple;
-    let ax: S = a + x;
-    let by: S = b + y;
+    let ax: S = x + a.clone();
+    let by: S = y.clone() + b;
 
-    // Sending both at once it more efficient.
-    let resp = agent.symmetric_broadcast::<_>((ax, by)).await.ok()?;
-    let (ax, by): (Vec<_>, Vec<_>) = itertools::multiunzip(resp);
+    // TODO: concurrency
+    let ax = S::recombine(ctx, ax, &mut coms).await?;
+    let by = S::recombine(ctx, by, &mut coms).await?;
 
-    let ax = S::recombine(ctx, &ax)?;
-    let by = S::recombine(ctx, &by)?;
-
-    Some(y * ax + a * (-by) + c)
+    Ok(y * ax + a * (-by) + c)
 }
 
 pub async fn beaver_multiply_many<
@@ -243,14 +242,14 @@ mod test {
         async fn do_mpc(
             triple: BeaverTriple<shamir::Share<Element32>>,
             network: InMemoryNetwork,
-            ctx: ShamirParams<Element32>,
+            mut ctx: ShamirParams<Element32>,
         ) {
             let mut rng = rand::rngs::mock::StepRng::new(1, 7);
             let mut network = network;
             let v = Element32::from(5u32);
             let shares = shamir::share(v, &ctx.ids, ctx.threshold, &mut rng);
             let shares = network.symmetric_unicast(shares).await.unwrap();
-            let res = beaver_multiply(&ctx, shares[0], shares[1], triple, &mut network)
+            let res = beaver_multiply(&mut ctx, shares[0], shares[1], triple, &mut network)
                 .await
                 .unwrap();
             let res = network.symmetric_broadcast(res).await.unwrap();

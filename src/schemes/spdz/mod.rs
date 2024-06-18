@@ -126,7 +126,7 @@ where
     Ok(res)
 }
 
-impl<'ctx, F> InteractiveShared<'ctx> for Share<F>
+impl<F> InteractiveShared for Share<F>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
@@ -206,7 +206,7 @@ where
     }
 }
 
-impl<'ctx, F> InteractiveSharedMany<'ctx> for Share<F>
+impl<F> InteractiveSharedMany for Share<F>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {

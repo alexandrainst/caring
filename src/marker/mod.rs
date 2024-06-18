@@ -41,7 +41,7 @@ impl<S> Unverified<S> {
     }
 }
 
-impl<'ctx, S: InteractiveShared<'ctx>> Verified<S> {
+impl<S: InteractiveShared> Verified<S> {
     pub async fn open(
         self,
         ctx: &mut S::Context,
@@ -61,7 +61,7 @@ impl<'ctx, S: InteractiveShared<'ctx>> Verified<S> {
     }
 }
 
-impl<'ctx, S: InteractiveShared<'ctx>> Unverified<S> {
+impl<S: InteractiveShared> Unverified<S> {
     pub async fn share_symmetric(
         val: S::Value,
         ctx: &mut S::Context,
