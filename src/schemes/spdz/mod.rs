@@ -8,8 +8,10 @@
 
 // TODO: make costum errors.
 use crate::{
+    algebra::math::Vector,
     net::agency::Broadcast,
     protocols::commitments::{commit, verify_commit},
+    schemes::interactive::InteractiveSharedMany,
 };
 use crate::{net::Communicate, schemes::interactive::InteractiveShared};
 use derive_more::{Add, AddAssign, Sub, SubAssign};
@@ -123,7 +125,7 @@ where
 
 impl<'ctx, F> InteractiveShared<'ctx> for Share<F>
 where
-    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
+    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
     type Context = &'ctx mut SpdzContext<F>;
     type Value = F;
@@ -201,36 +203,32 @@ where
     }
 }
 
-impl<'ctx, F> InteractiveShared<'ctx> for crate::algebra::math::Vector<Share<F>>
+impl<'ctx, F> InteractiveSharedMany<'ctx> for Share<F>
 where
-    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned + std::convert::Into<u64>,
+    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    type Context = &'ctx mut SpdzContext<F>;
+    type VectorShare = crate::algebra::math::Vector<Share<F>>;
 
-    type Value = crate::algebra::math::Vector<F>;
-
-    type Error = ();
-
-    async fn share(
+    async fn share_many(
         ctx: Self::Context,
-        secret: Self::Value,
+        secret: &[Self::Value],
         _rng: impl RngCore + Send,
         mut coms: impl Communicate,
-    ) -> Result<Self, Self::Error> {
+    ) -> Result<Self::VectorShare, Self::Error> {
         let params = &ctx.params;
         let for_sharing = &mut ctx.preprocessed.for_sharing;
-        let res = send_shares(&secret, for_sharing, params, &mut coms)
+        let res = send_shares(secret, for_sharing, params, &mut coms)
             .await
             .unwrap();
         Ok(res.into())
     }
 
-    async fn symmetric_share(
+    async fn symmetric_share_many(
         ctx: Self::Context,
-        secret: Self::Value,
+        secret: &[Self::Value],
         _rng: impl RngCore + Send,
         mut coms: impl Communicate,
-    ) -> Result<Vec<Self>, Self::Error> {
+    ) -> Result<Vec<Self::VectorShare>, Self::Error> {
         let number_of_parties = Broadcast::size(&coms);
         let nums: Vec<_> = secret.into();
         let me = ctx.params.who_am_i();
@@ -262,11 +260,11 @@ where
         Ok(shares)
     }
 
-    async fn receive_share(
+    async fn receive_share_many(
         ctx: Self::Context,
         mut coms: impl Communicate,
         from: usize,
-    ) -> Result<Self, Self::Error> {
+    ) -> Result<Self::VectorShare, Self::Error> {
         let params = &ctx.params;
         let for_sharing = &mut ctx.preprocessed.for_sharing;
         let res = receive_shares(&mut coms, from, for_sharing, params)
@@ -275,11 +273,11 @@ where
         Ok(res.into())
     }
 
-    async fn recombine(
+    async fn recombine_many(
         ctx: Self::Context,
-        secrets: Self,
+        secrets: Self::VectorShare,
         mut coms: impl Communicate,
-    ) -> Result<Self::Value, Self::Error> {
+    ) -> Result<Vector<Self::Value>, Self::Error> {
         // TODO: make random element
         let random_element = F::from_u128(12);
         let res = open_res_many(

@@ -258,6 +258,36 @@ pub mod interactive {
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>>;
     }
+
+    pub trait InteractiveSharedMany<'ctx>: InteractiveShared<'ctx> {
+        type VectorShare;
+
+        fn share_many(
+            ctx: Self::Context,
+            secrets: &[Self::Value],
+            rng: impl RngCore + Send,
+            coms: impl Communicate,
+        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>>;
+
+        fn symmetric_share_many(
+            ctx: Self::Context,
+            secrets: &[Self::Value],
+            rng: impl RngCore + Send,
+            coms: impl Communicate,
+        ) -> impl std::future::Future<Output = Result<Vec<Self::VectorShare>, Self::Error>>;
+
+        fn receive_share_many(
+            ctx: Self::Context,
+            coms: impl Communicate,
+            from: usize,
+        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>>;
+
+        fn recombine_many(
+            ctx: Self::Context,
+            secrets: Self::VectorShare,
+            coms: impl Communicate,
+        ) -> impl std::future::Future<Output = Result<Vector<Self::Value>, Self::Error>>;
+    }
 }
 
 pub trait Verify: Sized {

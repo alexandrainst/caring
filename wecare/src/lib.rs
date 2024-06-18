@@ -1,14 +1,15 @@
 use caring::{
+    algebra::math::Vector,
     net::network::TcpNetwork,
     schemes::spdz::{self, preprocessing},
 };
+use rand::{thread_rng, SeedableRng};
 use std::{fs::File, net::SocketAddr, time::Duration};
 
 pub struct AdderEngine {
     network: TcpNetwork,
     runtime: tokio::runtime::Runtime,
-    threshold: u64,
-    context: spdz::SpdzContext<curve25519_dalek::Scalar>,
+    context: spdz::SpdzContext<F>,
 }
 
 impl AdderEngine {
@@ -36,104 +37,40 @@ fn from_offset(num: u128) -> f64 {
     num.to_num()
 }
 
+use caring::schemes::interactive::InteractiveSharedMany;
+
+type F = curve25519_dalek::Scalar;
+type Share = caring::schemes::spdz::Share<F>;
+
 // We start allowing just one element.
 pub fn mpc_sum(engine: &mut AdderEngine, nums: &[f64]) -> Option<Vec<f64>> {
     let AdderEngine {
         network,
         runtime,
-        threshold: _,
-        context,
+        context: ctx,
     } = engine;
     let nums: Vec<_> = nums
         .iter()
         .map(|&num| {
             let num = to_offset(num);
-            curve25519_dalek::Scalar::from(num)
+            F::from(num)
         })
         .collect();
-
+    let rng = rand::rngs::StdRng::from_rng(thread_rng()).unwrap();
     let res: Option<_> = runtime.block_on(async {
+        let mut network = network;
         // construct
-        let parties: Vec<_> = network
-            .participants()
-            .map(|id| (id + 1))
-            .map(curve25519_dalek::Scalar::from)
-            .collect();
-
-        let number_of_parties = parties.len();
-        let nums: Vec<_> = nums.clone();
-        let who_am_i = context.params.who_am_i();
-        let mut shares: Vec<Vec<spdz::Share<_>>> = vec![];
-        for i in 0..number_of_parties {
-            if i == who_am_i {
-                let s: Vec<spdz::Share<_>> = spdz::share(
-                    Some(nums.clone()),
-                    &mut context.preprocessed_values.for_sharing,
-                    &context.params,
-                    i,
-                    network,
-                )
-                .await
-                .expect("TODO: look at error");
-                shares.push(s);
-            } else {
-                let s: Vec<spdz::Share<_>> = spdz::share(
-                    None,
-                    &mut context.preprocessed.for_sharing,
-                    &context.params,
-                    i,
-                    network,
-                )
-                .await
-                .expect("TODO: look at error");
-                shares.push(s);
-            }
-        }
-        // Compute
-        let mut shares = shares.into_iter();
-        let mut my_result: Vec<spdz::Share<_>> = shares.next().expect("atleast one result");
-        let my_res_len = my_result.len();
-        for s in shares {
-            println!("my_result: {}", my_result.len());
-            for i in 0..my_res_len {
-                my_result[i] += s[i];
-            }
-        }
-
-        // TODO: make random element
-        let random_element = curve25519_dalek::Scalar::from(12u128);
-        let res: Vec<_> = if my_result.len() == 1 {
-            vec![from_offset(u128::from_le_bytes(
-                spdz::open_res(
-                    my_result.pop().expect("we just checked, it is there."),
-                    network,
-                    &context.params,
-                    &context.opened_values,
-                )
-                .await
-                .as_bytes()[0..128 / 8]
-                    .try_into()
-                    .expect("convertion between types should go well"),
-            ))]
-        } else {
-            spdz::open_res_many(
-                my_result,
-                network,
-                &context.params,
-                &context.opened_values,
-                random_element,
-            )
+        let shares: Vec<Vector<Share>> = Share::symmetric_share_many(ctx, &nums, rng, &mut network)
             .await
+            .unwrap();
+        let sum: Vector<Share> = shares.into_iter().sum();
+        let res: Vector<F> = Share::recombine_many(ctx, sum, network).await.unwrap();
+
+        let res = res
             .into_iter()
-            .map(|x| {
-                x.as_bytes()[0..128 / 8]
-                    .try_into()
-                    .expect("convertion between types should go well")
-            })
-            .map(u128::from_le_bytes)
+            .map(|x| u128::from_le_bytes(x.as_bytes()[0..128 / 8].try_into().unwrap()))
             .map(from_offset)
-            .collect()
-        };
+            .collect();
         Some(res)
     });
     res
@@ -160,7 +97,7 @@ pub fn setup_engine(
     let my_addr: SocketAddr = my_addr.parse().unwrap();
     let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
 
-    let threshold = ((others.len() + 1) / 2 + 1) as u64;
+    //let threshold = ((others.len() + 1) / 2 + 1) as u64;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -177,7 +114,6 @@ pub fn setup_engine(
     let engine = AdderEngine {
         network,
         runtime,
-        threshold,
         context,
     };
     Ok(engine)

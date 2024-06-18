@@ -1,4 +1,4 @@
-use crate::net::{Channel, RecvBytes, SendBytes};
+use crate::net::{Channel, Communicate, RecvBytes, SendBytes};
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 
 use futures::future::join_all;
@@ -562,6 +562,8 @@ impl TcpNetwork {
         join_all(futs).await.into_iter().map_ok(|_| {}).collect()
     }
 }
+
+impl<C: SplitChannel> Communicate for Network<C> {}
 
 #[cfg(test)]
 mod test {
