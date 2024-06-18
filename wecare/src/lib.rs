@@ -3,6 +3,7 @@ use caring::{
     net::network::TcpNetwork,
     schemes::{
         interactive::InteractiveSharedMany,
+        shamir,
         spdz::{self, preprocessing},
     },
 };
@@ -96,13 +97,60 @@ where
 }
 
 impl<'ctx> AdderEngine<'ctx, spdz::Share<curve25519_dalek::Scalar>> {
-    pub fn load_preprocess(&mut self, file: &mut File) {
+    pub fn from_preprocess(
+        my_addr: &str,
+        others: &[impl AsRef<str>],
+        file: &mut File,
+    ) -> Result<Self, MpcError> {
+        let my_addr: SocketAddr = my_addr.parse().unwrap();
+        let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
         let mut context = preprocessing::read_preproc_from_file(file);
-        // Notice: This is a hack and only works as long as the parties share the same number of elements.
-        // To make a propper solotion, the id must be known befor the preprocessing is made.
-        // To ensure that the right number of elements are made for each party.
-        context.params.who_am_i = self.network.index;
-        self.context = context;
+
+        //let threshold = ((others.len() + 1) / 2 + 1) as u64;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let network = TcpNetwork::connect(my_addr, &others);
+        let network = runtime
+            .block_on(network)
+            .map_err(|_| MpcError("Failed to setup network"))?;
+        context.params.who_am_i = network.index;
+        let engine = AdderEngine {
+            network,
+            runtime,
+            context,
+        };
+        Ok(engine)
+    }
+}
+
+impl<'ctx> AdderEngine<'ctx, shamir::Share<curve25519_dalek::Scalar>> {
+    pub fn shamir(my_addr: &str, others: &[impl AsRef<str>]) -> Result<Self, MpcError> {
+        let my_addr: SocketAddr = my_addr.parse().unwrap();
+        let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
+
+        let threshold = ((others.len() + 1) / 2 + 1) as u64;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let network = TcpNetwork::connect(my_addr, &others);
+        let network = runtime
+            .block_on(network)
+            .map_err(|_| MpcError("Failed to setup network"))?;
+
+        let ids = network
+            .participants()
+            .map(|id| (id + 1u32).into())
+            .collect();
+        let context = shamir::ShamirParams { threshold, ids };
+        let engine = AdderEngine {
+            network,
+            runtime,
+            context,
+        };
+        Ok(engine)
     }
 }
 
@@ -169,20 +217,13 @@ mod test {
     }
 
     #[test]
-    fn sunshine() {
+    fn sunshine_shamir() {
         use std::thread;
-        let ctx1 = tempfile::tempfile().unwrap();
-        let ctx2 = tempfile::tempfile().unwrap();
-        let mut files = [ctx1, ctx2];
-        do_preproc(&mut files, vec![1, 1]);
-        let [mut ctx1, mut ctx2] = files;
-        ctx1.rewind().unwrap();
-        ctx2.rewind().unwrap();
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:1234", &["127.0.0.1:1235"], ctx1).unwrap();
+            let mut engine = AdderEngine::shamir("127.0.0.1:1232", &["127.0.0.1:1233"]).unwrap();
             println!("[1] Ready");
-            let res = mpc_sum(&mut engine, &[32.0]).unwrap();
+            let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[1] Done");
             drop(engine);
             res
@@ -190,9 +231,9 @@ mod test {
         std::thread::sleep(Duration::from_millis(50));
         let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:1235", &["127.0.0.1:1234"], ctx2).unwrap();
+            let mut engine = AdderEngine::shamir("127.0.0.1:1233", &["127.0.0.1:1232"]).unwrap();
             println!("[2] Ready");
-            let res = mpc_sum(&mut engine, &[32.0]).unwrap();
+            let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[2] Done");
             drop(engine);
             res
@@ -204,7 +245,46 @@ mod test {
     }
 
     #[test]
-    fn sunshine_for_two() {
+    fn sunshine_spdz() {
+        use std::thread;
+        let ctx1 = tempfile::tempfile().unwrap();
+        let ctx2 = tempfile::tempfile().unwrap();
+        let mut files = [ctx1, ctx2];
+        do_preproc(&mut files, vec![1, 1]);
+        let [mut ctx1, mut ctx2] = files;
+        ctx1.rewind().unwrap();
+        ctx2.rewind().unwrap();
+        let t1 = thread::spawn(move || {
+            println!("[1] Setting up...");
+            let mut engine =
+                AdderEngine::from_preprocess("127.0.0.1:1234", &["127.0.0.1:1235"], &mut ctx1)
+                    .unwrap();
+            println!("[1] Ready");
+            let res = engine.mpc_sum(&[32.0]).unwrap();
+            println!("[1] Done");
+            drop(engine);
+            res
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        let t2 = thread::spawn(move || {
+            println!("[2] Setting up...");
+            let mut engine =
+                AdderEngine::from_preprocess("127.0.0.1:1235", &["127.0.0.1:1234"], &mut ctx2)
+                    .unwrap();
+            println!("[2] Ready");
+            let res = engine.mpc_sum(&[32.0]).unwrap();
+            println!("[2] Done");
+            drop(engine);
+            res
+        });
+        let a = t1.join().expect("joining")[0];
+        let b = t2.join().expect("joining")[0];
+        assert_eq!(a, 64.0);
+        assert_eq!(b, 64.0);
+    }
+
+    #[test]
+    fn sunshine_spdz_for_two() {
         use std::thread;
 
         let ctx1 = tempfile::tempfile().unwrap();
@@ -214,21 +294,25 @@ mod test {
         let [mut ctx1, mut ctx2] = files;
         ctx1.rewind().unwrap();
         ctx2.rewind().unwrap();
-        let t1 = thread::spawn(|| {
+        let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:2234", &["127.0.0.1:2235"], ctx1).unwrap();
+            let mut engine =
+                AdderEngine::from_preprocess("127.0.0.1:2234", &["127.0.0.1:2235"], &mut ctx1)
+                    .unwrap();
             println!("[1] Ready");
-            let res = mpc_sum(&mut engine, &[32.0, 11.9]).unwrap();
+            let res = engine.mpc_sum(&[32.0, 11.9]).unwrap();
             println!("[1] Done");
             drop(engine);
             res
         });
         std::thread::sleep(Duration::from_millis(50));
-        let t2 = thread::spawn(|| {
+        let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
-            let mut engine = setup_engine("127.0.0.1:2235", &["127.0.0.1:2234"], ctx2).unwrap();
+            let mut engine =
+                AdderEngine::from_preprocess("127.0.0.1:2235", &["127.0.0.1:2234"], &mut ctx2)
+                    .unwrap();
             println!("[2] Ready");
-            let res = mpc_sum(&mut engine, &[32.0, 24.1]).unwrap();
+            let res = engine.mpc_sum(&[32.0, 24.1]).unwrap();
             println!("[2] Done");
             drop(engine);
             res

@@ -14,6 +14,7 @@ use crate::{
 };
 
 use crate::algebra::poly::Polynomial;
+use derive_more::{Add, AddAssign, Sub, SubAssign};
 
 /// A Shamir Secret Share
 /// This is a point evaluated at `x` given a secret polynomial.
@@ -23,7 +24,9 @@ use crate::algebra::poly::Polynomial;
 ///
 /// * `x`: The id of the share
 /// * `y`: The 'share' part of the share
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, serde::Serialize, serde::Deserialize, Add, Sub, AddAssign, SubAssign,
+)]
 pub struct Share<F: Field> {
     pub(crate) y: F,
 }
@@ -120,58 +123,9 @@ pub fn reconstruct<F: Field>(ctx: &ShamirParams<F>, shares: &[Share<F>]) -> F {
     sum
 }
 
-impl<F: Field> std::ops::Add for Share<F> {
-    type Output = Self;
-
-    /// Add two shares together.
-    /// Note: These must share the same `x` value.
-    ///
-    /// * `rhs`: the other share
-    fn add(self, rhs: Self) -> Self::Output {
-        // assert_eq!(self.x, rhs.x);
-        Self {
-            // x: self.x,
-            y: self.y + rhs.y,
-        }
-    }
-}
-
-impl<F: Field> std::ops::AddAssign for Share<F> {
-    fn add_assign(&mut self, rhs: Self) {
-        // assert_eq!(self.x, rhs.x);
-        self.y += rhs.y;
-    }
-}
-
-impl<F: Field> std::ops::Sub for Share<F> {
-    type Output = Self;
-
-    /// Add two shares together.
-    /// Note: These must share the same `x` value.
-    ///
-    /// * `rhs`: the other share
-    fn sub(self, rhs: Self) -> Self::Output {
-        // assert_eq!(self.x, rhs.x);
-        Self {
-            // x: self.x,
-            y: self.y - rhs.y,
-        }
-    }
-}
-
-impl<F: Field> std::ops::Add<F> for Share<F> {
-    type Output = Self;
-
-    /// Add a field to a share.
-    /// This 'acts' as the field element is the in the same `x` point.
-    ///
-    /// * `rhs`: the field element to add
-    /// NOTE: This will be redundant if we remove `x` as a share will be a field element
-    fn add(self, rhs: F) -> Self::Output {
-        Self {
-            // x: self.x,
-            y: self.y + rhs,
-        }
+impl<F: Field> std::ops::AddAssign<&Self> for Share<F> {
+    fn add_assign(&mut self, rhs: &Self) {
+        self.add_assign(*rhs)
     }
 }
 

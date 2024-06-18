@@ -141,6 +141,7 @@ pub trait InteractiveMult: Shared {
 }
 
 pub mod interactive {
+    use itertools::Itertools;
     use thiserror::Error;
 
     use crate::{
@@ -158,11 +159,11 @@ pub mod interactive {
     }
 
     use super::*;
-    impl<'ctx, S, V, C> InteractiveShared<'ctx> for S
+    impl<'ctx, S, V, Ctx> InteractiveShared<'ctx> for S
     where
-        S: Shared<Value = V, Context = C> + Send,
+        S: Shared<Value = V, Context = Ctx> + Send,
         V: Send + Clone,
-        C: Send + Sync + Clone + 'ctx,
+        Ctx: Send + Sync + Clone + 'ctx,
     {
         type Context = S::Context;
         type Value = V;
@@ -291,6 +292,74 @@ pub mod interactive {
             secrets: Self::VectorShare,
             coms: impl Communicate,
         ) -> impl std::future::Future<Output = Result<Vector<Self::Value>, Self::Error>>;
+    }
+
+    // TODO: Consider using specialized SharedMany instead.
+    impl<'ctx, S, V, Ctx> InteractiveSharedMany<'ctx> for S
+    where
+        S: InteractiveShared<'ctx, Error = CommunicationError, Value = V, Context = Ctx>
+            + Shared<Value = V, Context = Ctx>
+            + Send,
+        V: Send + Clone,
+    {
+        type VectorShare = Vector<S>;
+
+        async fn share_many(
+            ctx: &mut Self::Context,
+            secrets: &[Self::Value],
+            rng: impl RngCore + Send,
+            mut coms: impl Communicate,
+        ) -> Result<Self::VectorShare, Self::Error> {
+            let shares = S::share_many(&*ctx, secrets, rng);
+            let my_share = shares[coms.id()].clone();
+            coms.unicast(&shares)
+                .await
+                .map_err(CommunicationError::new)?;
+            Ok(my_share.into())
+        }
+
+        async fn symmetric_share_many(
+            ctx: &mut Self::Context,
+            secrets: &[Self::Value],
+            rng: impl RngCore + Send,
+            mut coms: impl Communicate,
+        ) -> Result<Vec<Self::VectorShare>, Self::Error> {
+            let shares: Vec<Vector<Self>> = S::share_many(&*ctx, secrets, rng)
+                .into_iter()
+                .map(|v| v.into())
+                .collect();
+            let shared = coms
+                .symmetric_unicast(shares)
+                .await
+                .map_err(CommunicationError::new)?;
+            Ok(shared)
+        }
+
+        async fn receive_share_many(
+            _ctx: &mut Self::Context,
+            mut coms: impl Communicate,
+            from: usize,
+        ) -> Result<Self::VectorShare, Self::Error> {
+            let s = Tuneable::recv_from(&mut coms, from).await;
+            let s = s.map_err(CommunicationError::new)?;
+            Ok(s)
+        }
+
+        async fn recombine_many(
+            ctx: &mut Self::Context,
+            secrets: Self::VectorShare,
+            mut coms: impl Communicate,
+        ) -> Result<Vector<Self::Value>, Self::Error> {
+            let shares = coms
+                .symmetric_broadcast(secrets)
+                .await
+                .map_err(CommunicationError::new)?;
+            let res: Vector<Self::Value> = Shared::recombine_many(&*ctx, &shares)
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect(); // TODO: Proper errors
+            Ok(res)
+        }
     }
 }
 
