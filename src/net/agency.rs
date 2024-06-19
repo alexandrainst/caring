@@ -27,7 +27,7 @@ use std::{error::Error, marker::PhantomData};
 use futures::Future;
 use itertools::Itertools;
 
-pub trait Broadcast {
+pub trait Broadcast: Send {
     type BroadcastError: Error + Send + 'static;
     // type Error: Error + 'static;
 
@@ -52,12 +52,12 @@ pub trait Broadcast {
         msg: T,
     ) -> impl Future<Output = Result<Vec<T>, Self::BroadcastError>> + Send
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync;
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync;
 
     /// Receive a message from a party
     ///
     /// Returns: a message from the given party or an error
-    fn recv_from<T: serde::de::DeserializeOwned>(
+    fn recv_from<T: serde::de::DeserializeOwned + Send>(
         &mut self,
         idx: usize,
     ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send;
@@ -82,12 +82,12 @@ impl<'a, B: Broadcast> Broadcast for &'a mut B {
         msg: T,
     ) -> impl Future<Output = Result<Vec<T>, Self::BroadcastError>> + Send
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync,
     {
         (**self).symmetric_broadcast(msg)
     }
 
-    fn recv_from<T: serde::de::DeserializeOwned>(
+    fn recv_from<T: serde::de::DeserializeOwned + Send>(
         &mut self,
         idx: usize,
     ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send {
@@ -113,7 +113,7 @@ pub trait Unicast {
     /// * `msgs`: Messages to send
     fn unicast(
         &mut self,
-        msgs: &[impl serde::Serialize + Sync],
+        msgs: &[impl serde::Serialize + Send + Sync],
     ) -> impl std::future::Future<Output = Result<(), Self::UnicastError>> + Send;
 
     /// Unicast a message to each party and await their messages
@@ -126,14 +126,14 @@ pub trait Unicast {
         msgs: Vec<T>,
     ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>> + Send
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync;
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync;
 
     /// Receive a message for each party.
     ///
     /// Asymmetric, waiting
     ///
     /// Returns: A list sorted by the connections (skipping yourself)
-    fn receive_all<T: serde::de::DeserializeOwned>(
+    fn receive_all<T: serde::de::DeserializeOwned + Send>(
         &mut self,
     ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>> + Send;
 
@@ -149,7 +149,7 @@ impl<'a, U: Unicast> Unicast for &'a mut U {
         (**self).size()
     }
 
-    fn receive_all<T: serde::de::DeserializeOwned>(
+    fn receive_all<T: serde::de::DeserializeOwned + Send>(
         &mut self,
     ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>> + Send {
         (**self).receive_all()
@@ -157,7 +157,7 @@ impl<'a, U: Unicast> Unicast for &'a mut U {
 
     fn unicast(
         &mut self,
-        msgs: &[impl serde::Serialize + Sync],
+        msgs: &[impl serde::Serialize + Send + Sync],
     ) -> impl std::future::Future<Output = Result<(), Self::UnicastError>> + Send {
         (**self).unicast(msgs)
     }
@@ -167,7 +167,7 @@ impl<'a, U: Unicast> Unicast for &'a mut U {
         msgs: Vec<T>,
     ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>> + Send
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync,
     {
         (**self).symmetric_unicast(msgs)
     }
@@ -353,7 +353,7 @@ pub enum BroadcastVerificationError<E> {
     Other(E),
 }
 
-impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
+impl<B: Broadcast, D: Digest + Send> Broadcast for VerifiedBroadcast<B, D> {
     type BroadcastError = BroadcastVerificationError<<B as Broadcast>::BroadcastError>;
 
     async fn broadcast(&mut self, msg: &impl serde::Serialize) -> Result<(), Self::BroadcastError> {

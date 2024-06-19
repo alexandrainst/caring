@@ -75,7 +75,7 @@ pub fn assert_holded_by<F>(shares: impl IntoIterator<Item = Share<F>>, party: us
     assert_eq!(val, party, "Shares not issued to party {party}");
 }
 
-impl<F: Field + Serialize + DeserializeOwned + PartialEq + Sync> Shared for Share<F> {
+impl<F: Field + Serialize + DeserializeOwned + PartialEq + Send + Sync> Shared for Share<F> {
     type Context = Context;
 
     type Value = F;

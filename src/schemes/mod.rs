@@ -56,6 +56,7 @@ pub trait Shared:
     + serde::Serialize
     + serde::de::DeserializeOwned
     + Clone
+    + Send
     + Sync
 {
     /// The context needed to use the scheme.
@@ -117,6 +118,8 @@ pub trait Shared:
     }
 }
 
+// NOTE: Not used currently.
+//
 /// Support for multiplication of two shares for producing a share.
 ///
 /// Note, that this is different to beaver multiplication as it does not require
@@ -137,7 +140,7 @@ pub trait InteractiveMult: Shared {
         net: &mut U,
         a: Self,
         b: Self,
-    ) -> impl Future<Output = Result<Self, Box<dyn Error>>> + Send;
+    ) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
 }
 
 pub mod interactive {
@@ -300,7 +303,8 @@ pub mod interactive {
         S: InteractiveShared<Error = CommunicationError, Value = V, Context = Ctx>
             + Shared<Value = V, Context = Ctx>
             + Send,
-        V: Send + Clone,
+        V: Send + Sync + Clone,
+        Ctx: Send + Sync,
     {
         type VectorShare = Vector<S>;
 

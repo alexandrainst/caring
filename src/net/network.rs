@@ -366,7 +366,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(
+    async fn receive_all<T: serde::de::DeserializeOwned + Send>(
         &mut self,
     ) -> Result<Vec<T>, Self::UnicastError> {
         self.receive_all().await
