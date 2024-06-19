@@ -144,7 +144,6 @@ pub trait InteractiveMult: Shared {
 }
 
 pub mod interactive {
-    use itertools::Itertools;
     use thiserror::Error;
 
     use crate::{
