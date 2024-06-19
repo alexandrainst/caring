@@ -137,7 +137,7 @@ pub trait InteractiveMult: Shared {
         net: &mut U,
         a: Self,
         b: Self,
-    ) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
+    ) -> impl Future<Output = Result<Self, Box<dyn Error>>> + Send;
 }
 
 pub mod interactive {
@@ -242,26 +242,26 @@ pub mod interactive {
             secret: Self::Value,
             rng: impl RngCore + Send,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self, Self::Error>> + Send;
 
         fn symmetric_share(
             ctx: &mut Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>> + Send;
 
         fn receive_share(
             ctx: &mut Self::Context,
             coms: impl Communicate,
             from: usize,
-        ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self, Self::Error>> + Send;
 
         fn recombine(
             ctx: &mut Self::Context,
             secrets: Self,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>> + Send;
     }
 
     pub trait InteractiveSharedMany<'ctx>: InteractiveShared<'ctx> {
@@ -272,26 +272,26 @@ pub mod interactive {
             secrets: &[Self::Value],
             rng: impl RngCore + Send,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>> + Send;
 
         fn symmetric_share_many(
             ctx: &mut Self::Context,
             secrets: &[Self::Value],
             rng: impl RngCore + Send,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Vec<Self::VectorShare>, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Vec<Self::VectorShare>, Self::Error>> + Send;
 
         fn receive_share_many(
             ctx: &mut Self::Context,
             coms: impl Communicate,
             from: usize,
-        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>> + Send;
 
         fn recombine_many(
             ctx: &mut Self::Context,
             secrets: Self::VectorShare,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Vector<Self::Value>, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Vector<Self::Value>, Self::Error>> + Send;
     }
 
     // TODO: Consider using specialized SharedMany instead.

@@ -399,7 +399,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::BroadcastError>> {
+    ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send {
         Tuneable::recv_from(self, idx)
     }
 
