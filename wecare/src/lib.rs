@@ -96,8 +96,10 @@ where
     }
 }
 
+pub type SpdzEngine = AdderEngine<spdz::Share<curve25519_dalek::Scalar>>;
+
 impl AdderEngine<spdz::Share<curve25519_dalek::Scalar>> {
-    pub fn from_preprocess(
+    pub fn spdz(
         my_addr: &str,
         others: &[impl AsRef<str>],
         file: &mut File,
@@ -257,8 +259,7 @@ mod test {
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
             let mut engine =
-                AdderEngine::from_preprocess("127.0.0.1:1234", &["127.0.0.1:1235"], &mut ctx1)
-                    .unwrap();
+                AdderEngine::spdz("127.0.0.1:1234", &["127.0.0.1:1235"], &mut ctx1).unwrap();
             println!("[1] Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[1] Done");
@@ -269,8 +270,7 @@ mod test {
         let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
             let mut engine =
-                AdderEngine::from_preprocess("127.0.0.1:1235", &["127.0.0.1:1234"], &mut ctx2)
-                    .unwrap();
+                AdderEngine::spdz("127.0.0.1:1235", &["127.0.0.1:1234"], &mut ctx2).unwrap();
             println!("[2] Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[2] Done");
@@ -297,8 +297,7 @@ mod test {
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
             let mut engine =
-                AdderEngine::from_preprocess("127.0.0.1:2234", &["127.0.0.1:2235"], &mut ctx1)
-                    .unwrap();
+                AdderEngine::spdz("127.0.0.1:2234", &["127.0.0.1:2235"], &mut ctx1).unwrap();
             println!("[1] Ready");
             let res = engine.mpc_sum(&[32.0, 11.9]).unwrap();
             println!("[1] Done");
@@ -309,8 +308,7 @@ mod test {
         let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
             let mut engine =
-                AdderEngine::from_preprocess("127.0.0.1:2235", &["127.0.0.1:2234"], &mut ctx2)
-                    .unwrap();
+                AdderEngine::spdz("127.0.0.1:2235", &["127.0.0.1:2234"], &mut ctx2).unwrap();
             println!("[2] Ready");
             let res = engine.mpc_sum(&[32.0, 24.1]).unwrap();
             println!("[2] Done");
