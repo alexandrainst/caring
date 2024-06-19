@@ -12,15 +12,15 @@ use std::{fs::File, mem, net::SocketAddr, time::Duration};
 
 type F = curve25519_dalek::Scalar;
 
-pub struct AdderEngine<'a, S: InteractiveSharedMany<'a>> {
+pub struct AdderEngine<S: InteractiveSharedMany> {
     network: TcpNetwork,
     runtime: tokio::runtime::Runtime,
     context: S::Context,
 }
 
-impl<'a, S> AdderEngine<'a, S>
+impl<S> AdderEngine<S>
 where
-    S: InteractiveSharedMany<'a, Value = curve25519_dalek::Scalar>,
+    S: InteractiveSharedMany<Value = curve25519_dalek::Scalar>,
 {
     //pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: String) -> Result<AdderEngine<F>, MpcError> {
     pub fn setup(
@@ -58,7 +58,7 @@ where
 
     pub fn mpc_sum(&mut self, nums: &[f64]) -> Option<Vec<f64>>
     where
-        <S as InteractiveSharedMany<'a>>::VectorShare: std::iter::Sum,
+        <S as InteractiveSharedMany>::VectorShare: std::iter::Sum,
     {
         let AdderEngine {
             network,
@@ -96,7 +96,7 @@ where
     }
 }
 
-impl<'ctx> AdderEngine<'ctx, spdz::Share<curve25519_dalek::Scalar>> {
+impl AdderEngine<spdz::Share<curve25519_dalek::Scalar>> {
     pub fn from_preprocess(
         my_addr: &str,
         others: &[impl AsRef<str>],
@@ -125,7 +125,7 @@ impl<'ctx> AdderEngine<'ctx, spdz::Share<curve25519_dalek::Scalar>> {
     }
 }
 
-impl<'ctx> AdderEngine<'ctx, shamir::Share<curve25519_dalek::Scalar>> {
+impl AdderEngine<shamir::Share<curve25519_dalek::Scalar>> {
     pub fn shamir(my_addr: &str, others: &[impl AsRef<str>]) -> Result<Self, MpcError> {
         let my_addr: SocketAddr = my_addr.parse().unwrap();
         let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();

@@ -1,3 +1,5 @@
+//! Experimental module to try 'marking' different kind of shares in a program using types.
+
 mod exptree;
 
 use rand::RngCore;
