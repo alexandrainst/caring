@@ -9,8 +9,24 @@ use caring::{
 };
 use rand::{thread_rng, SeedableRng};
 use std::{fs::File, net::SocketAddr, time::Duration};
+use tokio::runtime::Runtime;
 
 type F = curve25519_dalek::Scalar;
+
+type SignedFix = fixed::FixedI128<64>;
+fn to_offset(num: f64) -> u128 {
+    let num: i128 = SignedFix::from_num(num).to_bits(); // convert to signed fixed point
+                                                        // Okay this a some voodoo why this 'just works', but the idea is that
+                                                        // twos complement is actually just an offset from the max value.
+                                                        // https://en.wikipedia.org/wiki/Offset_binary
+    num as u128
+}
+
+fn from_offset(num: u128) -> f64 {
+    // Same applies as above
+    let num = SignedFix::from_bits(num as i128);
+    num.to_num()
+}
 
 pub struct AdderEngine<S: InteractiveSharedMany> {
     network: TcpNetwork,
@@ -23,29 +39,12 @@ where
     S: InteractiveSharedMany<Value = curve25519_dalek::Scalar>,
 {
     //pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: String) -> Result<AdderEngine<F>, MpcError> {
-    pub fn setup(
-        my_addr: &str,
-        others: &[impl AsRef<str>],
-        context: S::Context,
-    ) -> Result<Self, MpcError> {
-        let my_addr: SocketAddr = my_addr.parse().unwrap();
-        let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
-
-        //let threshold = ((others.len() + 1) / 2 + 1) as u64;
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let network = TcpNetwork::connect(my_addr, &others);
-        let network = runtime
-            .block_on(network)
-            .map_err(|_| MpcError("Failed to setup network"))?;
-        let engine = AdderEngine {
+    fn new(network: TcpNetwork, runtime: Runtime, context: S::Context) -> Self {
+        Self {
             network,
             runtime,
             context,
-        };
-        Ok(engine)
+        }
     }
 
     pub fn shutdown(self) {
@@ -98,80 +97,7 @@ where
 
 pub type SpdzEngine = AdderEngine<spdz::Share<curve25519_dalek::Scalar>>;
 
-impl AdderEngine<spdz::Share<curve25519_dalek::Scalar>> {
-    pub fn spdz(
-        my_addr: &str,
-        others: &[impl AsRef<str>],
-        file: &mut File,
-    ) -> Result<Self, MpcError> {
-        let my_addr: SocketAddr = my_addr.parse().unwrap();
-        let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
-        let mut context = preprocessing::read_preproc_from_file(file);
-
-        //let threshold = ((others.len() + 1) / 2 + 1) as u64;
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let network = TcpNetwork::connect(my_addr, &others);
-        let network = runtime
-            .block_on(network)
-            .map_err(|_| MpcError("Failed to setup network"))?;
-        context.params.who_am_i = network.index;
-        let engine = AdderEngine {
-            network,
-            runtime,
-            context,
-        };
-        Ok(engine)
-    }
-}
-
-impl AdderEngine<shamir::Share<curve25519_dalek::Scalar>> {
-    pub fn shamir(my_addr: &str, others: &[impl AsRef<str>]) -> Result<Self, MpcError> {
-        let my_addr: SocketAddr = my_addr.parse().unwrap();
-        let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
-
-        let threshold = ((others.len() + 1) / 2 + 1) as u64;
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let network = TcpNetwork::connect(my_addr, &others);
-        let network = runtime
-            .block_on(network)
-            .map_err(|_| MpcError("Failed to setup network"))?;
-
-        let ids = network
-            .participants()
-            .map(|id| (id + 1u32).into())
-            .collect();
-        let context = shamir::ShamirParams { threshold, ids };
-        let engine = AdderEngine {
-            network,
-            runtime,
-            context,
-        };
-        Ok(engine)
-    }
-}
-
-type SignedFix = fixed::FixedI128<64>;
-fn to_offset(num: f64) -> u128 {
-    let num: i128 = SignedFix::from_num(num).to_bits(); // convert to signed fixed point
-                                                        // Okay this a some voodoo why this 'just works', but the idea is that
-                                                        // twos complement is actually just an offset from the max value.
-                                                        // https://en.wikipedia.org/wiki/Offset_binary
-    num as u128
-}
-
-fn from_offset(num: u128) -> f64 {
-    // Same applies as above
-    let num = SignedFix::from_bits(num as i128);
-    num.to_num()
-}
-
-// We start allowing just one element.
+pub type ShamirEngine = AdderEngine<shamir::Share<curve25519_dalek::Scalar>>;
 
 #[derive(Debug)]
 pub struct MpcError(pub &'static str);
@@ -199,6 +125,107 @@ pub fn do_preproc(files: &mut [File], number_of_shares: Vec<usize>) {
     .unwrap();
 }
 
+pub type Engine = generic::AdderEngine;
+
+mod generic {
+    use tokio::runtime::Runtime;
+
+    use super::*;
+
+    pub enum AdderEngine {
+        Spdz(SpdzEngine),
+        Shamir(ShamirEngine),
+    }
+
+    pub struct EngineBuilder<'a> {
+        my_addr: &'a str,
+        other_addr: Vec<&'a str>,
+        threshold: Option<u64>,
+        preprocessed: Option<&'a mut File>,
+    }
+    impl<'a> EngineBuilder<'a> {
+        pub fn build_spdz(self) -> Result<AdderEngine, MpcError> {
+            let (network, runtime) = self.semi_build()?;
+            let file = self
+                .preprocessed
+                .ok_or(MpcError("No proccesing file found"))?;
+            let mut context = preprocessing::read_preproc_from_file(file);
+            context.params.who_am_i = network.index;
+            let engine = SpdzEngine::new(network, runtime, context);
+            Ok(AdderEngine::Spdz(engine))
+        }
+
+        pub fn build_shamir(self) -> Result<AdderEngine, MpcError> {
+            let threshold = self.threshold.ok_or(MpcError("No threshold found"))?;
+            let (network, runtime) = self.semi_build()?;
+            let ids = network
+                .participants()
+                .map(|id| (id + 1u32).into())
+                .collect();
+            let context = shamir::ShamirParams { threshold, ids };
+            let engine = ShamirEngine::new(network, runtime, context);
+            Ok(AdderEngine::Shamir(engine))
+        }
+
+        fn semi_build(&self) -> Result<(TcpNetwork, Runtime), MpcError> {
+            let my_addr: SocketAddr = self.my_addr.parse().unwrap();
+            let others: Vec<SocketAddr> =
+                self.other_addr.iter().map(|s| s.parse().unwrap()).collect();
+
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let network = TcpNetwork::connect(my_addr, &others);
+            let network = runtime
+                .block_on(network)
+                .map_err(|_| MpcError("Failed to setup network"))?;
+
+            Ok((network, runtime))
+        }
+
+        pub fn add_participant(mut self, addr: &'a str) -> Self {
+            self.other_addr.push(addr);
+            self
+        }
+
+        pub fn threshold(mut self, t: u64) -> Self {
+            self.threshold = Some(t);
+            self
+        }
+
+        pub fn file_to_preprocessed(mut self, file: &'a mut File) -> Self {
+            self.preprocessed = Some(file);
+            self
+        }
+    }
+
+    impl AdderEngine {
+        pub fn setup(addr: &str) -> EngineBuilder<'_> {
+            EngineBuilder {
+                my_addr: addr,
+                other_addr: vec![],
+                threshold: None,
+                preprocessed: None,
+            }
+        }
+
+        pub fn mpc_sum(&mut self, nums: &[f64]) -> Option<Vec<f64>> {
+            match self {
+                AdderEngine::Spdz(e) => e.mpc_sum(nums),
+                AdderEngine::Shamir(e) => e.mpc_sum(nums),
+            }
+        }
+
+        pub fn shutdown(self) {
+            match self {
+                AdderEngine::Spdz(e) => e.shutdown(),
+                AdderEngine::Shamir(e) => e.shutdown(),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::{io::Seek, time::Duration};
@@ -223,7 +250,11 @@ mod test {
         use std::thread;
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
-            let mut engine = AdderEngine::shamir("127.0.0.1:1232", &["127.0.0.1:1233"]).unwrap();
+            let mut engine = Engine::setup("127.0.0.1:1232")
+                .add_participant("127.0.0.1:1233")
+                .threshold(2)
+                .build_shamir()
+                .unwrap();
             println!("[1] Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[1] Done");
@@ -233,7 +264,11 @@ mod test {
         std::thread::sleep(Duration::from_millis(50));
         let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
-            let mut engine = AdderEngine::shamir("127.0.0.1:1233", &["127.0.0.1:1232"]).unwrap();
+            let mut engine = Engine::setup("127.0.0.1:1233")
+                .add_participant("127.0.0.1:1232")
+                .threshold(2)
+                .build_shamir()
+                .unwrap();
             println!("[2] Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[2] Done");
@@ -258,8 +293,12 @@ mod test {
         ctx2.rewind().unwrap();
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
-            let mut engine =
-                AdderEngine::spdz("127.0.0.1:1234", &["127.0.0.1:1235"], &mut ctx1).unwrap();
+
+            let mut engine = Engine::setup("127.0.0.1:1234")
+                .add_participant("127.0.0.1:1235")
+                .file_to_preprocessed(&mut ctx1)
+                .build_spdz()
+                .unwrap();
             println!("[1] Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[1] Done");
@@ -269,8 +308,11 @@ mod test {
         std::thread::sleep(Duration::from_millis(50));
         let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
-            let mut engine =
-                AdderEngine::spdz("127.0.0.1:1235", &["127.0.0.1:1234"], &mut ctx2).unwrap();
+            let mut engine = Engine::setup("127.0.0.1:1235")
+                .add_participant("127.0.0.1:1234")
+                .file_to_preprocessed(&mut ctx2)
+                .build_spdz()
+                .unwrap();
             println!("[2] Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[2] Done");
@@ -296,8 +338,11 @@ mod test {
         ctx2.rewind().unwrap();
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
-            let mut engine =
-                AdderEngine::spdz("127.0.0.1:2234", &["127.0.0.1:2235"], &mut ctx1).unwrap();
+            let mut engine = Engine::setup("127.0.0.1:2234")
+                .add_participant("127.0.0.1:2235")
+                .file_to_preprocessed(&mut ctx1)
+                .build_spdz()
+                .unwrap();
             println!("[1] Ready");
             let res = engine.mpc_sum(&[32.0, 11.9]).unwrap();
             println!("[1] Done");
@@ -307,8 +352,11 @@ mod test {
         std::thread::sleep(Duration::from_millis(50));
         let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
-            let mut engine =
-                AdderEngine::spdz("127.0.0.1:2235", &["127.0.0.1:2234"], &mut ctx2).unwrap();
+            let mut engine = Engine::setup("127.0.0.1:2235")
+                .add_participant("127.0.0.1:2234")
+                .file_to_preprocessed(&mut ctx2)
+                .build_spdz()
+                .unwrap();
             println!("[2] Ready");
             let res = engine.mpc_sum(&[32.0, 24.1]).unwrap();
             println!("[2] Done");
