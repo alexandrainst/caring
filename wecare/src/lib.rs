@@ -8,7 +8,7 @@ use caring::{
     },
 };
 use rand::{thread_rng, SeedableRng};
-use std::{fs::File, mem, net::SocketAddr, time::Duration};
+use std::{fs::File, net::SocketAddr, time::Duration};
 
 type F = curve25519_dalek::Scalar;
 
