@@ -27,7 +27,7 @@ use std::{error::Error, marker::PhantomData};
 use futures::Future;
 use itertools::Itertools;
 
-pub trait Broadcast {
+pub trait Broadcast: Send {
     type BroadcastError: Error + Send + 'static;
     // type Error: Error + 'static;
 
@@ -38,7 +38,7 @@ pub trait Broadcast {
     fn broadcast(
         &mut self,
         msg: &(impl serde::Serialize + Sync),
-    ) -> impl std::future::Future<Output = Result<(), Self::BroadcastError>>;
+    ) -> impl std::future::Future<Output = Result<(), Self::BroadcastError>> + Send;
 
     /// Broadcast a message to all parties and await their messages
     /// Messages are ordered by their index.
@@ -50,17 +50,17 @@ pub trait Broadcast {
     fn symmetric_broadcast<T>(
         &mut self,
         msg: T,
-    ) -> impl Future<Output = Result<Vec<T>, Self::BroadcastError>>
+    ) -> impl Future<Output = Result<Vec<T>, Self::BroadcastError>> + Send
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync;
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync;
 
     /// Receive a message from a party
     ///
     /// Returns: a message from the given party or an error
-    fn recv_from<T: serde::de::DeserializeOwned>(
+    fn recv_from<T: serde::de::DeserializeOwned + Send>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::BroadcastError>>;
+    ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send;
 
     /// Size of the broadcasting network including yourself,
     /// as such there is n-1 outgoing connections
@@ -73,24 +73,24 @@ impl<'a, B: Broadcast> Broadcast for &'a mut B {
     fn broadcast(
         &mut self,
         msg: &(impl serde::Serialize + Sync),
-    ) -> impl std::future::Future<Output = Result<(), Self::BroadcastError>> {
+    ) -> impl std::future::Future<Output = Result<(), Self::BroadcastError>> + Send {
         (**self).broadcast(msg)
     }
 
     fn symmetric_broadcast<T>(
         &mut self,
         msg: T,
-    ) -> impl Future<Output = Result<Vec<T>, Self::BroadcastError>>
+    ) -> impl Future<Output = Result<Vec<T>, Self::BroadcastError>> + Send
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync,
     {
         (**self).symmetric_broadcast(msg)
     }
 
-    fn recv_from<T: serde::de::DeserializeOwned>(
+    fn recv_from<T: serde::de::DeserializeOwned + Send>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::BroadcastError>> {
+    ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send {
         (**self).recv_from(idx)
     }
 
@@ -113,8 +113,8 @@ pub trait Unicast {
     /// * `msgs`: Messages to send
     fn unicast(
         &mut self,
-        msgs: &[impl serde::Serialize + Sync],
-    ) -> impl std::future::Future<Output = Result<(), Self::UnicastError>>;
+        msgs: &[impl serde::Serialize + Send + Sync],
+    ) -> impl std::future::Future<Output = Result<(), Self::UnicastError>> + Send;
 
     /// Unicast a message to each party and await their messages
     /// Messages are supposed to be in order, meaning message `i`
@@ -124,18 +124,18 @@ pub trait Unicast {
     fn symmetric_unicast<T>(
         &mut self,
         msgs: Vec<T>,
-    ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>>
+    ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>> + Send
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync;
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync;
 
     /// Receive a message for each party.
     ///
     /// Asymmetric, waiting
     ///
     /// Returns: A list sorted by the connections (skipping yourself)
-    fn receive_all<T: serde::de::DeserializeOwned>(
+    fn receive_all<T: serde::de::DeserializeOwned + Send>(
         &mut self,
-    ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>>;
+    ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>> + Send;
 
     /// Size of the unicasting network including yourself,
     /// as such there is n-1 outgoing connections
@@ -149,25 +149,25 @@ impl<'a, U: Unicast> Unicast for &'a mut U {
         (**self).size()
     }
 
-    fn receive_all<T: serde::de::DeserializeOwned>(
+    fn receive_all<T: serde::de::DeserializeOwned + Send>(
         &mut self,
-    ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>> {
+    ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>> + Send {
         (**self).receive_all()
     }
 
     fn unicast(
         &mut self,
-        msgs: &[impl serde::Serialize + Sync],
-    ) -> impl std::future::Future<Output = Result<(), Self::UnicastError>> {
+        msgs: &[impl serde::Serialize + Send + Sync],
+    ) -> impl std::future::Future<Output = Result<(), Self::UnicastError>> + Send {
         (**self).unicast(msgs)
     }
 
     fn symmetric_unicast<T>(
         &mut self,
         msgs: Vec<T>,
-    ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>>
+    ) -> impl Future<Output = Result<Vec<T>, Self::UnicastError>> + Send
     where
-        T: serde::Serialize + serde::de::DeserializeOwned + Sync,
+        T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync,
     {
         (**self).symmetric_unicast(msgs)
     }
@@ -353,7 +353,7 @@ pub enum BroadcastVerificationError<E> {
     Other(E),
 }
 
-impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
+impl<B: Broadcast, D: Digest + Send> Broadcast for VerifiedBroadcast<B, D> {
     type BroadcastError = BroadcastVerificationError<<B as Broadcast>::BroadcastError>;
 
     async fn broadcast(&mut self, msg: &impl serde::Serialize) -> Result<(), Self::BroadcastError> {
@@ -370,7 +370,7 @@ impl<B: Broadcast, D: Digest> Broadcast for VerifiedBroadcast<B, D> {
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::BroadcastError>> {
+    ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send {
         self.recv_from(idx)
     }
 

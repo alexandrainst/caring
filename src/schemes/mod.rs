@@ -56,6 +56,7 @@ pub trait Shared:
     + serde::Serialize
     + serde::de::DeserializeOwned
     + Clone
+    + Send
     + Sync
 {
     /// The context needed to use the scheme.
@@ -117,6 +118,8 @@ pub trait Shared:
     }
 }
 
+// NOTE: Not used currently.
+//
 /// Support for multiplication of two shares for producing a share.
 ///
 /// Note, that this is different to beaver multiplication as it does not require
@@ -141,7 +144,6 @@ pub trait InteractiveMult: Shared {
 }
 
 pub mod interactive {
-    use itertools::Itertools;
     use thiserror::Error;
 
     use crate::{
@@ -159,11 +161,11 @@ pub mod interactive {
     }
 
     use super::*;
-    impl<'ctx, S, V, Ctx> InteractiveShared<'ctx> for S
+    impl<S, V, Ctx> InteractiveShared for S
     where
         S: Shared<Value = V, Context = Ctx> + Send,
         V: Send + Clone,
-        Ctx: Send + Sync + Clone + 'ctx,
+        Ctx: Send + Sync + Clone,
     {
         type Context = S::Context;
         type Value = V;
@@ -220,7 +222,7 @@ pub mod interactive {
         }
     }
 
-    pub trait InteractiveShared<'ctx>:
+    pub trait InteractiveShared:
         Sized
         + Add<Output = Self>
         + Sub<Output = Self>
@@ -229,7 +231,7 @@ pub mod interactive {
         + Clone
         + Sync
     {
-        type Context: Sync + Send + 'ctx;
+        type Context: Sync + Send;
         type Value: Clone + Send;
         type Error: Send + Sized + Error + 'static;
 
@@ -242,29 +244,29 @@ pub mod interactive {
             secret: Self::Value,
             rng: impl RngCore + Send,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self, Self::Error>> + Send;
 
         fn symmetric_share(
             ctx: &mut Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>> + Send;
 
         fn receive_share(
             ctx: &mut Self::Context,
             coms: impl Communicate,
             from: usize,
-        ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self, Self::Error>> + Send;
 
         fn recombine(
             ctx: &mut Self::Context,
             secrets: Self,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>> + Send;
     }
 
-    pub trait InteractiveSharedMany<'ctx>: InteractiveShared<'ctx> {
+    pub trait InteractiveSharedMany: InteractiveShared {
         type VectorShare;
 
         fn share_many(
@@ -272,35 +274,36 @@ pub mod interactive {
             secrets: &[Self::Value],
             rng: impl RngCore + Send,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>> + Send;
 
         fn symmetric_share_many(
             ctx: &mut Self::Context,
             secrets: &[Self::Value],
             rng: impl RngCore + Send,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Vec<Self::VectorShare>, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Vec<Self::VectorShare>, Self::Error>> + Send;
 
         fn receive_share_many(
             ctx: &mut Self::Context,
             coms: impl Communicate,
             from: usize,
-        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>> + Send;
 
         fn recombine_many(
             ctx: &mut Self::Context,
             secrets: Self::VectorShare,
             coms: impl Communicate,
-        ) -> impl std::future::Future<Output = Result<Vector<Self::Value>, Self::Error>>;
+        ) -> impl std::future::Future<Output = Result<Vector<Self::Value>, Self::Error>> + Send;
     }
 
     // TODO: Consider using specialized SharedMany instead.
-    impl<'ctx, S, V, Ctx> InteractiveSharedMany<'ctx> for S
+    impl<S, V, Ctx> InteractiveSharedMany for S
     where
-        S: InteractiveShared<'ctx, Error = CommunicationError, Value = V, Context = Ctx>
+        S: InteractiveShared<Error = CommunicationError, Value = V, Context = Ctx>
             + Shared<Value = V, Context = Ctx>
             + Send,
-        V: Send + Clone,
+        V: Send + Sync + Clone,
+        Ctx: Send + Sync,
     {
         type VectorShare = Vector<S>;
 

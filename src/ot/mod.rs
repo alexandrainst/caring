@@ -35,7 +35,7 @@ pub trait ObliviousSend<C: Channel> {
         pkg0: &T,
         pkg1: &T,
         channel: &mut C,
-    ) -> impl Future<Output = Result<(), Self::Error>>;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 pub trait ObliviousReceive<C: Channel> {
@@ -49,7 +49,7 @@ pub trait ObliviousReceive<C: Channel> {
     fn choose<T: serde::de::DeserializeOwned>(
         choice: bool,
         channel: &mut C,
-    ) -> impl Future<Output = Result<T, Self::Error>>;
+    ) -> impl Future<Output = Result<T, Self::Error>> + Send;
 }
 
 /// A Mock OT that provides no security what-so-ever.

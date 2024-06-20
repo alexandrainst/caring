@@ -99,13 +99,13 @@ pub trait Tuneable {
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::TuningError>>;
+    ) -> impl Future<Output = Result<T, Self::TuningError>> + Send;
 
     fn send_to<T: serde::Serialize + Sync>(
         &mut self,
         idx: usize,
         msg: &T,
-    ) -> impl Future<Output = Result<(), Self::TuningError>>;
+    ) -> impl Future<Output = Result<(), Self::TuningError>> + Send;
 }
 
 impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
@@ -118,7 +118,7 @@ impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::TuningError>> {
+    ) -> impl Future<Output = Result<T, Self::TuningError>> + Send {
         (**self).recv_from(idx)
     }
 
@@ -126,7 +126,7 @@ impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
         &mut self,
         idx: usize,
         msg: &T,
-    ) -> impl Future<Output = Result<(), Self::TuningError>> {
+    ) -> impl Future<Output = Result<(), Self::TuningError>> + Send {
         (**self).send_to(idx, msg)
     }
 }

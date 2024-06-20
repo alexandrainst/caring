@@ -366,7 +366,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn receive_all<T: serde::de::DeserializeOwned>(
+    async fn receive_all<T: serde::de::DeserializeOwned + Send>(
         &mut self,
     ) -> Result<Vec<T>, Self::UnicastError> {
         self.receive_all().await
@@ -399,7 +399,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         idx: usize,
-    ) -> impl Future<Output = Result<T, Self::BroadcastError>> {
+    ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send {
         Tuneable::recv_from(self, idx)
     }
 

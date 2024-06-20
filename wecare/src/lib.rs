@@ -12,15 +12,15 @@ use std::{fs::File, mem, net::SocketAddr, time::Duration};
 
 type F = curve25519_dalek::Scalar;
 
-pub struct AdderEngine<'a, S: InteractiveSharedMany<'a>> {
+pub struct AdderEngine<S: InteractiveSharedMany> {
     network: TcpNetwork,
     runtime: tokio::runtime::Runtime,
     context: S::Context,
 }
 
-impl<'a, S> AdderEngine<'a, S>
+impl<S> AdderEngine<S>
 where
-    S: InteractiveSharedMany<'a, Value = curve25519_dalek::Scalar>,
+    S: InteractiveSharedMany<Value = curve25519_dalek::Scalar>,
 {
     //pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: String) -> Result<AdderEngine<F>, MpcError> {
     pub fn setup(
@@ -58,7 +58,7 @@ where
 
     pub fn mpc_sum(&mut self, nums: &[f64]) -> Option<Vec<f64>>
     where
-        <S as InteractiveSharedMany<'a>>::VectorShare: std::iter::Sum,
+        <S as InteractiveSharedMany>::VectorShare: std::iter::Sum,
     {
         let AdderEngine {
             network,
@@ -96,8 +96,10 @@ where
     }
 }
 
-impl<'ctx> AdderEngine<'ctx, spdz::Share<curve25519_dalek::Scalar>> {
-    pub fn from_preprocess(
+pub type SpdzEngine = AdderEngine<spdz::Share<curve25519_dalek::Scalar>>;
+
+impl AdderEngine<spdz::Share<curve25519_dalek::Scalar>> {
+    pub fn spdz(
         my_addr: &str,
         others: &[impl AsRef<str>],
         file: &mut File,
@@ -125,7 +127,7 @@ impl<'ctx> AdderEngine<'ctx, spdz::Share<curve25519_dalek::Scalar>> {
     }
 }
 
-impl<'ctx> AdderEngine<'ctx, shamir::Share<curve25519_dalek::Scalar>> {
+impl AdderEngine<shamir::Share<curve25519_dalek::Scalar>> {
     pub fn shamir(my_addr: &str, others: &[impl AsRef<str>]) -> Result<Self, MpcError> {
         let my_addr: SocketAddr = my_addr.parse().unwrap();
         let others: Vec<SocketAddr> = others.iter().map(|s| s.as_ref().parse().unwrap()).collect();
@@ -257,8 +259,7 @@ mod test {
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
             let mut engine =
-                AdderEngine::from_preprocess("127.0.0.1:1234", &["127.0.0.1:1235"], &mut ctx1)
-                    .unwrap();
+                AdderEngine::spdz("127.0.0.1:1234", &["127.0.0.1:1235"], &mut ctx1).unwrap();
             println!("[1] Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[1] Done");
@@ -269,8 +270,7 @@ mod test {
         let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
             let mut engine =
-                AdderEngine::from_preprocess("127.0.0.1:1235", &["127.0.0.1:1234"], &mut ctx2)
-                    .unwrap();
+                AdderEngine::spdz("127.0.0.1:1235", &["127.0.0.1:1234"], &mut ctx2).unwrap();
             println!("[2] Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
             println!("[2] Done");
@@ -297,8 +297,7 @@ mod test {
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
             let mut engine =
-                AdderEngine::from_preprocess("127.0.0.1:2234", &["127.0.0.1:2235"], &mut ctx1)
-                    .unwrap();
+                AdderEngine::spdz("127.0.0.1:2234", &["127.0.0.1:2235"], &mut ctx1).unwrap();
             println!("[1] Ready");
             let res = engine.mpc_sum(&[32.0, 11.9]).unwrap();
             println!("[1] Done");
@@ -309,8 +308,7 @@ mod test {
         let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
             let mut engine =
-                AdderEngine::from_preprocess("127.0.0.1:2235", &["127.0.0.1:2234"], &mut ctx2)
-                    .unwrap();
+                AdderEngine::spdz("127.0.0.1:2235", &["127.0.0.1:2234"], &mut ctx2).unwrap();
             println!("[2] Ready");
             let res = engine.mpc_sum(&[32.0, 24.1]).unwrap();
             println!("[2] Done");

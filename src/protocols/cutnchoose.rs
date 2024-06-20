@@ -112,7 +112,7 @@ mod test {
         fn broadcast(
             &mut self,
             msg: &(impl serde::Serialize + Sync),
-        ) -> impl std::future::Future<Output = Result<(), Self::BroadcastError>> {
+        ) -> impl std::future::Future<Output = Result<(), Self::BroadcastError>> + Send {
             self.inner.send(msg)
         }
 
@@ -134,7 +134,7 @@ mod test {
         fn recv_from<T: serde::de::DeserializeOwned>(
             &mut self,
             _idx: usize,
-        ) -> impl futures::prelude::Future<Output = Result<T, Self::BroadcastError>> {
+        ) -> impl futures::prelude::Future<Output = Result<T, Self::BroadcastError>> + Send {
             self.inner.recv()
         }
 
