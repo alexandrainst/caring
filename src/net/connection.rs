@@ -16,7 +16,7 @@
 //! This could be background verification and 'anti-cheat' detection, error-reporting,
 //! background beaver share generation, or other preproccessing actions.
 
-use std::error::Error;
+use std::{error::Error, time::Duration};
 
 use futures::{SinkExt, StreamExt};
 use futures_concurrency::future::Join;
@@ -35,7 +35,7 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
 
-use crate::net::{Channel, RecvBytes, SendBytes, SplitChannel};
+use crate::net::{connection::latency::Delayed, Channel, RecvBytes, SendBytes, SplitChannel};
 
 pub struct Connection<R: AsyncRead, W: AsyncWrite> {
     sender: Sending<W>,
@@ -54,7 +54,7 @@ pub enum ConnectionError {
     Unknown(#[from] Box<dyn Error + Send + Sync + 'static>),
 }
 
-impl<R: AsyncRead, W: AsyncWrite> Connection<R, W> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Connection<R, W> {
     /// Construct a new connection from a reader and writer
     /// Messages are serialized with bincode and length delimated.
     ///
@@ -76,6 +76,20 @@ impl<R: AsyncRead, W: AsyncWrite> Connection<R, W> {
         // Should not wait much here since we drop input
         // it is really only unsent packages holding us back
         (receiver.0.into_inner(), sender.0.into_inner())
+    }
+
+    pub fn delayed_read(self, delay: Duration) -> Connection<Delayed<R>, W> {
+        let r = self.receiver.0.into_inner();
+        let r = Delayed::new(r, delay);
+        let w = self.sender.0.into_inner();
+        Connection::new(r, w)
+    }
+
+    pub fn delayed_write(self, delay: Duration) -> Connection<R, Delayed<W>> {
+        let w = self.sender.0.into_inner();
+        let w = Delayed::new(w, delay);
+        let r = self.receiver.0.into_inner();
+        Connection::new(r, w)
     }
 }
 
@@ -168,6 +182,7 @@ impl TcpConnection {
     ///
     /// * `stream`: TCP stream to use
     pub fn from_tcp_stream(stream: TcpStream) -> Self {
+        let _ = stream.set_nodelay(true);
         let (reader, writer) = stream.into_split();
         Self::new(reader, writer)
     }
@@ -213,6 +228,113 @@ impl DuplexConnection {
         let (_, _) = (r.read_u8(), w.write_u8(0)).join().await;
         let mut stream = r.unsplit(w);
         stream.shutdown().await
+    }
+}
+
+pub mod latency {
+    //! Primitive latency for arbitrary `AsyncWrite`/`AsyncRead` types
+    //! for similating network latency.
+    //!
+    //! When reading or flushing we run a timer in which we wait until it is done,
+    //! after which the
+    //!
+    //! Writing is probably the most realistic, given that it runs a timer after flushing,
+    //! which could be slow.
+
+    use std::{pin::Pin, time::Duration};
+
+    use futures::{pin_mut, FutureExt};
+    use tokio::{
+        io::{AsyncRead, AsyncWrite},
+        time::Sleep,
+    };
+
+    pub struct Delayed<T> {
+        inner: T,
+        delay: Duration,
+        timer: Pin<Box<Sleep>>,
+    }
+
+    impl<T> Delayed<T> {
+        pub fn new(t: T, delay: Duration) -> Self {
+            Self {
+                inner: t,
+                delay,
+                timer: Box::pin(tokio::time::sleep(delay)),
+            }
+        }
+
+        pub fn destroy(self) -> T {
+            self.inner
+        }
+    }
+
+    impl<T> AsyncWrite for Delayed<T>
+    where
+        T: AsyncWrite + Unpin,
+    {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<Result<usize, std::io::Error>> {
+            let writer = &mut self.inner;
+            pin_mut!(writer);
+            writer.poll_write(cx, buf)
+        }
+
+        fn poll_flush(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), std::io::Error>> {
+            let Delayed {
+                timer,
+                inner,
+                delay,
+            } = &mut *self;
+            match timer.poll_unpin(cx) {
+                std::task::Poll::Ready(()) => {
+                    pin_mut!(inner);
+                    timer.set(tokio::time::sleep(*delay));
+                    inner.poll_flush(cx)
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            }
+        }
+
+        fn poll_shutdown(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), std::io::Error>> {
+            let writer = &mut self.inner;
+            pin_mut!(writer);
+            writer.poll_shutdown(cx)
+        }
+    }
+
+    impl<T> AsyncRead for Delayed<T>
+    where
+        T: AsyncRead + Unpin,
+    {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            let Delayed {
+                timer,
+                inner,
+                delay,
+            } = &mut *self;
+            match timer.poll_unpin(cx) {
+                std::task::Poll::Ready(()) => {
+                    pin_mut!(inner);
+                    timer.set(tokio::time::sleep(*delay));
+                    inner.poll_read(cx, buf)
+                }
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            }
+        }
     }
 }
 
@@ -279,6 +401,96 @@ mod test {
             assert_eq!(msg, "Buddy".into());
             conn.send(&"Greetings friend").await.unwrap();
             println!("[2] Message sent");
+        };
+
+        futures::join!(h1, h2);
+    }
+
+    #[tokio::test]
+    async fn in_memory_delayed_read() {
+        use std::time::Instant;
+        let (conn1, conn2) = DuplexConnection::in_memory();
+        let h1 = async move {
+            let mut conn = conn1.delayed_read(Duration::from_millis(50));
+            let t0 = Instant::now();
+            conn.send(&"Hello").await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[1] Message sent in {delta_t:#?}");
+
+            let t0 = Instant::now();
+            conn.send(&"Buddy").await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[1] Message sent in {delta_t:#?}");
+
+            let t0 = Instant::now();
+            let msg: Box<str> = conn.recv().await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[1] Message received in {delta_t:#?}");
+            assert_eq!(msg, "Greetings friend".into());
+        };
+        let h2 = async move {
+            let mut conn = conn2.delayed_read(Duration::from_millis(50));
+            let t0 = Instant::now();
+            let msg: Box<str> = conn.recv().await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[2] Message received in {delta_t:#?}");
+            assert_eq!(msg, "Hello".into());
+
+            let t0 = Instant::now();
+            let msg: Box<str> = conn.recv().await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[2] Message received in {delta_t:#?}");
+            assert_eq!(msg, "Buddy".into());
+
+            let t0 = Instant::now();
+            conn.send(&"Greetings friend").await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[2] Message sent in {delta_t:#?}");
+        };
+
+        futures::join!(h1, h2);
+    }
+
+    #[tokio::test]
+    async fn in_memory_delayed_write() {
+        use std::time::Instant;
+        let (conn1, conn2) = DuplexConnection::in_memory();
+        let h1 = async move {
+            let mut conn = conn1.delayed_write(Duration::from_millis(50));
+            let t0 = Instant::now();
+            conn.send(&"Hello").await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[1] Message sent in {delta_t:#?}");
+
+            let t0 = Instant::now();
+            conn.send(&"Buddy").await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[1] Message sent in {delta_t:#?}");
+
+            let t0 = Instant::now();
+            let msg: Box<str> = conn.recv().await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[1] Message received in {delta_t:#?}");
+            assert_eq!(msg, "Greetings friend".into());
+        };
+        let h2 = async move {
+            let mut conn = conn2.delayed_write(Duration::from_millis(50));
+            let t0 = Instant::now();
+            let msg: Box<str> = conn.recv().await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[2] Message received in {delta_t:#?}");
+            assert_eq!(msg, "Hello".into());
+
+            let t0 = Instant::now();
+            let msg: Box<str> = conn.recv().await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[2] Message received in {delta_t:#?}");
+            assert_eq!(msg, "Buddy".into());
+
+            let t0 = Instant::now();
+            conn.send(&"Greetings friend").await.unwrap();
+            let delta_t = Instant::now() - t0;
+            println!("[2] Message sent in {delta_t:#?}");
         };
 
         futures::join!(h1, h2);

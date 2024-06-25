@@ -445,6 +445,8 @@ impl<C: SplitChannel> Tuneable for Network<C> {
     }
 }
 
+impl<C: SplitChannel> Communicate for Network<C> {}
+
 /// Network containing only duplex connections.
 /// Used for local testing.
 pub type InMemoryNetwork = Network<DuplexConnection>;
@@ -493,6 +495,30 @@ impl InMemoryNetwork {
             .into_iter()
             .map(|conn| async move { conn.shutdown().await });
         join_all(futs).await.into_iter().map_ok(|_| {}).collect()
+    }
+
+    pub fn add_read_latency(self, delay: Duration) -> Network<impl SplitChannel> {
+        let connections = self
+            .connections
+            .into_iter()
+            .map(|c| c.delayed_read(delay))
+            .collect();
+        Network {
+            connections,
+            index: self.index,
+        }
+    }
+
+    pub fn add_write_latency(self, delay: Duration) -> Network<impl SplitChannel> {
+        let connections = self
+            .connections
+            .into_iter()
+            .map(|c| c.delayed_write(delay))
+            .collect();
+        Network {
+            connections,
+            index: self.index,
+        }
     }
 }
 
@@ -563,7 +589,55 @@ impl TcpNetwork {
     }
 }
 
-impl<C: SplitChannel> Communicate for Network<C> {}
+mod builder {
+    use std::{net::SocketAddr, time::Duration};
+
+    use crate::net::{
+        connection::TcpConnection,
+        network::{NetResult, TcpNetwork},
+    };
+
+    pub struct NetworkBuilder {
+        delay: Option<Duration>,
+    }
+
+    pub struct TcpNetworkBuilder {
+        parent: NetworkBuilder,
+        addr: SocketAddr,
+        parties: Vec<SocketAddr>,
+    }
+
+    impl NetworkBuilder {
+        pub fn add_delay(mut self, lag: Duration) -> Self {
+            self.delay = Some(lag);
+            self
+        }
+
+        pub fn tcp(self, addr: SocketAddr) -> TcpNetworkBuilder {
+            TcpNetworkBuilder {
+                parent: self,
+                addr,
+                parties: vec![],
+            }
+        }
+    }
+
+    impl TcpNetworkBuilder {
+        pub fn add_party(mut self, addr: SocketAddr) -> Self {
+            self.parties.push(addr);
+            self
+        }
+
+        pub fn add_parties(mut self, addrs: &[SocketAddr]) -> Self {
+            self.parties.extend_from_slice(addrs);
+            self
+        }
+
+        pub async fn connect(self) -> NetResult<TcpNetwork, TcpConnection> {
+            TcpNetwork::connect(self.addr, &self.parties).await
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {
