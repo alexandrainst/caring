@@ -189,6 +189,13 @@ mod generic {
             self
         }
 
+        pub fn add_participants(mut self, addrs: &'a [impl AsRef<str>]) -> Self {
+            let addrs = addrs.iter().map(|s| s.as_ref::<'a>());
+
+            self.other_addr.extend(addrs);
+            self
+        }
+
         pub fn threshold(mut self, t: u64) -> Self {
             self.threshold = Some(t);
             self

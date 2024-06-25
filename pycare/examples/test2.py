@@ -1,5 +1,6 @@
 import caring
-engine = caring.setup("./context2.bin", "127.0.0.1:1235", "127.0.0.1:1234")
+# engine = caring.spdz("./context2.bin", "127.0.0.1:1235", "127.0.0.1:1234")
+engine = caring.shamir(2, "127.0.0.1:1235", "127.0.0.1:1234")
 
 res = engine.sum(-5)
 print(f"2.5 - 5 = {res}")
