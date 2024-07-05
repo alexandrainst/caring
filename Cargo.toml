@@ -28,6 +28,7 @@ thiserror = "1.0.50"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-util = { version = "0.7.9", features = ["io", "net", "io-util", "codec", "full"] }
 tracing = "0.1.40"
+turmoil = "0.6.2"
 
 [dev-dependencies]
 tempfile = "3.10.1"
@@ -37,6 +38,7 @@ sha2 = "0.10.8"
 
 [features]
 rayon = []
+turmoil = []
 
 [profile.release]
 lto = true

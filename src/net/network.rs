@@ -525,6 +525,12 @@ impl InMemoryNetwork {
 /// TCP Network based on TCP Streams.
 pub type TcpNetwork = Network<TcpConnection>;
 
+#[cfg(not(feature = "turmoil"))]
+use tokio::net::{TcpListener, TcpStream};
+
+#[cfg(feature = "turmoil")]
+use turmoil::net::{TcpListener, TcpStream};
+
 impl TcpNetwork {
     /// Construct a TCP-based network by opening a socket and connecting to peers.
     /// If peers cannot be connected to, we wait until we wait until they have
@@ -539,7 +545,7 @@ impl TcpNetwork {
         let results = future::join_all(
             peers
                 .iter()
-                .map(|addr| tokio::task::spawn(tokio::net::TcpStream::connect(*addr))),
+                .map(|addr| tokio::task::spawn(TcpStream::connect(*addr))),
         )
         .await;
 
@@ -551,7 +557,8 @@ impl TcpNetwork {
 
         // If we are not able to connect to some, they will connect to us.
         // Accepting connections
-        let incoming = tokio::net::TcpListener::bind(me).await.unwrap();
+        let incoming = TcpListener::bind(me).await.unwrap();
+
         loop {
             if parties.len() >= n {
                 break;
@@ -560,9 +567,9 @@ impl TcpNetwork {
             parties.push(stream);
         }
 
-        // Not sure if a good idea?
-        // Fresco does it
+        #[allow(unused_variables, reason = "not run when turmoil is enabled")]
         for stream in &mut parties {
+            #[cfg(not(feature = "turmoil"))]
             stream.set_nodelay(true).unwrap();
         }
 

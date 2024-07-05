@@ -23,11 +23,19 @@ use futures_concurrency::future::Join;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf},
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream,
-    },
     time::error::Elapsed,
+};
+
+#[cfg(not(feature = "turmoil"))]
+use tokio::net::{
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
+    TcpStream,
+};
+
+#[cfg(feature = "turmoil")]
+use turmoil::net::{
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
+    TcpStream,
 };
 
 use tokio_util::{
@@ -182,7 +190,9 @@ impl TcpConnection {
     ///
     /// * `stream`: TCP stream to use
     pub fn from_tcp_stream(stream: TcpStream) -> Self {
+        #[cfg(not(feature = "turmoil"))]
         let _ = stream.set_nodelay(true);
+
         let (reader, writer) = stream.into_split();
         Self::new(reader, writer)
     }
@@ -341,10 +351,6 @@ pub mod latency {
 #[cfg(test)]
 mod test {
 
-    use std::net::SocketAddrV4;
-
-    use tokio::net::TcpListener;
-
     use super::*;
 
     #[tokio::test]
@@ -375,8 +381,11 @@ mod test {
         futures::join!(h1, h2);
     }
 
+    #[cfg(not(feature = "turmoil"))]
     #[tokio::test]
     async fn tcp() {
+        use std::net::SocketAddrV4;
+        use tokio::net::TcpListener;
         let addr = "127.0.0.1:4321".parse::<SocketAddrV4>().unwrap();
         let listener = TcpListener::bind(addr).await.unwrap();
         let h1 = async move {

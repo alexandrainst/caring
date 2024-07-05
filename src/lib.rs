@@ -2,6 +2,7 @@
 #![allow(refining_impl_trait)]
 #![allow(dead_code)]
 #![feature(async_fn_traits)]
+#![feature(lint_reasons)]
 #![allow(clippy::cast_possible_truncation)]
 
 pub mod algebra;
