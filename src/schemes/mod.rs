@@ -193,8 +193,8 @@ pub mod interactive {
             rng: impl RngCore + Send,
             mut coms: impl Communicate,
         ) -> Result<Self, Self::Error> {
-            let shares = S::share(ctx, secret, rng);
-            let my_share = shares[coms.id()].clone();
+            let mut shares = S::share(ctx, secret, rng);
+            let my_share = shares.remove(coms.id());
             coms.unicast(&shares)
                 .await
                 .map_err(CommunicationError::new)?;
