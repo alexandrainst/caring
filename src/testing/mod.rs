@@ -60,7 +60,7 @@ impl Cluster {
     }
 }
 
-impl<Arg: Clone> Cluster<Arg> {
+impl<Arg> Cluster<Arg> {
     /// Run a cluster with arguments
     ///
     /// # Example
