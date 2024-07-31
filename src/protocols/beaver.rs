@@ -224,7 +224,23 @@ mod test {
         algebra::element::Element32,
         net::network::InMemoryNetwork,
         schemes::shamir::{self, ShamirParams},
+        testing::mock,
     };
+
+    #[test]
+    fn fake_shares() {
+        type Share = mock::Share<Element32>;
+        let ctx = Share::new_context(1, 3);
+        let mut rng = rand::rngs::mock::StepRng::new(7, 32);
+        let triples_set = BeaverTriple::<Share>::fake_many(&ctx, &mut rng, 7);
+        for (i, triples) in triples_set.into_iter().enumerate() {
+            for triple in triples {
+                assert_eq!(triple.shares.0.issued_to, i);
+                assert_eq!(triple.shares.1.issued_to, i);
+                assert_eq!(triple.shares.2.issued_to, i);
+            }
+        }
+    }
 
     #[tokio::test]
     async fn beaver_mult() {
