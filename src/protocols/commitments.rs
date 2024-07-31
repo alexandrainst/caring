@@ -6,6 +6,8 @@ use rand::Rng;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+// TODO: refactor rng and bincode away
+
 // TODO: Find a hashing algorithm of cryptograpic standart to use in commitments
 // TODO: Consider whether we need a "real" commitment scheme
 #[derive(PartialEq, serde::Serialize, serde::Deserialize)]

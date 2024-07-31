@@ -37,7 +37,7 @@ pub struct Network<C: SplitChannel> {
     // NOTE:
     // We could also insert a 'fake' Connection into the set for the representation of ourselves.
     // However that is probably a less efficient, if nicer, abstraction.
-    pub(super) connections: Vec<C>,
+    pub(crate) connections: Vec<C>,
     pub index: usize,
 }
 
