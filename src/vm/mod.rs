@@ -52,6 +52,10 @@ where
         }
     }
 
+    pub fn add_fuel(&mut self, fuel: &mut Vec<BeaverTriple<S>>) {
+        self.fueltank.append(fuel);
+    }
+
     // TODO: Superscalar execution when awaiting.
 
     pub async fn execute(&mut self, script: &Script<F>) -> F {

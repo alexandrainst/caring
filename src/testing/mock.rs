@@ -5,9 +5,9 @@ use crate::{algebra::field::Field, schemes::Shared};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Share<F> {
-    value: F,
-    issued_to: usize,
-    issued_by: Option<usize>,
+    pub value: F,
+    pub issued_to: usize,
+    pub issued_by: Option<usize>,
 }
 
 impl<F: Field> std::ops::Add for Share<F> {
@@ -43,6 +43,15 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
         Self {
             value: self.value * rhs,
             ..self
+        }
+    }
+}
+
+impl<F> Share<F> {
+    pub fn new_context(id: usize, total_parties: usize) -> Context {
+        Context {
+            all_parties: total_parties,
+            me: id,
         }
     }
 }
@@ -95,8 +104,14 @@ impl<F: Field + Serialize + DeserializeOwned + PartialEq + Send + Sync> Shared f
     }
 
     fn recombine(_ctx: &Self::Context, shares: &[Self]) -> Option<Self::Value> {
+        let mut all_is_well = true;
         for (i, share) in shares.iter().enumerate() {
-            assert_eq!(share.issued_to, i, "Mismatch in issued_to and order");
+            all_is_well &= share.issued_to == i
+        }
+
+        if !all_is_well {
+            let ids: Vec<_> = shares.iter().map(|s| s.issued_to).collect();
+            panic!("Mismatch in issued shares and order. Received them as:\n {ids:#?}");
         }
 
         assert!(

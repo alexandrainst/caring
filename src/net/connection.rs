@@ -38,8 +38,8 @@ use tokio_util::{
 use crate::net::{connection::latency::Delayed, Channel, RecvBytes, SendBytes, SplitChannel};
 
 pub struct Connection<R: AsyncRead, W: AsyncWrite> {
-    sender: Sending<W>,
-    receiver: Receiving<R>,
+    pub(crate) sender: Sending<W>,
+    pub(crate) receiver: Receiving<R>,
 }
 
 #[derive(Error, Debug)]

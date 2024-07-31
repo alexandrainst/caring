@@ -1,5 +1,6 @@
 //! This module documents various tools which can be used to test or benchmark schemes.
 pub mod mock;
+pub mod tapping;
 
 use crate::net::network::InMemoryNetwork;
 use std::future::Future;
