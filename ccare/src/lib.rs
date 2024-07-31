@@ -1,9 +1,10 @@
 use core::slice;
-use std::{ffi::{CStr, c_char}, panic, sync::Mutex};
+use std::{ffi::{c_char, CStr}, fs::File, panic, sync::Mutex};
 
-static ENGINE : Mutex<Option<AdderEngine>> = Mutex::new(None);
+use wecare::SpdzEngine;
 
-use wecare::*;
+static ENGINE : Mutex<Option<SpdzEngine>> = Mutex::new(None);
+
 
 /// Setup a MPC engine with address `my_addr` connected to the parties with addresses in the
 /// array `others`.
@@ -11,17 +12,27 @@ use wecare::*;
 /// This returns an integer returning zero on no errors otherwise.
 ///
 /// # Error Codes
-/// 1. my_addr malformed
-/// 2. others malformed
-/// 3. something went wrong in setup_engine, bad address format?
+/// 1. preproc malformed
+/// 2. could not open preproc file
+/// 3. my_addr malformed
+/// 4. others malformed
+/// 5. something went wrong in setup_engine, bad address format?
 ///
 /// # Safety
 /// Strings must null terminated and the array have length `len`
 #[no_mangle]
-pub unsafe extern "C" fn care_setup(my_addr: *const c_char, others: *const *const c_char, len: usize) -> i32 {
+pub unsafe extern "C" fn care_setup(preproc: *const c_char, my_addr: *const c_char, others: *const *const c_char, len: usize) -> i32 {
+    let file = unsafe { CStr::from_ptr(preproc) };
+    let Ok(file) = file.to_str() else {
+        return 1;
+    };
+    let Ok(mut file) = File::open(file) else {
+        return 2;
+    };
+
     let my_addr = unsafe { CStr::from_ptr(my_addr) };
     let Ok(my_addr) = my_addr.to_str() else {
-        return 1;
+        return 3;
     };
 
     let Ok(others) = (unsafe {
@@ -33,10 +44,10 @@ pub unsafe extern "C" fn care_setup(my_addr: *const c_char, others: *const *cons
             .collect();
         others
     }) else {
-        return 2;
+        return 4;
     };
-    let Ok(engine) = setup_engine(my_addr, &others) else {
-        return 3;
+    let Ok(engine) = SpdzEngine::spdz(my_addr, &others, &mut file) else {
+        return 5;
     };
     *ENGINE.lock().unwrap() = Some(engine);
     0
@@ -52,7 +63,7 @@ pub extern "C" fn care_sum(a: f64) -> f64 {
     let result = panic::catch_unwind(|| {
         let engine = &mut ENGINE.lock().unwrap();
         let engine = engine.as_mut().unwrap();
-        mpc_sum(engine, &[a])
+        engine.mpc_sum(&[a])
     });
     let Ok(result) = result else {
         return f64::NAN;
@@ -76,7 +87,7 @@ pub unsafe extern "C" fn care_sum_many(buf: *const f64, des: *mut f64, len: usiz
     let result = panic::catch_unwind(|| {
         let engine = &mut ENGINE.lock().unwrap();
         let engine = engine.as_mut().unwrap();
-        mpc_sum(engine, input)
+        engine.mpc_sum(input)
     });
     let Ok(res) = result else {
         return -1;

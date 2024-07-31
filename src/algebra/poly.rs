@@ -47,7 +47,7 @@ impl<G: Field> Polynomial<G> {
 impl<G: Send + Sync> Polynomial<G> {
     pub fn degree(&self) -> usize {
         // a0 + a1x1 is degree(1)
-        self.0.len() - 1
+        self.0.size() - 1
     }
 }
 
@@ -101,7 +101,7 @@ impl<
 {
     pub fn mult(&self, other: &Self) -> Polynomial<F> {
         // degree is length - 1.
-        let n = self.0.len() + other.0.len();
+        let n = self.0.size() + other.0.size();
         let iter = self
             .0
             .iter()

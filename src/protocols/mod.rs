@@ -1,4 +1,5 @@
 pub mod beaver;
 pub mod cointoss;
-mod cutnchoose;
+pub mod commitments;
 mod rand;
+pub mod voting;

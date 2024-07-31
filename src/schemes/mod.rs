@@ -56,6 +56,7 @@ pub trait Shared:
     + serde::Serialize
     + serde::de::DeserializeOwned
     + Clone
+    + Send
     + Sync
 {
     /// The context needed to use the scheme.
@@ -117,8 +118,8 @@ pub trait Shared:
     }
 }
 
-
-
+// NOTE: Not used currently.
+//
 /// Support for multiplication of two shares for producing a share.
 ///
 /// Note, that this is different to beaver multiplication as it does not require
@@ -145,8 +146,10 @@ pub trait InteractiveMult: Shared {
 pub mod interactive {
     use thiserror::Error;
 
-    use crate::net::Tuneable;
-
+    use crate::{
+        algebra::math::Vector,
+        net::{Communicate, Tuneable},
+    };
 
     #[derive(Debug, Error)]
     #[error("Communication failure: {0}")]
@@ -155,49 +158,61 @@ pub mod interactive {
         fn new(e: impl Error + Send + 'static) -> Self {
             Self(Box::new(e))
         }
-
     }
 
     use super::*;
-    impl<S, V, C> InteractiveShared for S where S: Shared<Value = V, Context = C> + Send, V: Send + Clone, C: Send + Sync + Clone  {
+    impl<S, V, Ctx> InteractiveShared for S
+    where
+        S: Shared<Value = V, Context = Ctx> + Send,
+        V: Send + Clone,
+        Ctx: Send + Sync + Clone,
+    {
         type Context = S::Context;
         type Value = V;
         type Error = CommunicationError;
 
         async fn share(
-            ctx: &Self::Context,
+            ctx: &mut Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             mut coms: impl Communicate,
         ) -> Result<Self, Self::Error> {
             let shares = S::share(ctx, secret, rng);
             let my_share = shares[coms.id()].clone();
-            coms.unicast(&shares).await.map_err(CommunicationError::new)?;
+            coms.unicast(&shares)
+                .await
+                .map_err(CommunicationError::new)?;
             Ok(my_share)
         }
 
         async fn recombine(
-            ctx: &Self::Context,
+            ctx: &mut Self::Context,
             secret: Self,
             mut coms: impl Communicate,
         ) -> Result<V, Self::Error> {
-            let shares = coms.symmetric_broadcast(secret).await.map_err(CommunicationError::new)?;
-            Ok(Shared::recombine(ctx, &shares).unwrap())
+            let shares = coms
+                .symmetric_broadcast(secret)
+                .await
+                .map_err(CommunicationError::new)?;
+            Ok(Shared::recombine(&*ctx, &shares).unwrap())
         }
 
         async fn symmetric_share(
-            ctx: &Self::Context,
+            ctx: &mut Self::Context,
             secret: Self::Value,
             rng: impl RngCore + Send,
             mut coms: impl Communicate,
         ) -> Result<Vec<Self>, Self::Error> {
             let shares = S::share(ctx, secret, rng);
-            let shared = coms.symmetric_unicast(shares).await.map_err(CommunicationError::new)?;
+            let shared = coms
+                .symmetric_unicast(shares)
+                .await
+                .map_err(CommunicationError::new)?;
             Ok(shared)
         }
 
         async fn receive_share(
-            _ctx: &Self::Context,
+            _ctx: &mut Self::Context,
             mut coms: impl Communicate,
             from: usize,
         ) -> Result<Self, Self::Error> {
@@ -207,7 +222,6 @@ pub mod interactive {
         }
     }
 
-
     pub trait InteractiveShared:
         Sized
         + Add<Output = Self>
@@ -216,44 +230,151 @@ pub mod interactive {
         + serde::de::DeserializeOwned
         + Clone
         + Sync
-        {
-            type Context: Sync + Send + Clone;
-            type Value: Clone + Send;
-            type Error: Send + Sized + 'static;
+    {
+        type Context: Sync + Send;
+        type Value: Clone + Send;
+        type Error: Send + Sized + Error + 'static;
 
-            fn share(
-                ctx: &Self::Context,
-                secret: Self::Value,
-                rng: impl RngCore + Send,
-                coms: impl Communicate,
-            ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
+        // Note: Not sure if ctx should be passed as a move or as a mutable reference.
+        // Some schemes require bookkeeping (spdz) so we need the mutability.
+        // Another method could be to swap Context and Share<_>,
+        // however that would probably just result in the same issues.
+        fn share(
+            ctx: &mut Self::Context,
+            secret: Self::Value,
+            rng: impl RngCore + Send,
+            coms: impl Communicate,
+        ) -> impl std::future::Future<Output = Result<Self, Self::Error>> + Send;
 
-            fn symmetric_share(
-                ctx: &Self::Context,
-                secret: Self::Value,
-                rng: impl RngCore + Send,
-                coms: impl Communicate,
-            ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>>;
+        fn symmetric_share(
+            ctx: &mut Self::Context,
+            secret: Self::Value,
+            rng: impl RngCore + Send,
+            coms: impl Communicate,
+        ) -> impl std::future::Future<Output = Result<Vec<Self>, Self::Error>> + Send;
 
-            fn receive_share(
-                ctx: &Self::Context,
-                coms: impl Communicate,
-                from: usize,
-            ) -> impl std::future::Future<Output = Result<Self, Self::Error>>;
+        fn receive_share(
+            ctx: &mut Self::Context,
+            coms: impl Communicate,
+            from: usize,
+        ) -> impl std::future::Future<Output = Result<Self, Self::Error>> + Send;
 
-            fn recombine(
-                ctx: &Self::Context,
-                secrets: Self,
-                coms: impl Communicate,
-            ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>>;
+        fn recombine(
+            ctx: &mut Self::Context,
+            secrets: Self,
+            coms: impl Communicate,
+        ) -> impl std::future::Future<Output = Result<Self::Value, Self::Error>> + Send;
+    }
+
+    pub trait InteractiveSharedMany: InteractiveShared {
+        type VectorShare;
+
+        fn share_many(
+            ctx: &mut Self::Context,
+            secrets: &[Self::Value],
+            rng: impl RngCore + Send,
+            coms: impl Communicate,
+        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>> + Send;
+
+        fn symmetric_share_many(
+            ctx: &mut Self::Context,
+            secrets: &[Self::Value],
+            rng: impl RngCore + Send,
+            coms: impl Communicate,
+        ) -> impl std::future::Future<Output = Result<Vec<Self::VectorShare>, Self::Error>> + Send;
+
+        fn receive_share_many(
+            ctx: &mut Self::Context,
+            coms: impl Communicate,
+            from: usize,
+        ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>> + Send;
+
+        fn recombine_many(
+            ctx: &mut Self::Context,
+            secrets: Self::VectorShare,
+            coms: impl Communicate,
+        ) -> impl std::future::Future<Output = Result<Vector<Self::Value>, Self::Error>> + Send;
+    }
+
+    // TODO: Consider using specialized SharedMany instead.
+    impl<S, V, Ctx> InteractiveSharedMany for S
+    where
+        S: InteractiveShared<Error = CommunicationError, Value = V, Context = Ctx>
+            + Shared<Value = V, Context = Ctx>
+            + Send,
+        V: Send + Sync + Clone,
+        Ctx: Send + Sync,
+    {
+        type VectorShare = Vector<S>;
+
+        async fn share_many(
+            ctx: &mut Self::Context,
+            secrets: &[Self::Value],
+            rng: impl RngCore + Send,
+            mut coms: impl Communicate,
+        ) -> Result<Self::VectorShare, Self::Error> {
+            let shares = S::share_many(&*ctx, secrets, rng);
+            let my_share = shares[coms.id()].clone();
+            coms.unicast(&shares)
+                .await
+                .map_err(CommunicationError::new)?;
+            Ok(my_share.into())
         }
+
+        async fn symmetric_share_many(
+            ctx: &mut Self::Context,
+            secrets: &[Self::Value],
+            rng: impl RngCore + Send,
+            mut coms: impl Communicate,
+        ) -> Result<Vec<Self::VectorShare>, Self::Error> {
+            let shares: Vec<Vector<Self>> = S::share_many(&*ctx, secrets, rng)
+                .into_iter()
+                .map(|v| v.into())
+                .collect();
+            let shared = coms
+                .symmetric_unicast(shares)
+                .await
+                .map_err(CommunicationError::new)?;
+            Ok(shared)
+        }
+
+        async fn receive_share_many(
+            _ctx: &mut Self::Context,
+            mut coms: impl Communicate,
+            from: usize,
+        ) -> Result<Self::VectorShare, Self::Error> {
+            let s = Tuneable::recv_from(&mut coms, from).await;
+            let s = s.map_err(CommunicationError::new)?;
+            Ok(s)
+        }
+
+        async fn recombine_many(
+            ctx: &mut Self::Context,
+            secrets: Self::VectorShare,
+            mut coms: impl Communicate,
+        ) -> Result<Vector<Self::Value>, Self::Error> {
+            let shares = coms
+                .symmetric_broadcast(secrets)
+                .await
+                .map_err(CommunicationError::new)?;
+            let res: Vector<Self::Value> = Shared::recombine_many(&*ctx, &shares)
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect(); // TODO: Proper errors
+            Ok(res)
+        }
+    }
 }
 
 pub trait Verify: Sized {
     type Args: Send;
 
-    fn verify(&self, coms: impl Communicate, args: Self::Args) -> impl Future<Output = bool> + Send;
+    fn verify(&self, coms: impl Communicate, args: Self::Args)
+        -> impl Future<Output = bool> + Send;
 
-    fn verify_many(batch: &[Self], coms: impl Communicate, args: Self::Args) -> impl Future<Output = Vec<bool>> + Send;
+    fn verify_many(
+        batch: &[Self],
+        coms: impl Communicate,
+        args: Self::Args,
+    ) -> impl Future<Output = Vec<bool>> + Send;
 }
-
