@@ -94,14 +94,11 @@ impl<F> Sub for Exp<F> {
 
 #[cfg(test)]
 mod test {
-    use rand::SeedableRng;
-
     use crate::{
-        algebra,
-        net::network::InMemoryNetwork,
-        protocols::beaver,
+        algebra::{self, element::Element32},
+        net::Id,
         testing::{self, Cluster},
-        vm::{parsing::Exp, Engine},
+        vm::parsing::Exp,
     };
 
     type F = algebra::element::Element32;
@@ -109,26 +106,21 @@ mod test {
 
     #[tokio::test]
     async fn addition() {
-        async fn program(net: InMemoryNetwork, input: impl Into<F>) -> F {
-            let me = net.id();
-
-            let script = {
-                let [a, b, c] = Exp::share_or_receive(input, me);
-
-                let sum = a + b + c;
-                let res = sum.open();
-                res.finalize()
-            };
-            let ctx = Share::new_context(me, 3);
-            let rng = rand::rngs::StdRng::from_entropy();
-
-            let mut engine = Engine::<_, Share, _>::new(ctx, net, rng);
-            engine.execute(&script).await
-        }
-
+        let inputs = [3, 7, 13u32];
         let res = Cluster::new(3)
-            .with_args([3u32, 7, 13])
-            .run_with_args(program)
+            .with_args(
+                (0..3)
+                    .map(|id| {
+                        let me = Id(id);
+                        type E = Exp<Element32>;
+                        let [a, b, c] = E::share_or_receive(inputs[id], me);
+                        let sum = a + b + c;
+                        let res = sum.open();
+                        res.finalize()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .execute_mock()
             .await
             .unwrap();
 
@@ -137,31 +129,21 @@ mod test {
 
     #[tokio::test]
     async fn multiplication() {
-        async fn program(net: InMemoryNetwork, input: impl Into<F>) -> F {
-            let me = net.id();
-
-            let script = {
-                let [a, b, c] = Exp::share_or_receive(input, me);
-
-                let sum = a * b * c;
-                let res = sum.open();
-                res.finalize()
-            };
-            let ctx = Share::new_context(me, 3);
-            let rng = rand::rngs::StdRng::from_entropy();
-
-            let net = net.tap(format!("Party {me:?}"));
-            let mut engine = Engine::<_, Share, _>::new(ctx, net, rng);
-
-            let seeded_rng = rand::rngs::StdRng::seed_from_u64(7);
-            let mut fueltanks = beaver::BeaverTriple::fake_many(&ctx, seeded_rng, 2);
-            engine.add_fuel(&mut fueltanks[me.0]);
-            engine.execute(&script).await
-        }
-
+        let inputs = [1, 2, 3u32];
         let res = Cluster::new(3)
-            .with_args([1u32, 2, 3])
-            .run_with_args(program)
+            .with_args(
+                (0..3)
+                    .map(|id| {
+                        let me = Id(id);
+                        type E = Exp<Element32>;
+                        let [a, b, c] = E::share_or_receive(inputs[id], me);
+                        let sum = a * b * c;
+                        let res = sum.open();
+                        res.finalize()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .execute_mock()
             .await
             .unwrap();
 
