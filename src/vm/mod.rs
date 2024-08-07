@@ -4,7 +4,7 @@ use rand::RngCore;
 
 use crate::{
     algebra::field::Field,
-    net::{network::Network, SplitChannel},
+    net::{network::Network, Id, SplitChannel},
     protocols::beaver::{beaver_multiply, BeaverTriple},
     schemes::interactive::{InteractiveShared, InteractiveSharedMany},
 };
@@ -12,7 +12,7 @@ use crate::{
 pub enum Instruction<F> {
     Share(F),
     SymShare(F),
-    Recv(usize),
+    Recv(Id),
     Recombine,
     Add,
     MulCon(F),
@@ -129,7 +129,7 @@ mod tests {
 
     use crate::{
         algebra::{self, element::Element32},
-        net::{agency::Broadcast, connection::DuplexConnection, network::InMemoryNetwork},
+        net::{agency::Broadcast, connection::DuplexConnection, network::InMemoryNetwork, Id},
         testing::{self, mock},
         vm::{Engine, Instruction},
     };
@@ -140,7 +140,7 @@ mod tests {
     {
         let context = mock::Context {
             all_parties: network.size(),
-            me: network.index,
+            me: network.id(),
         };
 
         let rng = StepRng::new(42, 7);
@@ -181,13 +181,13 @@ mod tests {
         use Instruction::{Add, Recombine, Recv, Share};
         let a = Element32::from(42u32);
         let a = crate::vm::Script(vec![
-            Share(a),  // +1
-            Recv(1),   // +1
-            Add,       // -1
-            Recombine, // -1
+            Share(a),    // +1
+            Recv(Id(1)), // +1
+            Add,         // -1
+            Recombine,   // -1
         ]);
         let b = Element32::from(57u32);
-        let b = crate::vm::Script(vec![Recv(0), Share(b), Add, Recombine]);
+        let b = crate::vm::Script(vec![Recv(Id(0)), Share(b), Add, Recombine]);
         let results = testing::Cluster::new(2)
             .with_args([a, b])
             .run_with_args(|net, script| async move {

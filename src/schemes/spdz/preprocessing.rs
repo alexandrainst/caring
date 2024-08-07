@@ -1,6 +1,9 @@
 // Preprocessing
 
-use crate::schemes::spdz::{self, SpdzContext};
+use crate::{
+    net::Id,
+    schemes::spdz::{self, SpdzContext},
+};
 use bincode;
 use ff::PrimeField;
 use rand::SeedableRng;
@@ -128,7 +131,7 @@ pub fn dealer_preproc<F: PrimeField + serde::Serialize + serde::de::DeserializeO
         .map(|_| F::random(&mut rng))
         .collect();
     let mut contexts: Vec<SpdzContext<F>> = (0..number_of_parties)
-        .map(|i| SpdzContext::empty(number_of_parties, mac_keys[i], i))
+        .map(|i| SpdzContext::empty(number_of_parties, mac_keys[i], Id(i)))
         .collect();
     let mac_key = mac_keys.into_iter().sum();
 
@@ -245,7 +248,7 @@ pub fn dealer_preproc<F: PrimeField + serde::Serialize + serde::de::DeserializeO
 }
 
 impl<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned> SpdzContext<F> {
-    fn empty(number_of_parties: usize, mac_key_share: F, who_am_i: usize) -> Self {
+    fn empty(number_of_parties: usize, mac_key_share: F, who_am_i: Id) -> Self {
         generate_empty_context(number_of_parties, mac_key_share, who_am_i)
     }
 
@@ -257,7 +260,7 @@ impl<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned> SpdzContext
 fn generate_empty_context<F: PrimeField>(
     number_of_parties: usize,
     mac_key_share: F,
-    who_am_i: usize,
+    who_am_i: Id,
 ) -> SpdzContext<F> {
     let rand_known_to_i = RandomKnownToPi {
         shares: vec![vec![]; number_of_parties],

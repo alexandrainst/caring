@@ -222,7 +222,7 @@ mod test {
     use super::*;
     use crate::{
         algebra::element::Element32,
-        net::network::InMemoryNetwork,
+        net::{network::InMemoryNetwork, Id},
         schemes::shamir::{self, ShamirParams},
         testing::mock,
     };
@@ -230,11 +230,12 @@ mod test {
     #[test]
     fn fake_shares() {
         type Share = mock::Share<Element32>;
-        let ctx = Share::new_context(1, 3);
+        let ctx = Share::new_context(Id(1), 3);
         let mut rng = rand::rngs::mock::StepRng::new(7, 32);
         let triples_set = BeaverTriple::<Share>::fake_many(&ctx, &mut rng, 7);
         for (i, triples) in triples_set.into_iter().enumerate() {
             for triple in triples {
+                let i = Id(i);
                 assert_eq!(triple.shares.0.issued_to, i);
                 assert_eq!(triple.shares.1.issued_to, i);
                 assert_eq!(triple.shares.2.issued_to, i);

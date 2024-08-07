@@ -6,7 +6,7 @@ use rand::RngCore;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    net::Communicate,
+    net::{Communicate, Id},
     schemes::{interactive::InteractiveShared, Shared, Verify},
 };
 
@@ -77,7 +77,7 @@ impl<S: InteractiveShared> Unverified<S> {
     pub async fn receive_share(
         ctx: &mut S::Context,
         coms: impl Communicate,
-        from: usize,
+        from: Id,
     ) -> Result<Self, S::Error> {
         let s = S::receive_share(ctx, coms, from).await?;
         Ok(Self(s))
@@ -206,7 +206,7 @@ mod test {
     fn serdede() {
         let ctx = mock::Context {
             all_parties: 1,
-            me: 0,
+            me: Id(0),
         };
         let mut rng = rngs::mock::StepRng::new(0, 0);
         let s = <mock::Share<Mod11> as Shared>::share(&ctx, Mod11(3), &mut rng);
