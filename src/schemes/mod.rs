@@ -28,7 +28,7 @@ pub mod spdz;
 use std::{
     error::Error,
     future::Future,
-    ops::{Add, Sub},
+    ops::{Add, Mul, Sub},
 };
 
 use rand::RngCore;
@@ -53,6 +53,7 @@ pub trait Shared:
     Sized
     + Add<Output = Self>
     + Sub<Output = Self>
+    + Mul<Self::Value, Output = Self>
     + serde::Serialize
     + serde::de::DeserializeOwned
     + Clone
@@ -152,6 +153,8 @@ pub trait SharedMany: Shared {
 }
 
 pub mod interactive {
+    use std::ops::Mul;
+
     use thiserror::Error;
 
     use crate::{
@@ -242,6 +245,7 @@ pub mod interactive {
         Sized
         + Add<Output = Self>
         + Sub<Output = Self>
+        + Mul<Self::Value, Output = Self>
         + serde::Serialize
         + serde::de::DeserializeOwned
         + Clone
