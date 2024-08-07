@@ -1,6 +1,6 @@
 use std::{error::Error, future::Future};
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use tokio_util::bytes::{Bytes, BytesMut};
 
@@ -58,7 +58,7 @@ pub trait RecvBytes: Send {
     ) -> impl Future<Output = Result<T, ReceiverError<Self::RecvError>>> + Send {
         async {
             let msg = self.recv_bytes().await?;
-            bincode::deserialize(&msg).map_err(|e| ReceiverError::BadSerialization(e))
+            bincode::deserialize(&msg).map_err(ReceiverError::BadSerialization)
         }
     }
 }
@@ -99,20 +99,23 @@ impl<'a, C: SplitChannel> SplitChannel for &'a mut C {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub struct Id(pub usize);
+
 /// Tune to a specific channel
 pub trait Tuneable {
     type TuningError: Error + Send + 'static;
 
-    fn id(&self) -> usize;
+    fn id(&self) -> Id;
 
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
-        idx: usize,
+        id: Id,
     ) -> impl Future<Output = Result<T, Self::TuningError>> + Send;
 
     fn send_to<T: serde::Serialize + Sync>(
         &mut self,
-        idx: usize,
+        id: Id,
         msg: &T,
     ) -> impl Future<Output = Result<(), Self::TuningError>> + Send;
 }
@@ -120,23 +123,23 @@ pub trait Tuneable {
 impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
     type TuningError = R::TuningError;
 
-    fn id(&self) -> usize {
+    fn id(&self) -> Id {
         (**self).id()
     }
 
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
-        idx: usize,
+        id: Id,
     ) -> impl Future<Output = Result<T, Self::TuningError>> + Send {
-        (**self).recv_from(idx)
+        (**self).recv_from(id)
     }
 
     fn send_to<T: serde::Serialize + Sync>(
         &mut self,
-        idx: usize,
+        id: Id,
         msg: &T,
     ) -> impl Future<Output = Result<(), Self::TuningError>> + Send {
-        (**self).send_to(idx, msg)
+        (**self).send_to(id, msg)
     }
 }
 

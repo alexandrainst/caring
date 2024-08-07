@@ -2,12 +2,12 @@ use std::env::Args;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::net::Communicate;
+use crate::net::{Communicate, Id};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Proposal<T> {
     initative: T,
-    creator: usize,
+    creator: Id,
 }
 
 pub trait Initiative: Serialize + DeserializeOwned + Sync {

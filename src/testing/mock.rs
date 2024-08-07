@@ -1,13 +1,13 @@
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{algebra::field::Field, schemes::Shared};
+use crate::{algebra::field::Field, net::Id, schemes::Shared};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Share<F> {
     pub value: F,
-    pub issued_to: usize,
-    pub issued_by: Option<usize>,
+    pub issued_to: Id,
+    pub issued_by: Option<Id>,
 }
 
 impl<F: Field> std::ops::Add for Share<F> {
@@ -48,7 +48,7 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
 }
 
 impl<F> Share<F> {
-    pub fn new_context(id: usize, total_parties: usize) -> Context {
+    pub fn new_context(id: Id, total_parties: usize) -> Context {
         Context {
             all_parties: total_parties,
             me: id,
@@ -59,7 +59,7 @@ impl<F> Share<F> {
 #[derive(Clone, Copy)]
 pub struct Context {
     pub all_parties: usize,
-    pub me: usize,
+    pub me: Id,
 }
 
 impl Context {
@@ -75,13 +75,13 @@ pub fn assert_holding_same<F>(shares: &[Share<F>]) {
     );
 }
 
-pub fn assert_holded_by<F>(shares: impl IntoIterator<Item = Share<F>>, party: usize) {
+pub fn assert_holded_by<F>(shares: impl IntoIterator<Item = Share<F>>, party: Id) {
     let val = shares
         .into_iter()
         .map(|s| s.issued_to)
         .all_equal_value()
         .expect("Not all values were the same");
-    assert_eq!(val, party, "Shares not issued to party {party}");
+    assert_eq!(val, party, "Shares not issued to party {party:?}");
 }
 
 impl<F: Field + Serialize + DeserializeOwned + PartialEq + Send + Sync> Shared for Share<F> {
@@ -97,7 +97,7 @@ impl<F: Field + Serialize + DeserializeOwned + PartialEq + Send + Sync> Shared f
         (0..ctx.all_parties)
             .map(|i| Share {
                 value: secret,
-                issued_to: i,
+                issued_to: Id(i),
                 issued_by: Some(ctx.me),
             })
             .collect()
@@ -106,7 +106,7 @@ impl<F: Field + Serialize + DeserializeOwned + PartialEq + Send + Sync> Shared f
     fn recombine(_ctx: &Self::Context, shares: &[Self]) -> Option<Self::Value> {
         let mut all_is_well = true;
         for (i, share) in shares.iter().enumerate() {
-            all_is_well &= share.issued_to == i
+            all_is_well &= share.issued_to.0 == i
         }
 
         if !all_is_well {

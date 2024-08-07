@@ -1,4 +1,4 @@
-use crate::net::{Channel, Communicate, ReceiverError, RecvBytes, SendBytes};
+use crate::net::{Channel, Communicate, Id, ReceiverError, RecvBytes, SendBytes};
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 
 use futures::future::join_all;
@@ -38,7 +38,7 @@ pub struct Network<C: SplitChannel> {
     // We could also insert a 'fake' Connection into the set for the representation of ourselves.
     // However that is probably a less efficient, if nicer, abstraction.
     pub(crate) connections: Vec<C>,
-    pub index: usize,
+    pub(crate) index: usize,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -53,19 +53,33 @@ type NetResult<T, C: Channel> = std::result::Result<T, NetworkError<C::RecvError
 
 // PERFORMANCE: serialize in network once when broadcasting.
 impl<C: SplitChannel> Network<C> {
-    pub(crate) fn id_to_index(&self, index: usize) -> usize {
+    pub(crate) fn id_to_index(&self, Id(id): Id) -> usize {
         let n = self.connections.len() + 1;
-        if index < self.index {
-            index
-        } else if index == self.index {
+        if id < self.index {
+            id
+        } else if id == self.index {
             // You probably didn't mean to do that.
-            panic!("Trying to reference self connection, id = {index}")
-        } else if index < n {
-            index - 1
+            panic!("Trying to reference self connection, id = {id}")
+        } else if id < n {
+            id - 1
         } else {
             // Out of bounds
-            panic!("Only {n} in network, but referenced id = {index}")
+            panic!("Only {n} in network, but referenced id = {id}")
         }
+    }
+
+    pub fn id(&self) -> Id {
+        Id(self.index)
+    }
+
+    pub fn prev_neighbour(&self) -> Id {
+        let n = self.connections.len();
+        Id((self.index + n - 1) % n)
+    }
+
+    pub fn next_neighbour(&self) -> Id {
+        let n = self.connections.len();
+        Id((self.index + n + 1) % n)
     }
 
     /// Broadcast a message to all other parties.
@@ -398,9 +412,9 @@ impl<C: SplitChannel> Broadcast for Network<C> {
 
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
-        idx: usize,
+        id: Id,
     ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send {
-        Tuneable::recv_from(self, idx)
+        Tuneable::recv_from(self, id)
     }
 
     fn size(&self) -> usize {
@@ -411,15 +425,15 @@ impl<C: SplitChannel> Broadcast for Network<C> {
 impl<C: SplitChannel> Tuneable for Network<C> {
     type TuningError = NetworkError<C::RecvError, C::SendError>;
 
-    fn id(&self) -> usize {
-        self.index
+    fn id(&self) -> Id {
+        self.id()
     }
 
     async fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
-        idx: usize,
+        id: Id,
     ) -> Result<T, Self::TuningError> {
-        let idx = self.id_to_index(idx);
+        let idx = self.id_to_index(id);
         self.connections[idx]
             .recv()
             .await
@@ -431,10 +445,10 @@ impl<C: SplitChannel> Tuneable for Network<C> {
 
     async fn send_to<T: serde::Serialize + Sync>(
         &mut self,
-        idx: usize,
+        id: Id,
         msg: &T,
     ) -> Result<(), Self::TuningError> {
-        let idx = self.id_to_index(idx);
+        let idx = self.id_to_index(id);
         self.connections[idx]
             .send(msg)
             .await

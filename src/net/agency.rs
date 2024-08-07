@@ -59,7 +59,7 @@ pub trait Broadcast: Send {
     /// Returns: a message from the given party or an error
     fn recv_from<T: serde::de::DeserializeOwned + Send>(
         &mut self,
-        idx: usize,
+        id: Id,
     ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send;
 
     /// Size of the broadcasting network including yourself,
@@ -89,9 +89,9 @@ impl<'a, B: Broadcast> Broadcast for &'a mut B {
 
     fn recv_from<T: serde::de::DeserializeOwned + Send>(
         &mut self,
-        idx: usize,
+        id: Id,
     ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send {
-        (**self).recv_from(idx)
+        (**self).recv_from(id)
     }
 
     fn size(&self) -> usize {
@@ -175,6 +175,8 @@ impl<'a, U: Unicast> Unicast for &'a mut U {
 
 use digest::Digest;
 use tracing::{event, Level};
+
+use crate::net::Id;
 
 pub struct VerifiedBroadcast<B: Broadcast, D: Digest>(B, PhantomData<D>);
 
@@ -292,7 +294,7 @@ impl<B: Broadcast, D: Digest> VerifiedBroadcast<B, D> {
     #[tracing::instrument(skip_all)]
     pub async fn recv_from<T>(
         &mut self,
-        party: usize,
+        party: Id,
     ) -> Result<T, BroadcastVerificationError<B::BroadcastError>>
     where
         T: serde::de::DeserializeOwned,
@@ -369,9 +371,9 @@ impl<B: Broadcast, D: Digest + Send> Broadcast for VerifiedBroadcast<B, D> {
 
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
-        idx: usize,
+        id: Id,
     ) -> impl Future<Output = Result<T, Self::BroadcastError>> + Send {
-        self.recv_from(idx)
+        self.recv_from(id)
     }
 
     fn size(&self) -> usize {
@@ -451,12 +453,12 @@ mod test {
 
         let t2 = async {
             let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n2);
-            let resp: String = vb.recv_from(0).await.unwrap();
+            let resp: String = vb.recv_from(Id(0)).await.unwrap();
             assert_eq!(resp, "Hello everyone!");
         };
         let t3 = async {
             let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n3);
-            let resp: String = vb.recv_from(0).await.unwrap();
+            let resp: String = vb.recv_from(Id(0)).await.unwrap();
             assert_eq!(resp, "Hello everyone!");
         };
 
@@ -473,12 +475,12 @@ mod test {
 
         let t1 = async {
             let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n1);
-            vb.recv_from::<String>(2).await
+            vb.recv_from::<String>(Id(2)).await
         };
 
         let t2 = async {
             let mut vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n2);
-            vb.recv_from::<String>(2).await
+            vb.recv_from::<String>(Id(2)).await
         };
         let t3 = async {
             let vb = VerifiedBroadcast::<_, sha2::Sha256>::new(n3);
@@ -493,8 +495,8 @@ mod test {
             net.broadcast(&hash).await.unwrap();
             net.symmetric_broadcast(hash).await.unwrap();
             // fake broadcast
-            net.send_to(0, &s0).await.unwrap();
-            net.send_to(1, &s1).await.unwrap();
+            net.send_to(Id(0), &s0).await.unwrap();
+            net.send_to(Id(1), &s1).await.unwrap();
             let _ = net.symmetric_broadcast(true).await.unwrap();
         };
 

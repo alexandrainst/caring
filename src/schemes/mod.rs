@@ -156,7 +156,7 @@ pub mod interactive {
 
     use crate::{
         algebra::math::Vector,
-        net::{Communicate, Tuneable},
+        net::{Communicate, Id, Tuneable},
     };
 
     #[derive(Debug, Error)]
@@ -194,7 +194,7 @@ pub mod interactive {
             mut coms: impl Communicate,
         ) -> Result<Self, Self::Error> {
             let mut shares = S::share(ctx, secret, rng);
-            let my_share = shares.remove(coms.id());
+            let my_share = shares.remove(coms.id().0);
             coms.unicast(&shares)
                 .await
                 .map_err(CommunicationError::new)?;
@@ -230,7 +230,7 @@ pub mod interactive {
         async fn receive_share(
             _ctx: &mut Self::Context,
             mut coms: impl Communicate,
-            from: usize,
+            from: Id,
         ) -> Result<Self, Self::Error> {
             let s = Tuneable::recv_from(&mut coms, from).await;
             let s = s.map_err(CommunicationError::new)?;
@@ -268,7 +268,7 @@ pub mod interactive {
         fn receive_share(
             ctx: &mut Self::Context,
             coms: impl Communicate,
-            from: usize,
+            from: Id,
         ) -> impl std::future::Future<Output = Result<Self, Self::Error>> + Send;
 
         fn recombine(
@@ -298,7 +298,7 @@ pub mod interactive {
         fn receive_share_many(
             ctx: &mut Self::Context,
             coms: impl Communicate,
-            from: usize,
+            from: Id,
         ) -> impl std::future::Future<Output = Result<Self::VectorShare, Self::Error>> + Send;
 
         fn recombine_many(
@@ -325,7 +325,7 @@ pub mod interactive {
             mut coms: impl Communicate,
         ) -> Result<Self::VectorShare, Self::Error> {
             let shares = S::share_many(&*ctx, secrets, rng);
-            let my_share = shares[coms.id()].clone();
+            let my_share = shares[coms.id().0].clone();
             coms.unicast(&shares)
                 .await
                 .map_err(CommunicationError::new)?;
@@ -349,7 +349,7 @@ pub mod interactive {
         async fn receive_share_many(
             _ctx: &mut Self::Context,
             mut coms: impl Communicate,
-            from: usize,
+            from: Id,
         ) -> Result<Self::VectorShare, Self::Error> {
             let s = Tuneable::recv_from(&mut coms, from).await;
             let s = s.map_err(CommunicationError::new)?;
