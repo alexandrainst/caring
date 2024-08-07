@@ -303,7 +303,6 @@ impl<F: Field + DeserializeOwned + Serialize> SharedMany for Share<F> {
 
 /// A secret shared vector
 ///
-/// * `x`: the id
 /// * `ys`: share values
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct VecShare<F: Field> {
@@ -365,6 +364,15 @@ impl<F: Field> std::ops::Sub<&Self> for VecShare<F> {
         let a = self.ys;
         let b = &rhs.ys;
         let ys: Vector<_> = a - b;
+        VecShare { ys }
+    }
+}
+
+impl<F: Field> std::ops::Mul<Vec<F>> for VecShare<F> {
+    type Output = Self;
+
+    fn mul(self, rhs: Vec<F>) -> Self::Output {
+        let ys = self.ys.into_iter().zip(rhs).map(|(a, c)| a * c).collect();
         VecShare { ys }
     }
 }

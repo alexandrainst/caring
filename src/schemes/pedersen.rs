@@ -106,7 +106,11 @@ pub struct PedersenContext<F: Field, G: Group> {
 impl<F, G> Shared for VerifiableShare<F, G>
 where
     F: Field + Serialize + DeserializeOwned,
-    G: Group + Serialize + DeserializeOwned + std::ops::Mul<F, Output = G>,
+    G: Group
+        + Serialize
+        + DeserializeOwned
+        + std::ops::Mul<F, Output = G>
+        + for<'a> std::ops::MulAssign<&'a F>,
 {
     type Context = PedersenContext<F, G>;
 

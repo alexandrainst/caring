@@ -2,7 +2,13 @@
 pub mod mock;
 pub mod tapping;
 
-use crate::net::network::InMemoryNetwork;
+use crate::{
+    algebra::{element::Element32, field::Field},
+    net::{agency::Broadcast, connection::DuplexConnection, network::InMemoryNetwork},
+    schemes::interactive::InteractiveShared,
+    vm::{Engine, Script},
+};
+use rand::rngs::mock::StepRng;
 use std::future::Future;
 use tokio::task::JoinError;
 
@@ -62,6 +68,14 @@ impl Cluster {
 }
 
 impl<Arg> Cluster<Arg> {
+    pub fn more_args<B>(self, args: impl Into<Vec<B>>) -> Cluster<(Arg, B)> {
+        let args: Vec<_> = self.args.into_iter().zip(args.into()).collect();
+        Cluster {
+            players: self.players,
+            args,
+        }
+    }
+
     /// Run a cluster with arguments
     ///
     /// # Example
@@ -94,6 +108,22 @@ impl<Arg> Cluster<Arg> {
             .await
             .into_iter()
             .collect()
+    }
+}
+
+impl Cluster<Script<Element32>> {
+    pub async fn execute_mock(self) -> Result<Vec<Element32>, JoinError> {
+        self.run_with_args(|network, script| async move {
+            type S = mock::Share<Element32>;
+            let context = mock::Context {
+                all_parties: network.size(),
+                me: network.id(),
+            };
+            let rng = StepRng::new(42, 7 + network.id().0 as u64);
+            let mut engine = Engine::<_, S, _>::new(context, network, rng);
+            engine.execute(&script).await
+        })
+        .await
     }
 }
 

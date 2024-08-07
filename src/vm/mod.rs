@@ -39,7 +39,7 @@ pub struct Engine<C: SplitChannel, S: InteractiveShared, R> {
 impl<C, S, R, F> Engine<C, S, R>
 where
     C: SplitChannel,
-    S: InteractiveShared<Value = F> + std::ops::Mul<F, Output = S>,
+    S: InteractiveShared<Value = F>,
     R: RngCore + Send,
     F: Field,
 {

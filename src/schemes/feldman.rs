@@ -15,7 +15,7 @@
 use std::{
     borrow::Borrow,
     iter,
-    ops::{self, Mul},
+    ops::{self, Mul, MulAssign},
 };
 
 use crate::{
@@ -142,7 +142,11 @@ where
 
 impl<
         F: ff::Field + serde::Serialize + serde::de::DeserializeOwned,
-        G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>,
+        G: Group
+            + serde::Serialize
+            + serde::de::DeserializeOwned
+            + std::ops::Mul<F, Output = G>
+            + for<'a> std::ops::MulAssign<&'a F>,
     > super::Shared for VerifiableShare<F, G>
 {
     type Context = ShamirParams<F>;
@@ -190,6 +194,19 @@ impl<F: Field, G: Group> ops::Sub for VerifiableShare<F, G> {
             share: self.share - rhs.share,
             poly: Polynomial(self.poly.0 - rhs.poly.0),
         }
+    }
+}
+
+impl<F: Field, G: Group> ops::Mul<F> for VerifiableShare<F, G>
+where
+    Vector<G>: for<'a> MulAssign<&'a F>,
+{
+    type Output = Self;
+
+    fn mul(mut self, rhs: F) -> Self::Output {
+        self.poly.0 *= &rhs;
+        self.share.y *= rhs;
+        self
     }
 }
 

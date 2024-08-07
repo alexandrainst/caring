@@ -4,8 +4,6 @@ use std::{
     ops::{Add, Mul, Sub},
 };
 
-use itertools::Itertools;
-
 use crate::{
     net::Id,
     vm::{Instruction, Script},
@@ -33,7 +31,7 @@ impl<F> Exp<F> {
         self
     }
 
-    pub fn finalize(mut self) -> Script<F> {
+    pub fn finalize(self) -> Script<F> {
         Script(self.exp)
     }
 
@@ -46,7 +44,7 @@ impl<F> Exp<F> {
         array::from_fn(|i| {
             let id = Id(i);
             if id == me {
-                let f = input.take().unwrap();
+                let f = input.take().expect("We only do this once.");
                 Exp::share(f)
             } else {
                 Exp::receive_input(id)
@@ -100,7 +98,7 @@ mod test {
 
     use crate::{
         algebra,
-        net::{network::InMemoryNetwork, Id},
+        net::network::InMemoryNetwork,
         protocols::beaver,
         testing::{self, Cluster},
         vm::{parsing::Exp, Engine},

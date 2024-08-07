@@ -44,6 +44,16 @@ impl<F: Field + Serialize + DeserializeOwned> super::Shared for Share<F> {
     }
 }
 
+impl<F: Field> std::ops::Mul<F> for Share<F> {
+    type Output = Self;
+
+    fn mul(self, rhs: F) -> Self::Output {
+        let x = self.0 * rhs;
+        let y = self.1 * rhs;
+        Share(x, y)
+    }
+}
+
 pub async fn multiplication<F: Field + Serialize + DeserializeOwned>(
     a: Share<F>,
     b: Share<F>,
