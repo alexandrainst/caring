@@ -1,6 +1,10 @@
+/// Pseudo-parsing direct to an array-backed AST which just is a bytecode stack.
 use std::ops::{Add, Mul, Sub};
 
-use crate::vm::{Instruction, Script};
+use crate::{
+    net::Id,
+    vm::{Instruction, Script},
+};
 
 struct Exp<F> {
     exp: Vec<Instruction<F>>,
@@ -13,7 +17,7 @@ impl<F> Exp<F> {
         }
     }
 
-    pub fn receive_input(id: usize) -> Self {
+    pub fn receive_input(id: Id) -> Self {
         Self {
             exp: vec![Instruction::Recv(id)],
         }
@@ -90,9 +94,9 @@ mod test {
     #[tokio::test]
     async fn addition() {
         async fn program(net: InMemoryNetwork, input: impl Into<F>) -> F {
-            let id0 = net.index;
-            let id1 = (1 + id0) % 3;
-            let id2 = (2 + id0) % 3;
+            let id0 = net.id();
+            let id1 = net.next_neighbour();
+            let id2 = net.prev_neighbour();
 
             let script = {
                 let a = Exp::share(input);
@@ -122,9 +126,9 @@ mod test {
     #[tokio::test]
     async fn multiplication() {
         async fn program(net: InMemoryNetwork, input: impl Into<F>) -> F {
-            let id0 = net.index;
-            let id1 = (1 + id0) % 3;
-            let id2 = (2 + id0) % 3;
+            let id0 = net.id();
+            let id1 = net.next_neighbour();
+            let id2 = net.prev_neighbour();
 
             let script = {
                 let a = Exp::share(input);
@@ -138,21 +142,21 @@ mod test {
             let ctx = Share::new_context(id0, 3);
             let rng = rand::rngs::StdRng::from_entropy();
 
-            let net = net.tap(format!("Party {id0}"));
+            let net = net.tap(format!("Party {id0:?}"));
             let mut engine = Engine::<_, Share, _>::new(ctx, net, rng);
 
             let seeded_rng = rand::rngs::StdRng::seed_from_u64(7);
             let mut fueltanks = beaver::BeaverTriple::fake_many(&ctx, seeded_rng, 2);
-            engine.add_fuel(&mut fueltanks[id0]);
+            engine.add_fuel(&mut fueltanks[id0.0]);
             engine.execute(&script).await
         }
 
         let res = Cluster::new(3)
-            .with_args([3u32, 7, 13])
+            .with_args([1u32, 2, 3])
             .run_with_args(program)
             .await
             .unwrap();
 
-        assert_eq!(res, vec![273u32.into(), 273u32.into(), 273u32.into()]);
+        assert_eq!(res, vec![6u32.into(), 6u32.into(), 6u32.into()]);
     }
 }

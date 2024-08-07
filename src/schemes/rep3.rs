@@ -10,7 +10,10 @@ use rand::RngCore;
 use derive_more::{Add, Sub};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{net::Tuneable, schemes::interactive::InteractiveMult};
+use crate::{
+    net::{Id, Tuneable},
+    schemes::interactive::InteractiveMult,
+};
 
 #[derive(Debug, Clone, Copy, Add, Sub, Serialize, Deserialize)]
 pub struct Share<F: Field>(F, F);
@@ -46,12 +49,14 @@ pub async fn multiplication<F: Field + Serialize + DeserializeOwned>(
     b: Share<F>,
     cx: &mut impl Tuneable,
 ) -> Share<F> {
-    let (prev_id, next_id) = match cx.id() {
+    let (prev_id, next_id) = match cx.id().0 {
         0 => (2, 1),
         1 => (0, 2),
         2 => (1, 0),
         _ => panic!("ID higher than 3"),
     };
+    let next_id = Id(next_id);
+    let prev_id = Id(prev_id);
 
     let c0 = (a.0 * b.0) + (a.0 * b.1) + (a.1 * b.0);
 
