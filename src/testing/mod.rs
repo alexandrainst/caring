@@ -5,6 +5,7 @@ pub mod tapping;
 use crate::{
     algebra::{element::Element32, field::Field},
     net::{agency::Broadcast, connection::DuplexConnection, network::InMemoryNetwork},
+    protocols::beaver,
     schemes::interactive::InteractiveShared,
     vm::{Engine, Script},
 };
@@ -119,8 +120,11 @@ impl Cluster<Script<Element32>> {
                 all_parties: network.size(),
                 me: network.id(),
             };
-            let rng = StepRng::new(42, 7 + network.id().0 as u64);
-            let mut engine = Engine::<_, S, _>::new(context, network, rng);
+            let private_rng = StepRng::new(42, 7 + network.id().0 as u64);
+            let shared_rng = StepRng::new(3, 14);
+            let mut fueltanks = beaver::BeaverTriple::fake_many(&context, shared_rng, 2000);
+            let mut engine = Engine::<_, S, _>::new(context, network, private_rng);
+            engine.add_fuel(&mut fueltanks[context.me.0]);
             engine.execute(&script).await
         })
         .await
