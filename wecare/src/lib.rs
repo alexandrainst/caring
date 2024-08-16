@@ -2,31 +2,59 @@ use caring::{
     algebra::math::Vector,
     net::network::TcpNetwork,
     schemes::{
-        interactive::InteractiveSharedMany,
-        shamir,
-        spdz::{self, preprocessing},
+        feldman, interactive::InteractiveSharedMany, shamir, spdz::{self, preprocessing}
     },
 };
+use curve25519_dalek::RistrettoPoint;
+use fixed::FixedI32;
 use rand::{thread_rng, SeedableRng};
 use std::{fs::File, net::SocketAddr, time::Duration};
 use tokio::runtime::Runtime;
 
-type F = curve25519_dalek::Scalar;
+pub trait Mapping {
+    fn from_f64(val: f64) -> Self;
+    fn into_f64(val: Self) -> f64;
+}
+
+pub type S25519 = curve25519_dalek::Scalar;
+pub type S32 = caring::algebra::element::Element32;
 
 type SignedFix = fixed::FixedI128<64>;
-fn to_offset(num: f64) -> u128 {
-    let num: i128 = SignedFix::from_num(num).to_bits(); // convert to signed fixed point
-                                                        // Okay this a some voodoo why this 'just works', but the idea is that
-                                                        // twos complement is actually just an offset from the max value.
-                                                        // https://en.wikipedia.org/wiki/Offset_binary
-    num as u128
+impl Mapping for S25519 {
+    fn from_f64(val: f64) -> Self {
+        Self::from({
+            // convert to signed fixed point
+            let num: i128 = SignedFix::from_num(val).to_bits();
+            // Okay this a some voodoo why this 'just works', but the idea is that
+            // twos complement is actually just an offset from the max value.
+            // https://en.wikipedia.org/wiki/Offset_binary
+            num as u128
+        })
+    }
+
+    fn into_f64(val: Self) -> f64 {
+        let val = u128::from_le_bytes(val.as_bytes()[0..128 / 8].try_into().unwrap());
+        {
+            // Same applies as above
+            let num = SignedFix::from_bits(val as i128);
+            num.to_num()
+        }
+    }
 }
 
-fn from_offset(num: u128) -> f64 {
-    // Same applies as above
-    let num = SignedFix::from_bits(num as i128);
-    num.to_num()
+impl Mapping for S32 {
+    fn from_f64(val: f64) -> Self {
+        let num : i32 = FixedI32::<16>::from_num(val).to_bits();
+        S32::from(num as u32)
+    }
+
+    fn into_f64(val: Self) -> f64 {
+        let val : u32 = val.into();
+        let val =  FixedI32::<16>::from_bits(val as i32);
+        val.to_num()
+    }
 }
+
 
 pub struct AdderEngine<S: InteractiveSharedMany> {
     network: TcpNetwork,
@@ -34,9 +62,9 @@ pub struct AdderEngine<S: InteractiveSharedMany> {
     context: S::Context,
 }
 
-impl<S> AdderEngine<S>
+impl<S, F> AdderEngine<S>
 where
-    S: InteractiveSharedMany<Value = curve25519_dalek::Scalar>,
+    S: InteractiveSharedMany<Value = F>, F: Mapping
 {
     //pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: String) -> Result<AdderEngine<F>, MpcError> {
     fn new(network: TcpNetwork, runtime: Runtime, context: S::Context) -> Self {
@@ -68,8 +96,7 @@ where
         let nums: Vec<_> = nums
             .iter()
             .map(|&num| {
-                let num = to_offset(num);
-                F::from(num)
+                F::from_f64(num)
             })
             .collect();
         let rng = rand::rngs::StdRng::from_rng(thread_rng()).unwrap();
@@ -86,8 +113,7 @@ where
 
             let res = res
                 .into_iter()
-                .map(|x| u128::from_le_bytes(x.as_bytes()[0..128 / 8].try_into().unwrap()))
-                .map(from_offset)
+                .map(|x| F::into_f64(x))
                 .collect();
             Some(res)
         });
@@ -95,9 +121,11 @@ where
     }
 }
 
-pub type SpdzEngine = AdderEngine<spdz::Share<curve25519_dalek::Scalar>>;
-
-pub type ShamirEngine = AdderEngine<shamir::Share<curve25519_dalek::Scalar>>;
+pub type SpdzEngine = AdderEngine<spdz::Share<S25519>>;
+pub type ShamirEngine = AdderEngine<shamir::Share<S25519>>;
+pub type FeldmanEngine = AdderEngine<feldman::VerifiableShare<S25519, RistrettoPoint>>;
+pub type SpdzEngine32 = AdderEngine<spdz::Share<S32>>;
+pub type ShamirEngine32 = AdderEngine<shamir::Share<S32>>;
 
 #[derive(Debug)]
 pub struct MpcError(pub &'static str);
@@ -115,12 +143,12 @@ pub fn do_preproc(files: &mut [File], number_of_shares: Vec<usize>) {
     assert_eq!(files.len(), number_of_shares.len());
     let known_to_each = vec![number_of_shares[0], number_of_shares[1]];
     let number_of_triplets = 0;
-    let num = to_offset(0.0);
+    let num = S25519::from_f64(0.0);
     preprocessing::write_preproc_to_file(
         files,
         known_to_each,
         number_of_triplets,
-        curve25519_dalek::Scalar::from(num),
+        num,
     )
     .unwrap();
 }
@@ -134,7 +162,10 @@ mod generic {
 
     pub enum AdderEngine {
         Spdz(SpdzEngine),
+        Spdz32(SpdzEngine32),
         Shamir(ShamirEngine),
+        Shamir32(ShamirEngine32),
+        Feldman(FeldmanEngine),
     }
 
     pub struct EngineBuilder<'a> {
@@ -220,7 +251,10 @@ mod generic {
         pub fn mpc_sum(&mut self, nums: &[f64]) -> Option<Vec<f64>> {
             match self {
                 AdderEngine::Spdz(e) => e.mpc_sum(nums),
+                AdderEngine::Spdz32(e) => e.mpc_sum(nums),
                 AdderEngine::Shamir(e) => e.mpc_sum(nums),
+                AdderEngine::Shamir32(e) => e.mpc_sum(nums),
+                AdderEngine::Feldman(e) => todo!(),
             }
         }
 
@@ -228,6 +262,9 @@ mod generic {
             match self {
                 AdderEngine::Spdz(e) => e.shutdown(),
                 AdderEngine::Shamir(e) => e.shutdown(),
+                AdderEngine::Spdz32(e) => e.shutdown(),
+                AdderEngine::Shamir32(e) => e.shutdown(),
+                AdderEngine::Feldman(e) => e.shutdown(),
             }
         }
     }
@@ -242,13 +279,11 @@ mod test {
     #[test]
     fn offset_binary() {
         use curve25519_dalek::Scalar;
-        let a: Scalar = to_offset(1.1).into();
-        let b: Scalar = to_offset(2.2).into();
-        let c: Scalar = to_offset(3.3).into();
+        let a = Scalar::from_f64(1.1);
+        let b = Scalar::from_f64(2.2);
+        let c = Scalar::from_f64(3.3);
         let sum = a + b + c;
-        let sum: [u8; 16] = sum.as_bytes()[0..16].try_into().unwrap();
-        let sum = u128::from_le_bytes(sum);
-        let sum = from_offset(sum);
+        let sum = Scalar::into_f64(sum);
         assert!(sum - 6.6 < 0.01);
     }
 
