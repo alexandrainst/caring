@@ -118,6 +118,28 @@ pub trait Shared:
     }
 }
 
+pub trait SharedMany: Shared {
+    type Vectorized: Sized
+        + for<'a> Add<&'a Self::Vectorized, Output = Self::Vectorized>
+        + for<'b> Sub<&'b Self::Vectorized, Output = Self::Vectorized>
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + Clone
+        + Send
+        + Sync;
+
+    fn share_many(
+        ctx: &Self::Context,
+        secrets: &[Self::Value],
+        rng: impl RngCore,
+    ) -> Vec<Self::Vectorized>;
+
+    fn recombine_many(
+        ctx: &Self::Context,
+        many_shares: &[impl AsRef<Self::Vectorized>],
+    ) -> Vec<Option<Self::Value>>;
+}
+
 // NOTE: Not used currently.
 //
 /// Support for multiplication of two shares for producing a share.

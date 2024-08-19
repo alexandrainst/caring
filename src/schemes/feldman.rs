@@ -18,7 +18,11 @@ use std::{
     ops::{self, Mul},
 };
 
-use crate::{algebra::math::Vector, net::agency::Unicast, schemes::shamir};
+use crate::{
+    algebra::math::Vector,
+    net::agency::Unicast,
+    schemes::{shamir, SharedMany},
+};
 use crate::{algebra::poly::Polynomial, schemes::shamir::ShamirParams};
 
 use ff::Field;
@@ -209,10 +213,36 @@ pub struct VecVerifiableShare<F: Field, G: Group> {
     pub x: F,
 }
 
-impl<F: Field, G: Group> std::ops::Add<&Self> for VecVerifiableShare<F, G> {
+impl<F, G> SharedMany for VerifiableShare<F, G>
+where
+    F: Field + serde::Serialize + serde::de::DeserializeOwned,
+    G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>,
+    G: std::ops::Mul<F, Output = G>,
+    F: ops::Mul<G, Output = G>,
+    Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>,
+{
+    type Vectorized = VecVerifiableShare<F, G>;
+
+    fn share_many(
+        ctx: &Self::Context,
+        secrets: &[Self::Value],
+        rng: impl RngCore,
+    ) -> Vec<Self::Vectorized> {
+        share_many(secrets, &ctx.ids, ctx.threshold, rng)
+    }
+
+    fn recombine_many(
+        ctx: &Self::Context,
+        many_shares: &[impl AsRef<Self::Vectorized>],
+    ) -> Vec<Option<Self::Value>> {
+        todo!()
+    }
+}
+
+impl<'a, F: Field, G: Group> std::ops::Add<&'a Self> for VecVerifiableShare<F, G> {
     type Output = VecVerifiableShare<F, G>;
 
-    fn add(mut self, rhs: &Self) -> Self::Output {
+    fn add(mut self, rhs: &'a Self) -> Self::Output {
         self.shares += &rhs.shares;
         self.polys
             .iter_mut()
@@ -220,6 +250,22 @@ impl<F: Field, G: Group> std::ops::Add<&Self> for VecVerifiableShare<F, G> {
             .for_each(|(a, b)| {
                 let a = &mut a.0;
                 *a += &b.0;
+            });
+        self
+    }
+}
+
+impl<'a, F: Field, G: Group> std::ops::Sub<&'a Self> for VecVerifiableShare<F, G> {
+    type Output = VecVerifiableShare<F, G>;
+
+    fn sub(mut self, rhs: &'a Self) -> Self::Output {
+        self.shares -= &rhs.shares;
+        self.polys
+            .iter_mut()
+            .zip(rhs.polys.iter())
+            .for_each(|(a, b)| {
+                let a = &mut a.0;
+                *a -= &b.0;
             });
         self
     }
@@ -273,9 +319,9 @@ pub fn share_many<F, G>(
 where
     F: ops::Mul<G, Output = G>,
     Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>,
-    for<'a> &'a crate::algebra::poly::Polynomial<F>: std::ops::Mul<G, Output = Polynomial<G>>,
     F: Field,
     G: Group,
+    for<'b> F: std::ops::Mul<G>,
 {
     let n = ids.len();
     assert!(
@@ -294,7 +340,17 @@ where
             p
         })
         .collect();
-    let macs: Box<[Polynomial<G>]> = polys.iter().map(|p| p * G::generator()).collect();
+    let macs: Box<[Polynomial<G>]> = polys
+        .iter()
+        .map(|p| {
+            Polynomial(
+                p.0.clone()
+                    .into_iter()
+                    .map(|x| x * G::generator())
+                    .collect(),
+            )
+        })
+        .collect();
 
     let mut vshares: Vec<_> = Vec::with_capacity(n);
     for x in ids {

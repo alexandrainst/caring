@@ -377,6 +377,12 @@ impl<F: Field> std::ops::AddAssign<&VecShare<F>> for VecShare<F> {
     }
 }
 
+impl<F: Field> std::ops::SubAssign<&VecShare<F>> for VecShare<F> {
+    fn sub_assign(&mut self, rhs: &VecShare<F>) {
+        self.ys -= &rhs.ys;
+    }
+}
+
 impl<F: Field> std::iter::Sum for VecShare<F> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         let mut first = iter.next().expect("Please don't sum zero items together");

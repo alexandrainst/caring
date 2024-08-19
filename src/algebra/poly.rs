@@ -9,22 +9,6 @@ use crate::algebra::math::Vector;
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Polynomial<G: Send + Sync>(pub Vector<G>);
 
-// // HACK: We really should not implement Deref/DerefMut, but operator-overloading is annoying.
-// // If we can derive Add/Sub/Mul instead that would make me happy.
-// impl<G: Send + Sync> Deref for Polynomial<G> {
-//     type Target = Vector<G>;
-
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
-
-// impl<G: Send + Sync> DerefMut for Polynomial<G> {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         &mut self.0
-//     }
-// }
-
 impl<G: Field> Polynomial<G> {
     /// Evaluate `x` in the polynomial `f`, such you obtain `f(x)`
     ///
