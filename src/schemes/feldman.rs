@@ -233,9 +233,9 @@ where
 
     fn recombine_many(
         ctx: &Self::Context,
-        many_shares: &[impl AsRef<Self::Vectorized>],
-    ) -> Vec<Option<Self::Value>> {
-        todo!()
+        many_shares: &[Self::Vectorized],
+    ) -> Option<Vector<Self::Value>> {
+        reconstruct_many(ctx, many_shares).map(Vector::from_vec)
     }
 }
 

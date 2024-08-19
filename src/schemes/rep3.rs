@@ -10,7 +10,7 @@ use rand::RngCore;
 use derive_more::{Add, Sub};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{net::Tuneable, schemes::InteractiveMult};
+use crate::{net::Tuneable, schemes::interactive::InteractiveMult};
 
 #[derive(Debug, Clone, Copy, Add, Sub, Serialize, Deserialize)]
 pub struct Share<F: Field>(F, F);

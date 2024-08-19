@@ -198,6 +198,18 @@ mod generic {
             Ok(AdderEngine::Shamir(engine))
         }
 
+        pub fn build_feldman(self) -> Result<AdderEngine, MpcError> {
+            let threshold = self.threshold.ok_or(MpcError("No threshold found"))?;
+            let (network, runtime) = self.semi_build()?;
+            let ids = network
+                .participants()
+                .map(|id| (id + 1u32).into())
+                .collect();
+            let context = shamir::ShamirParams { threshold, ids };
+            let engine = FeldmanEngine::new(network, runtime, context);
+            Ok(AdderEngine::Feldman(engine))
+        }
+
         fn semi_build(&self) -> Result<(TcpNetwork, Runtime), MpcError> {
             let my_addr: SocketAddr = self.my_addr.parse().unwrap();
             let others: Vec<SocketAddr> =
@@ -221,7 +233,7 @@ mod generic {
         }
 
         pub fn add_participants(mut self, addrs: &'a [impl AsRef<str>]) -> Self {
-            let addrs = addrs.iter().map(|s| s.as_ref::<'a>());
+            let addrs = addrs.iter().map(|s| s.as_ref());
 
             self.other_addr.extend(addrs);
             self
@@ -254,7 +266,7 @@ mod generic {
                 AdderEngine::Spdz32(e) => e.mpc_sum(nums),
                 AdderEngine::Shamir(e) => e.mpc_sum(nums),
                 AdderEngine::Shamir32(e) => e.mpc_sum(nums),
-                AdderEngine::Feldman(e) => todo!(),
+                AdderEngine::Feldman(e) => e.mpc_sum(nums)
             }
         }
 

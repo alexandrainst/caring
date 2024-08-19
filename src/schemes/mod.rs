@@ -33,7 +33,7 @@ use std::{
 
 use rand::RngCore;
 
-use crate::net::Communicate;
+use crate::{algebra::math::Vector, net::Communicate};
 
 /// Currently unused trait, but might be a better way to represent that a share
 /// can be multiplied by a const, however, it could also just be baked into 'Shared' directly.
@@ -81,7 +81,7 @@ pub trait Shared:
     // TODO: Should be Result<F, impl Error> with some generic Secret-sharing error
 
     // These vecs of vecs are pretty annoying
-    fn share_many(
+    fn share_many_naive(
         ctx: &Self::Context,
         secrets: &[Self::Value],
         mut rng: impl RngCore,
@@ -93,12 +93,12 @@ pub trait Shared:
         crate::help::transpose(shares)
     }
 
-    /// Recombine several (different) shares back into multiple secrets,
+    /// Naively recombine several (different) shares back into multiple secrets,
     /// Return an option for each successfull recombination
     ///
     /// * `ctx`: scheme and instance specific context
     /// * `many_shares`: shares by each party to be recombined.
-    fn recombine_many(
+    fn recombine_many_naive(
         ctx: &Self::Context,
         many_shares: &[impl AsRef<[Self]>],
     ) -> Vec<Option<Self::Value>> {
@@ -128,41 +128,27 @@ pub trait SharedMany: Shared {
         + Send
         + Sync;
 
+    /// Perform secret sharing splitting many `secret`s into a number of vectorized shares.
+    ///
+    /// * `ctx`: scheme and instance specific context required to perform secret sharing
+    /// * `secrets`: secret values to share
+    /// * `rng`: cryptographic secure random number generator
+    ///
     fn share_many(
         ctx: &Self::Context,
         secrets: &[Self::Value],
         rng: impl RngCore,
     ) -> Vec<Self::Vectorized>;
 
-    fn recombine_many(
-        ctx: &Self::Context,
-        many_shares: &[impl AsRef<Self::Vectorized>],
-    ) -> Vec<Option<Self::Value>>;
-}
-
-// NOTE: Not used currently.
-//
-/// Support for multiplication of two shares for producing a share.
-///
-/// Note, that this is different to beaver multiplication as it does not require
-/// triplets, however it does require a native multiplication protocol.
-///
-pub trait InteractiveMult: Shared {
-    /// Perform interactive multiplication
+    /// Recombine several (different) shares back into multiple secrets,
+    /// Return an option for each successfull recombination
     ///
     /// * `ctx`: scheme and instance specific context
-    /// * `net`: Unicasting network
-    /// * `a`: first share to multiply
-    /// * `b`: second share to multiply
-    ///
-    /// Returns a result which contains the shared value corresponding
-    /// to the multiplication of `a` and `b`.
-    fn interactive_mult<U: Communicate>(
+    /// * `many_shares`: shares by each party to be recombined.
+    fn recombine_many(
         ctx: &Self::Context,
-        net: &mut U,
-        a: Self,
-        b: Self,
-    ) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
+        many_shares: &[Self::Vectorized],
+    ) -> Option<Vector<Self::Value>>;
 }
 
 pub mod interactive {
@@ -182,6 +168,14 @@ pub mod interactive {
         }
     }
 
+    #[derive(Debug, Error)]
+    pub enum SharingError {
+        #[error(transparent)]
+        Communication(#[from] CommunicationError),
+        #[error("Failure reconstruction")]
+        Reconstruction(),
+    }
+
     use super::*;
     impl<S, V, Ctx> InteractiveShared for S
     where
@@ -191,7 +185,7 @@ pub mod interactive {
     {
         type Context = S::Context;
         type Value = V;
-        type Error = CommunicationError;
+        type Error = SharingError;
 
         async fn share(
             ctx: &mut Self::Context,
@@ -216,7 +210,7 @@ pub mod interactive {
                 .symmetric_broadcast(secret)
                 .await
                 .map_err(CommunicationError::new)?;
-            Ok(Shared::recombine(&*ctx, &shares).unwrap())
+            Shared::recombine(&*ctx, &shares).ok_or(SharingError::Reconstruction())
         }
 
         async fn symmetric_share(
@@ -257,10 +251,6 @@ pub mod interactive {
         type Value: Clone + Send;
         type Error: Send + Sized + Error + 'static;
 
-        // Note: Not sure if ctx should be passed as a move or as a mutable reference.
-        // Some schemes require bookkeeping (spdz) so we need the mutability.
-        // Another method could be to swap Context and Share<_>,
-        // however that would probably just result in the same issues.
         fn share(
             ctx: &mut Self::Context,
             secret: Self::Value,
@@ -318,16 +308,15 @@ pub mod interactive {
         ) -> impl std::future::Future<Output = Result<Vector<Self::Value>, Self::Error>> + Send;
     }
 
-    // TODO: Consider using specialized SharedMany instead.
     impl<S, V, Ctx> InteractiveSharedMany for S
     where
-        S: InteractiveShared<Error = CommunicationError, Value = V, Context = Ctx>
-            + Shared<Value = V, Context = Ctx>
+        S: InteractiveShared<Error = SharingError, Value = V, Context = Ctx>
+            + SharedMany<Value = V, Context = Ctx>
             + Send,
         V: Send + Sync + Clone,
         Ctx: Send + Sync,
     {
-        type VectorShare = Vector<S>;
+        type VectorShare = S::Vectorized;
 
         async fn share_many(
             ctx: &mut Self::Context,
@@ -340,7 +329,7 @@ pub mod interactive {
             coms.unicast(&shares)
                 .await
                 .map_err(CommunicationError::new)?;
-            Ok(my_share.into())
+            Ok(my_share)
         }
 
         async fn symmetric_share_many(
@@ -349,10 +338,7 @@ pub mod interactive {
             rng: impl RngCore + Send,
             mut coms: impl Communicate,
         ) -> Result<Vec<Self::VectorShare>, Self::Error> {
-            let shares: Vec<Vector<Self>> = S::share_many(&*ctx, secrets, rng)
-                .into_iter()
-                .map(|v| v.into())
-                .collect();
+            let shares: Vec<S::Vectorized> = S::share_many(&*ctx, secrets, rng);
             let shared = coms
                 .symmetric_unicast(shares)
                 .await
@@ -375,16 +361,37 @@ pub mod interactive {
             secrets: Self::VectorShare,
             mut coms: impl Communicate,
         ) -> Result<Vector<Self::Value>, Self::Error> {
-            let shares = coms
+            let shares: Vec<S::Vectorized> = coms
                 .symmetric_broadcast(secrets)
                 .await
                 .map_err(CommunicationError::new)?;
-            let res: Vector<Self::Value> = Shared::recombine_many(&*ctx, &shares)
-                .into_iter()
-                .map(|x| x.unwrap())
-                .collect(); // TODO: Proper errors
-            Ok(res)
+            S::recombine_many(&*ctx, &shares).ok_or(SharingError::Reconstruction())
         }
+    }
+
+    // NOTE: Not used currently.
+    //
+    /// Support for multiplication of two shares for producing a share.
+    ///
+    /// Note, that this is different to beaver multiplication as it does not require
+    /// triplets, however it does require a native multiplication protocol.
+    ///
+    pub trait InteractiveMult: Shared {
+        /// Perform interactive multiplication
+        ///
+        /// * `ctx`: scheme and instance specific context
+        /// * `net`: Unicasting network
+        /// * `a`: first share to multiply
+        /// * `b`: second share to multiply
+        ///
+        /// Returns a result which contains the shared value corresponding
+        /// to the multiplication of `a` and `b`.
+        fn interactive_mult<U: Communicate>(
+            ctx: &Self::Context,
+            net: &mut U,
+            a: Self,
+            b: Self,
+        ) -> impl Future<Output = Result<Self, Box<dyn Error>>>;
     }
 }
 

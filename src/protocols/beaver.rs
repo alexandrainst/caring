@@ -53,9 +53,9 @@ impl<F: Field, C: Clone, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
         .take(count);
         let (a, b, c): (Vec<_>, Vec<_>, Vec<_>) = multiunzip(zipped);
         // Share (preproccess)
-        let a = S::share_many(ctx, &a, &mut rng);
-        let b = S::share_many(ctx, &b, &mut rng);
-        let c = S::share_many(ctx, &c, &mut rng);
+        let a = S::share_many_naive(ctx, &a, &mut rng);
+        let b = S::share_many_naive(ctx, &b, &mut rng);
+        let c = S::share_many_naive(ctx, &c, &mut rng);
 
         itertools::izip!(a, b, c)
             .map(|(a, b, c)| {
@@ -288,7 +288,7 @@ mod test {
                 let ctx = ShamirParams { threshold, ids };
                 let mut rng = rand::rngs::mock::StepRng::new(1, 7);
                 let x: Vec<_> = arg.into_iter().map(F::from).collect();
-                let shares = S::share_many(&ctx, &x, &mut rng);
+                let shares = S::share_many_naive(&ctx, &x, &mut rng);
 
                 let shares: Vec<_> = network.symmetric_unicast(shares).await.unwrap();
 
@@ -299,7 +299,7 @@ mod test {
                     .unwrap();
 
                 let shares: Vec<_> = network.symmetric_broadcast(c).await.unwrap();
-                let res: Option<_> = S::recombine_many(&ctx, &shares).into_iter().collect();
+                let res: Option<_> = S::recombine_many_naive(&ctx, &shares).into_iter().collect();
                 let res: Vec<_> = res.unwrap();
                 let res: Vec<_> = res.into_iter().map(u32::from).collect();
                 assert_eq!(res, [5 * 7, 2 * 3]);

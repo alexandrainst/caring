@@ -3,14 +3,14 @@
 use std::{borrow::Borrow, error::Error};
 
 use ff::{derive::rand_core::RngCore, Field};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 
 // TODO: Important! Switch RngCore to CryptoRngCore
 
 use crate::{
     algebra::math::{lagrange_coefficients, Vector},
     net::agency::Unicast,
-    schemes::InteractiveMult,
+    schemes::{interactive::InteractiveMult, SharedMany},
 };
 
 use crate::algebra::poly::Polynomial;
@@ -280,6 +280,25 @@ pub async fn deflate<F: Field + serde::Serialize + serde::de::DeserializeOwned, 
         .sum();
 
     Ok(Share { y })
+}
+
+impl<F: Field + DeserializeOwned + Serialize> SharedMany for Share<F> {
+    type Vectorized = VecShare<F>;
+
+    fn share_many(
+        ctx: &Self::Context,
+        secrets: &[Self::Value],
+        rng: impl RngCore,
+    ) -> Vec<Self::Vectorized> {
+        share_many(secrets, &ctx.ids, ctx.threshold, rng)
+    }
+
+    fn recombine_many(
+        ctx: &Self::Context,
+        many_shares: &[Self::Vectorized],
+    ) -> Option<Vector<Self::Value>> {
+        Some(reconstruct_many(ctx, many_shares).into())
+    }
 }
 
 /// A secret shared vector
