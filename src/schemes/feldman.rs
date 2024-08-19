@@ -233,8 +233,11 @@ pub struct VecVerifiableShare<F: Field, G: Group> {
 impl<F, G> SharedMany for VerifiableShare<F, G>
 where
     F: Field + serde::Serialize + serde::de::DeserializeOwned,
-    G: Group + serde::Serialize + serde::de::DeserializeOwned + std::ops::Mul<F, Output = G>,
-    G: std::ops::Mul<F, Output = G>,
+    G: Group
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + for<'a> std::ops::MulAssign<&'a F>
+        + std::ops::Mul<F, Output = G>,
     F: ops::Mul<G, Output = G>,
     Box<[G]>: FromIterator<<F as ops::Mul<G>>::Output>,
 {

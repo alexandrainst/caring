@@ -4,7 +4,9 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream};
 use tokio::io::{ReadHalf, WriteHalf};
 
 use crate::net::{
-    connection::{Connection, ConnectionError, Receiving, Sending}, network::{InMemoryNetwork, Network}, Channel, ReceiverError, RecvBytes, SendBytes, SplitChannel
+    connection::{Connection, ConnectionError, Receiving, Sending},
+    network::{InMemoryNetwork, Network},
+    Channel, ReceiverError, RecvBytes, SendBytes, SplitChannel,
 };
 
 pub struct TappedConnection<R: AsyncRead, W: AsyncWrite>(TapSending<W>, TapReceiving<R>);
@@ -48,7 +50,9 @@ impl<R: AsyncRead + Send + Unpin, W: AsyncWrite + Send + Unpin> RecvBytes
         self.1.recv_bytes().await
     }
 
-    async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ReceiverError<Self::RecvError>> {
+    async fn recv<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> Result<T, ReceiverError<Self::RecvError>> {
         self.1.recv().await
     }
 }
