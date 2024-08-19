@@ -85,7 +85,7 @@ impl<C: Channel> ObliviousReceive<C> for MockOTReceiver {
         choice: bool,
         channel: &mut C,
     ) -> Result<T, Self::Error> {
-        let (pkg0, pkg1) = channel.recv().await?;
+        let (pkg0, pkg1) = channel.recv().await.unwrap();
         Ok(if choice { pkg1 } else { pkg0 })
     }
 }

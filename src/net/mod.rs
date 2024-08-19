@@ -1,6 +1,7 @@
 use std::{error::Error, future::Future};
 
 use serde::{de::DeserializeOwned, Serialize};
+use thiserror::Error;
 use tokio_util::bytes::{Bytes, BytesMut};
 
 pub mod agency;
@@ -38,6 +39,14 @@ impl<S: SendBytes> SendBytes for &mut S {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum ReceiverError<E> {
+    #[error("Bad Serialization: {0}")]
+    BadSerialization(bincode::Error),
+    #[error("IO Error: {0}")]
+    IO(#[from] E),
+}
+
 pub trait RecvBytes: Send {
     type RecvError: Error + Send + Sync + 'static;
     fn recv_bytes(
@@ -46,10 +55,10 @@ pub trait RecvBytes: Send {
 
     fn recv<T: DeserializeOwned>(
         &mut self,
-    ) -> impl Future<Output = Result<T, Self::RecvError>> + Send {
+    ) -> impl Future<Output = Result<T, ReceiverError<Self::RecvError>>> + Send {
         async {
             let msg = self.recv_bytes().await?;
-            Ok(bincode::deserialize(&msg).unwrap())
+            bincode::deserialize(&msg).map_err(|e| ReceiverError::BadSerialization(e))
         }
     }
 }

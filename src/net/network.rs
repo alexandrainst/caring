@@ -1,4 +1,4 @@
-use crate::net::{Channel, Communicate, RecvBytes, SendBytes};
+use crate::net::{Channel, Communicate, ReceiverError, RecvBytes, SendBytes};
 use std::{collections::BTreeMap, net::SocketAddr, ops::Range, time::Duration};
 
 use futures::future::join_all;
@@ -44,7 +44,7 @@ pub struct Network<C: SplitChannel> {
 #[derive(thiserror::Error, Debug)]
 #[error("Error communicating with {id}: {source}")]
 pub enum NetworkError<E, U> {
-    Incoming { id: u32, source: E },
+    Incoming { id: u32, source: ReceiverError<E> },
     Outgoing { id: u32, source: U },
 }
 

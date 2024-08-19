@@ -31,9 +31,8 @@ impl From<u32> for Element32 {
     fn from(val: u32) -> Self {
         let val = val.to_le_bytes();
         // NOTE: Should probably mention that this is vartime.
-        // TODO: Maybe this fails if the integer is bigger than the modulus?
         Element32::from_repr_vartime(Element32Repr([val[0], val[1], val[2], val[3], 0, 0, 0, 0]))
-            .unwrap()
+            .unwrap_or(Element32::ZERO - Element32::ONE)
     }
 }
 
@@ -88,6 +87,8 @@ pub struct Mod11(pub(crate) u8);
 
 use overload::overload;
 use std::ops;
+
+use crate::algebra::field::Field;
 
 // Now instead of three implementations for each we just have one!
 overload!((a: ?Mod11) + (b: ?Mod11) -> Mod11 {Mod11((a.0 + b.0) % 11)});

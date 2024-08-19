@@ -35,7 +35,9 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
 
-use crate::net::{connection::latency::Delayed, Channel, RecvBytes, SendBytes, SplitChannel};
+use crate::net::{
+    connection::latency::Delayed, Channel, ReceiverError, RecvBytes, SendBytes, SplitChannel,
+};
 
 pub struct Connection<R: AsyncRead, W: AsyncWrite> {
     sender: Sending<W>,
@@ -130,7 +132,9 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send> Connection<R, W>
     }
 
     /// Receive a message waiting for arrival
-    pub async fn recv<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ConnectionError> {
+    pub async fn recv<T: serde::de::DeserializeOwned>(
+        &mut self,
+    ) -> Result<T, ReceiverError<ConnectionError>> {
         self.receiver.recv().await
     }
 }
