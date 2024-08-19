@@ -69,7 +69,7 @@ fn preproc(number_of_shares: usize, paths_to_pre: &Bound<'_, PyTuple>) {
         .map(|x| x.extract::<String>().unwrap())
         .map(|p| File::create(p).unwrap())
         .collect();
-    do_preproc(&mut files, vec![number_of_shares, number_of_shares]);
+    do_preproc(&mut files, vec![number_of_shares, number_of_shares], false);
 }
 
 #[pymethods]

@@ -139,18 +139,29 @@ impl std::fmt::Display for MpcError {
 
 impl std::error::Error for MpcError {}
 
-pub fn do_preproc(files: &mut [File], number_of_shares: Vec<usize>) {
+pub fn do_preproc(files: &mut [File], number_of_shares: Vec<usize>, use_32: bool) {
     assert_eq!(files.len(), number_of_shares.len());
     let known_to_each = vec![number_of_shares[0], number_of_shares[1]];
     let number_of_triplets = 0;
-    let num = S25519::from_f64(0.0);
-    preprocessing::write_preproc_to_file(
-        files,
-        known_to_each,
-        number_of_triplets,
-        num,
-    )
-    .unwrap();
+    if use_32 {
+        let num = S32::from_f64(0.0);
+        preprocessing::write_preproc_to_file(
+            files,
+            known_to_each,
+            number_of_triplets,
+            num,
+        )
+        .unwrap();
+    } else {
+        let num = S25519::from_f64(0.0);
+        preprocessing::write_preproc_to_file(
+            files,
+            known_to_each,
+            number_of_triplets,
+            num,
+        )
+        .unwrap();
+    }
 }
 
 pub type Engine = generic::AdderEngine;
@@ -364,7 +375,7 @@ mod test {
         let ctx1 = tempfile::tempfile().unwrap();
         let ctx2 = tempfile::tempfile().unwrap();
         let mut files = [ctx1, ctx2];
-        do_preproc(&mut files, vec![1, 1]);
+        do_preproc(&mut files, vec![1, 1], false);
         let [mut ctx1, mut ctx2] = files;
         ctx1.rewind().unwrap();
         ctx2.rewind().unwrap();
@@ -409,7 +420,7 @@ mod test {
         let ctx1 = tempfile::tempfile().unwrap();
         let ctx2 = tempfile::tempfile().unwrap();
         let mut files = [ctx1, ctx2];
-        do_preproc(&mut files, vec![2, 2]);
+        do_preproc(&mut files, vec![2, 2], false);
         let [mut ctx1, mut ctx2] = files;
         ctx1.rewind().unwrap();
         ctx2.rewind().unwrap();

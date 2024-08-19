@@ -2,7 +2,7 @@
 //! Here we have a prime field that is very close to 2^32.
 use ff::{
     derive::subtle::{Choice, ConditionallySelectable, ConstantTimeEq},
-    PrimeField,
+    Field, PrimeField,
 };
 use rand::Rng;
 
@@ -87,8 +87,6 @@ pub struct Mod11(pub(crate) u8);
 
 use overload::overload;
 use std::ops;
-
-use crate::algebra::field::Field;
 
 // Now instead of three implementations for each we just have one!
 overload!((a: ?Mod11) + (b: ?Mod11) -> Mod11 {Mod11((a.0 + b.0) % 11)});
