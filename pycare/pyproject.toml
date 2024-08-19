@@ -14,3 +14,8 @@ dynamic = ["version"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+
+
+[tool.basedpyright]
+venvPath = "pyo3"
+include = ["examples"]

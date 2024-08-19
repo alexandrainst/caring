@@ -62,10 +62,11 @@ fn feldman(threshold: u32, my_addr: &str, others: &Bound<'_, PyTuple>) -> PyResu
 
 /// Calculate and save the preprocessing
 #[pyfunction]
-#[pyo3(signature = (number_of_shares, paths_to_pre))]
-fn preproc(number_of_shares: usize, paths_to_pre: &str) {
+#[pyo3(signature = (number_of_shares, *paths_to_pre))]
+fn preproc(number_of_shares: usize, paths_to_pre: &Bound<'_, PyTuple>) {
     let mut files: Vec<File> = paths_to_pre
-        .split(",")
+        .iter()
+        .map(|x| x.extract::<String>().unwrap())
         .map(|p| File::create(p).unwrap())
         .collect();
     do_preproc(&mut files, vec![number_of_shares, number_of_shares]);
@@ -95,6 +96,7 @@ impl Engine {
 fn caring(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(spdz, m)?)?;
     m.add_function(wrap_pyfunction!(shamir, m)?)?;
+    m.add_function(wrap_pyfunction!(feldman, m)?)?;
     m.add_function(wrap_pyfunction!(preproc, m)?)?;
     m.add_class::<Engine>()?;
     Ok(())

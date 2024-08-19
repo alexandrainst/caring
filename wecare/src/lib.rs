@@ -202,16 +202,16 @@ mod generic {
                     .map(|id| (id + 1u32).into())
                     .collect();
                 let context = shamir::ShamirParams { threshold, ids };
-                let engine = ShamirEngine::new(network, runtime, context);
-                Ok(AdderEngine::Shamir(engine))
+                let engine = ShamirEngine32::new(network, runtime, context);
+                Ok(AdderEngine::Shamir32(engine))
             } else {
                 let ids = network
                     .participants()
                     .map(|id| (id + 1u32).into())
                     .collect();
                 let context = shamir::ShamirParams { threshold, ids };
-                let engine = ShamirEngine32::new(network, runtime, context);
-                Ok(AdderEngine::Shamir32(engine))
+                let engine = ShamirEngine::new(network, runtime, context);
+                Ok(AdderEngine::Shamir(engine))
             }
         }
 

@@ -25,7 +25,7 @@ def lasso_ADMM(engine: caring.Engine, A, b, max_iter=100, lam=1.):
     time_mpc_sum = 0
     rest = 0
 
-    for i in range(max_iter):
+    for _ in range(max_iter):
         start = time.time()
 
         theta = AtA_inv.dot(A.T.dot(b) / n_samples + tau * (rho - u))
