@@ -181,6 +181,7 @@ dependencies = [
  "async-backtrace",
  "async-trait",
  "bincode",
+ "castaway",
  "derive_more",
  "digest",
  "ff",
@@ -199,6 +200,15 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "castaway"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0abae9be0aaf9ea96a3b1b8b1b55c602ca751eba1b1500220cea4ecbafe7c0d5"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]

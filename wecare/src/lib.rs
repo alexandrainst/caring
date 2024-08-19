@@ -156,8 +156,6 @@ pub fn do_preproc(files: &mut [File], number_of_shares: Vec<usize>) {
 pub type Engine = generic::AdderEngine;
 
 mod generic {
-    use tokio::runtime::Runtime;
-
     use super::*;
 
     pub enum AdderEngine {
@@ -173,29 +171,48 @@ mod generic {
         other_addr: Vec<&'a str>,
         threshold: Option<u64>,
         preprocessed: Option<&'a mut File>,
+        use_32bit_field: bool,
     }
+
     impl<'a> EngineBuilder<'a> {
         pub fn build_spdz(self) -> Result<AdderEngine, MpcError> {
             let (network, runtime) = self.semi_build()?;
             let file = self
                 .preprocessed
                 .ok_or(MpcError("No proccesing file found"))?;
-            let mut context = preprocessing::read_preproc_from_file(file);
-            context.params.who_am_i = network.index;
-            let engine = SpdzEngine::new(network, runtime, context);
-            Ok(AdderEngine::Spdz(engine))
+            if self.use_32bit_field {
+                let mut context = preprocessing::read_preproc_from_file(file);
+                context.params.who_am_i = network.index;
+                let engine = SpdzEngine32::new(network, runtime, context);
+                Ok(AdderEngine::Spdz32(engine))
+            } else {
+                let mut context = preprocessing::read_preproc_from_file(file);
+                context.params.who_am_i = network.index;
+                let engine = SpdzEngine::new(network, runtime, context);
+                Ok(AdderEngine::Spdz(engine))
+            }
         }
 
         pub fn build_shamir(self) -> Result<AdderEngine, MpcError> {
             let threshold = self.threshold.ok_or(MpcError("No threshold found"))?;
             let (network, runtime) = self.semi_build()?;
-            let ids = network
-                .participants()
-                .map(|id| (id + 1u32).into())
-                .collect();
-            let context = shamir::ShamirParams { threshold, ids };
-            let engine = ShamirEngine::new(network, runtime, context);
-            Ok(AdderEngine::Shamir(engine))
+            if self.use_32bit_field {
+                let ids = network
+                    .participants()
+                    .map(|id| (id + 1u32).into())
+                    .collect();
+                let context = shamir::ShamirParams { threshold, ids };
+                let engine = ShamirEngine::new(network, runtime, context);
+                Ok(AdderEngine::Shamir(engine))
+            } else {
+                let ids = network
+                    .participants()
+                    .map(|id| (id + 1u32).into())
+                    .collect();
+                let context = shamir::ShamirParams { threshold, ids };
+                let engine = ShamirEngine32::new(network, runtime, context);
+                Ok(AdderEngine::Shamir32(engine))
+            }
         }
 
         pub fn build_feldman(self) -> Result<AdderEngine, MpcError> {
@@ -244,6 +261,11 @@ mod generic {
             self
         }
 
+        pub fn use_32bit_field(mut self) -> Self {
+            self.use_32bit_field = true;
+            self
+        }
+
         pub fn file_to_preprocessed(mut self, file: &'a mut File) -> Self {
             self.preprocessed = Some(file);
             self
@@ -257,6 +279,7 @@ mod generic {
                 other_addr: vec![],
                 threshold: None,
                 preprocessed: None,
+                use_32bit_field: false,
             }
         }
 

@@ -42,6 +42,24 @@ fn shamir(threshold: u32, my_addr: &str, others: &Bound<'_, PyTuple>) -> PyResul
     }
 }
 
+
+/// Setup a MPC addition engine connected to the given sockets using shamir secret sharing.
+#[pyfunction]
+#[pyo3(signature = (threshold, my_addr, *others))]
+fn feldman(threshold: u32, my_addr: &str, others: &Bound<'_, PyTuple>) -> PyResult<Engine> {
+    let others: Vec<_> = others
+        .iter()
+        .map(|x| x.extract::<String>().unwrap().clone())
+        .collect();
+    match wecare::Engine::setup(my_addr)
+        .add_participants(&others)
+        .threshold(threshold as u64)
+        .build_feldman() {
+        Ok(e) => Ok(Engine(Some(e))),
+        Err(e) => Err(PyIOError::new_err(e.0)),
+    }
+}
+
 /// Calculate and save the preprocessing
 #[pyfunction]
 #[pyo3(signature = (number_of_shares, paths_to_pre))]
