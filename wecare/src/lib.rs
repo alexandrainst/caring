@@ -1,8 +1,13 @@
+pub mod vm;
+
 use caring::{
     algebra::math::Vector,
     net::network::TcpNetwork,
     schemes::{
-        feldman, interactive::InteractiveSharedMany, shamir, spdz::{self, preprocessing}
+        feldman,
+        interactive::InteractiveSharedMany,
+        shamir,
+        spdz::{self, preprocessing},
     },
 };
 use curve25519_dalek::RistrettoPoint;
@@ -44,17 +49,16 @@ impl Mapping for S25519 {
 
 impl Mapping for S32 {
     fn from_f64(val: f64) -> Self {
-        let num : i32 = FixedI32::<16>::from_num(val).to_bits();
+        let num: i32 = FixedI32::<16>::from_num(val).to_bits();
         S32::from(num as u32)
     }
 
     fn into_f64(val: Self) -> f64 {
-        let val : u32 = val.into();
-        let val =  FixedI32::<16>::from_bits(val as i32);
+        let val: u32 = val.into();
+        let val = FixedI32::<16>::from_bits(val as i32);
         val.to_num()
     }
 }
-
 
 pub struct AdderEngine<S: InteractiveSharedMany> {
     network: TcpNetwork,
@@ -64,7 +68,8 @@ pub struct AdderEngine<S: InteractiveSharedMany> {
 
 impl<S, F> AdderEngine<S>
 where
-    S: InteractiveSharedMany<Value = F>, F: Mapping
+    S: InteractiveSharedMany<Value = F>,
+    F: Mapping,
 {
     //pub fn setup_engine(my_addr: &str, others: &[impl AsRef<str>], file_name: String) -> Result<AdderEngine<F>, MpcError> {
     fn new(network: TcpNetwork, runtime: Runtime, context: S::Context) -> Self {
@@ -93,12 +98,7 @@ where
             context,
         } = self;
 
-        let nums: Vec<_> = nums
-            .iter()
-            .map(|&num| {
-                F::from_f64(num)
-            })
-            .collect();
+        let nums: Vec<_> = nums.iter().map(|&num| F::from_f64(num)).collect();
         let rng = rand::rngs::StdRng::from_rng(thread_rng()).unwrap();
         let res: Option<_> = runtime.block_on(async move {
             let ctx = context;
@@ -111,10 +111,7 @@ where
             let sum: S::VectorShare = shares.into_iter().sum();
             let res: Vector<F> = S::recombine_many(ctx, sum, network).await.unwrap();
 
-            let res = res
-                .into_iter()
-                .map(|x| F::into_f64(x))
-                .collect();
+            let res = res.into_iter().map(|x| F::into_f64(x)).collect();
             Some(res)
         });
         res
@@ -145,22 +142,12 @@ pub fn do_preproc(files: &mut [File], number_of_shares: Vec<usize>, use_32: bool
     let number_of_triplets = 0;
     if use_32 {
         let num = S32::from_f64(0.0);
-        preprocessing::write_preproc_to_file(
-            files,
-            known_to_each,
-            number_of_triplets,
-            num,
-        )
-        .unwrap();
+        preprocessing::write_preproc_to_file(files, known_to_each, number_of_triplets, num)
+            .unwrap();
     } else {
         let num = S25519::from_f64(0.0);
-        preprocessing::write_preproc_to_file(
-            files,
-            known_to_each,
-            number_of_triplets,
-            num,
-        )
-        .unwrap();
+        preprocessing::write_preproc_to_file(files, known_to_each, number_of_triplets, num)
+            .unwrap();
     }
 }
 
@@ -193,12 +180,12 @@ mod generic {
                 .ok_or(MpcError("No proccesing file found"))?;
             if self.use_32bit_field {
                 let mut context = preprocessing::read_preproc_from_file(file);
-                context.params.who_am_i = network.index;
+                context.params.who_am_i = network.id();
                 let engine = SpdzEngine32::new(network, runtime, context);
                 Ok(AdderEngine::Spdz32(engine))
             } else {
                 let mut context = preprocessing::read_preproc_from_file(file);
-                context.params.who_am_i = network.index;
+                context.params.who_am_i = network.id();
                 let engine = SpdzEngine::new(network, runtime, context);
                 Ok(AdderEngine::Spdz(engine))
             }
@@ -300,7 +287,7 @@ mod generic {
                 AdderEngine::Spdz32(e) => e.mpc_sum(nums),
                 AdderEngine::Shamir(e) => e.mpc_sum(nums),
                 AdderEngine::Shamir32(e) => e.mpc_sum(nums),
-                AdderEngine::Feldman(e) => e.mpc_sum(nums)
+                AdderEngine::Feldman(e) => e.mpc_sum(nums),
             }
         }
 

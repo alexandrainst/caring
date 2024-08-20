@@ -1,12 +1,16 @@
 pub mod parsing;
 
+use ff::Field;
 use rand::RngCore;
 
 use crate::{
-    algebra::{field::Field, math::Vector},
+    algebra::math::Vector,
     net::{network::Network, Id, SplitChannel},
     protocols::beaver::{beaver_multiply, BeaverTriple},
-    schemes::interactive::{InteractiveShared, InteractiveSharedMany},
+    schemes::{
+        interactive::{InteractiveShared, InteractiveSharedMany},
+        shamir,
+    },
 };
 
 pub enum Value<F> {
@@ -85,7 +89,7 @@ impl<S: InteractiveSharedMany> Stack<S> {
 impl<C, S, R, F> Engine<C, S, R>
 where
     C: SplitChannel,
-    S: InteractiveSharedMany<Value = F>,
+    S: InteractiveSharedMany<Value = F> + 'static,
     R: RngCore + Send,
     F: Field,
 {
@@ -204,7 +208,9 @@ where
                     (SharedValue::Vector(x), SharedValue::Vector(y)) => {
                         todo!()
                     }
-                    (SharedValue::Vector(_), SharedValue::Single(_)) => todo!(),
+                    (SharedValue::Vector(_), SharedValue::Single(y)) => {
+                        todo!()
+                    }
                     (SharedValue::Single(_), SharedValue::Vector(_)) => todo!(),
                 };
             }

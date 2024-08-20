@@ -1359,6 +1359,7 @@ dependencies = [
  "caring",
  "curve25519-dalek",
  "enum_dispatch",
+ "ff",
  "fixed",
  "rand",
  "tempfile",
