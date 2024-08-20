@@ -147,7 +147,7 @@ pub async fn beaver_multiply_vector<
     x: S::VectorShare,
     y: S::VectorShare,
     triples: &[BeaverTriple<S>],
-    mut coms: impl Communicate,
+    coms: impl Communicate,
 ) {
     //
 }

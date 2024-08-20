@@ -7,10 +7,7 @@ use crate::{
     algebra::math::Vector,
     net::{network::Network, Id, SplitChannel},
     protocols::beaver::{beaver_multiply, BeaverTriple},
-    schemes::{
-        interactive::{InteractiveShared, InteractiveSharedMany},
-        shamir,
-    },
+    schemes::interactive::{InteractiveShared, InteractiveSharedMany},
 };
 
 #[derive(Debug, Clone)]
