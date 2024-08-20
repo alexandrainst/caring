@@ -121,6 +121,7 @@ pub trait Shared:
 
 pub trait SharedMany: Shared {
     type Vectorized: Sized
+        + FromIterator<Self>
         + for<'a> Add<&'a Self::Vectorized, Output = Self::Vectorized>
         + for<'b> Sub<&'b Self::Vectorized, Output = Self::Vectorized>
         + serde::Serialize
@@ -283,7 +284,15 @@ pub mod interactive {
     }
 
     pub trait InteractiveSharedMany: InteractiveShared {
-        type VectorShare;
+        type VectorShare: Sized
+            + FromIterator<Self>
+            + for<'a> Add<&'a Self::VectorShare, Output = Self::VectorShare>
+            + for<'b> Sub<&'b Self::VectorShare, Output = Self::VectorShare>
+            + serde::Serialize
+            + serde::de::DeserializeOwned
+            + Clone
+            + Send
+            + Sync;
 
         fn share_many(
             ctx: &mut Self::Context,
