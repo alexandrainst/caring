@@ -3,10 +3,9 @@ pub mod mock;
 pub mod tapping;
 
 use crate::{
-    algebra::{element::Element32, field::Field},
-    net::{agency::Broadcast, connection::DuplexConnection, network::InMemoryNetwork},
+    algebra::element::Element32,
+    net::{agency::Broadcast, network::InMemoryNetwork},
     protocols::beaver,
-    schemes::interactive::InteractiveShared,
     vm::{Engine, Script},
 };
 use rand::rngs::mock::StepRng;
