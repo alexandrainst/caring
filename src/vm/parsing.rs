@@ -5,8 +5,9 @@ use std::{
 };
 
 use crate::{
+    algebra::math::Vector,
     net::Id,
-    vm::{Instruction, Script},
+    vm::{Instruction, Script, Value},
 };
 
 struct Exp<F> {
@@ -16,7 +17,13 @@ struct Exp<F> {
 impl<F> Exp<F> {
     pub fn share(secret: impl Into<F>) -> Self {
         Self {
-            exp: vec![Instruction::Share(secret.into())],
+            exp: vec![Instruction::Share(Value::Single(secret.into()))],
+        }
+    }
+
+    pub fn share_vec(secret: impl Into<Vector<F>>) -> Self {
+        Self {
+            exp: vec![Instruction::Share(Value::Vector(secret.into()))],
         }
     }
 
@@ -77,7 +84,7 @@ impl<F> Mul<F> for Exp<F> {
     type Output = Self;
 
     fn mul(mut self, rhs: F) -> Self::Output {
-        self.exp.push(Instruction::MulCon(rhs));
+        self.exp.push(Instruction::MulCon(Value::Single(rhs)));
         self
     }
 }

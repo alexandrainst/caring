@@ -6,7 +6,10 @@ use rand::RngCore;
 use crate::{
     algebra::field::Field,
     net::{agency::Broadcast, Communicate},
-    schemes::{interactive::InteractiveShared, Shared},
+    schemes::{
+        interactive::{InteractiveShared, InteractiveSharedMany},
+        Shared,
+    },
 };
 
 /// Beaver (Multiplication) Triple
@@ -135,26 +138,19 @@ pub async fn beaver_multiply_many<
     Some(zs)
 }
 
-//pub async fn beaver_multiply_many2<
-//    C,
-//    F: Field,
-//    S: Shared<Value = F, Context = C> + Copy + std::ops::Mul<S::Value, Output = S>,
-//>(
-//    ctx: &C,
-//    xs: &[S],
-//    ys: &[S],
-//    triples: &[BeaverTriple<S>],
-//    agent: Network<impl SplitChannel + Send + 'static>,
-//) -> Option<Vec<S>> {
-//    let n = xs.len();
-//    let (gateway, mut muxes) = NetworkGateway::multiplex(agent, n);
-//    let iter = multizip((xs, ys, triples, muxes.iter_mut())).map(|(x, y, triple, net)| {
-//        beaver_multiply(ctx, *x, *y, triple.clone(), net)
-//    });
-//    let zs : Option<Vec<S>> = join_all(iter).await.into_iter().collect();
-//    let _ = gateway.takedown().await;
-//    zs
-//}
+pub async fn beaver_multiply_vector<
+    C,
+    F: Field,
+    S: InteractiveSharedMany<Value = F> + std::ops::Mul<S::Value, Output = S>,
+>(
+    ctx: &mut S::Context,
+    x: S::VectorShare,
+    y: S::VectorShare,
+    triples: &[BeaverTriple<S>],
+    mut coms: impl Communicate,
+) {
+    //
+}
 
 #[derive(Clone)]
 pub struct BeaverSquare<S: Shared> {

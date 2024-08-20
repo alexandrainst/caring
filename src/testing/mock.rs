@@ -1,7 +1,13 @@
+use std::ops::{AddAssign, SubAssign};
+
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{algebra::field::Field, net::Id, schemes::Shared};
+use crate::{
+    algebra::{field::Field, math::Vector},
+    net::Id,
+    schemes::{Shared, SharedMany},
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Share<F> {
@@ -23,6 +29,12 @@ impl<F: Field> std::ops::Add for Share<F> {
     }
 }
 
+impl<F: Field> AddAssign<&Self> for Share<F> {
+    fn add_assign(&mut self, rhs: &Self) {
+        *self = *self + *rhs;
+    }
+}
+
 impl<F: Field> std::ops::Sub for Share<F> {
     type Output = Self;
 
@@ -33,6 +45,12 @@ impl<F: Field> std::ops::Sub for Share<F> {
             issued_to: self.issued_to,
             issued_by: None,
         }
+    }
+}
+
+impl<F: Field> SubAssign<&Self> for Share<F> {
+    fn sub_assign(&mut self, rhs: &Self) {
+        *self = *self - *rhs;
     }
 }
 
@@ -120,5 +138,29 @@ impl<F: Field + Serialize + DeserializeOwned + PartialEq + Send + Sync> Shared f
         );
 
         Some(shares[0].value)
+    }
+}
+
+impl<F: Field + Serialize + DeserializeOwned + PartialEq + Send + Sync> SharedMany for Share<F> {
+    type Vectorized = Vector<Share<F>>;
+
+    fn share_many(
+        ctx: &Self::Context,
+        secrets: &[Self::Value],
+        rng: impl rand::RngCore,
+    ) -> Vec<Self::Vectorized> {
+        Share::share_many_naive(ctx, secrets, rng)
+            .into_iter()
+            .map(|v| Vector::from_vec(v))
+            .collect()
+    }
+
+    fn recombine_many(
+        ctx: &Self::Context,
+        many_shares: &[Self::Vectorized],
+    ) -> Option<Vector<Self::Value>> {
+        Share::recombine_many_naive(ctx, many_shares)
+            .into_iter()
+            .collect()
     }
 }

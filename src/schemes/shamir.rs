@@ -310,6 +310,13 @@ pub struct VecShare<F: Field> {
     pub(crate) ys: Vector<F>,
 }
 
+impl<F: Field> FromIterator<Share<F>> for VecShare<F> {
+    fn from_iter<T: IntoIterator<Item = Share<F>>>(iter: T) -> Self {
+        let ys = iter.into_iter().map(|s| s.y).collect();
+        Self { ys }
+    }
+}
+
 impl<F: Field + Serialize + serde::de::DeserializeOwned> super::Shared for VecShare<F> {
     type Context = ShamirParams<F>;
 

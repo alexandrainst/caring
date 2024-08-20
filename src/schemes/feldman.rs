@@ -21,7 +21,10 @@ use std::{
 use crate::{
     algebra::math::Vector,
     net::agency::Unicast,
-    schemes::{shamir, SharedMany},
+    schemes::{
+        shamir::{self},
+        SharedMany,
+    },
 };
 use crate::{algebra::poly::Polynomial, schemes::shamir::ShamirParams};
 
@@ -227,7 +230,6 @@ impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
 pub struct VecVerifiableShare<F: Field, G: Group> {
     shares: shamir::VecShare<F>,
     polys: Box<[Polynomial<G>]>,
-    pub x: F,
 }
 
 impl<F, G> SharedMany for VerifiableShare<F, G>
@@ -256,6 +258,18 @@ where
         many_shares: &[Self::Vectorized],
     ) -> Option<Vector<Self::Value>> {
         reconstruct_many(ctx, many_shares).map(Vector::from_vec)
+    }
+}
+
+impl<F: Field, G: Group> FromIterator<VerifiableShare<F, G>> for VecVerifiableShare<F, G> {
+    fn from_iter<T: IntoIterator<Item = VerifiableShare<F, G>>>(iter: T) -> Self {
+        let (shares, polys): (Vec<_>, Vec<_>) = iter
+            .into_iter()
+            .map(|VerifiableShare { share, poly }| (share, poly))
+            .unzip();
+        let shares = shares.into();
+        let polys = polys.into();
+        Self { shares, polys }
     }
 }
 
@@ -294,7 +308,6 @@ impl<'a, F: Field, G: Group> std::ops::Sub<&'a Self> for VecVerifiableShare<F, G
 impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F, G> {
     fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
         let fst = iter.next().unwrap();
-        let x = fst.x;
         let mut shares = fst.shares;
         let mut polys = fst.polys.iter().cloned().collect_vec();
 
@@ -305,7 +318,7 @@ impl<F: Field, G: Group> std::iter::Sum for VecVerifiableShare<F, G> {
             }
         }
         let polys: Box<[_]> = polys.into();
-        VecVerifiableShare { shares, polys, x }
+        VecVerifiableShare { shares, polys }
     }
 }
 
@@ -313,8 +326,8 @@ impl<F: Field, G> VecVerifiableShare<F, G>
 where
     G: Group + std::ops::Mul<F, Output = G>,
 {
-    pub fn verify(&self) -> bool {
-        let VecVerifiableShare { shares, polys, x } = self;
+    pub fn verify(&self, x: F) -> bool {
+        let VecVerifiableShare { shares, polys } = self;
         let ys = &shares.ys;
         for (&y, poly) in ys.iter().zip(polys.iter()) {
             let mut check = G::identity();
@@ -384,7 +397,7 @@ where
             ys: Vector::from_vec(vecshare),
         };
         let polys = macs.clone();
-        vshares.push(VecVerifiableShare { shares, polys, x })
+        vshares.push(VecVerifiableShare { shares, polys })
     }
 
     vshares
@@ -397,8 +410,8 @@ where
     G: Group,
     T: Borrow<VecVerifiableShare<F, G>>,
 {
-    for shares in vec_shares {
-        if !(shares.borrow().verify()) {
+    for (shares, x) in vec_shares.iter().zip(ctx.ids.iter()) {
+        if !(shares.borrow().verify(*x)) {
             return None;
         };
     }
@@ -441,8 +454,8 @@ mod test {
             let v: Vec<_> = a.clone().into_iter().map(to_scalar).collect();
             share_many::<Scalar, RistrettoPoint>(&v, &ctx.ids, 4, &mut rng)
         };
-        for share in &vs1 {
-            assert!(share.verify());
+        for (share, x) in vs1.iter().zip(ctx.ids.iter()) {
+            assert!(share.verify(*x));
         }
         let vsum = reconstruct_many(&ctx, &vs1).unwrap();
         let v: Vec<u32> = vsum
@@ -501,17 +514,18 @@ mod test {
             let v: Vec<_> = b.clone().into_iter().map(to_scalar).collect();
             share_many::<Scalar, RistrettoPoint>(&v, &ctx.ids, 4, &mut rng)
         };
-        for share in &vs1 {
-            assert!(share.verify());
+
+        for (share, x) in vs1.iter().zip(ctx.ids.iter()) {
+            assert!(share.verify(*x));
         }
-        for share in &vs2 {
-            assert!(share.verify());
+        for (share, x) in vs2.iter().zip(ctx.ids.iter()) {
+            assert!(share.verify(*x));
         }
         let shares: Vec<VecVerifiableShare<_, _>> =
             vs1.into_iter().zip(vs2).map(|(s1, s2)| s1 + &s2).collect();
 
-        for share in &shares {
-            assert!(share.verify());
+        for (share, x) in shares.iter().zip(ctx.ids.iter()) {
+            assert!(share.verify(*x));
         }
 
         let vsum = reconstruct_many(&ctx, &shares).unwrap();
