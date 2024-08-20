@@ -10,7 +10,7 @@ use crate::{
     vm::{Instruction, Script, Value},
 };
 
-struct Exp<F> {
+pub struct Exp<F> {
     exp: Vec<Instruction<F>>,
 }
 
