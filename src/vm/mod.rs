@@ -13,21 +13,38 @@ use crate::{
     },
 };
 
+#[derive(Debug, Clone)]
 pub enum Value<F> {
     Single(F),
     Vector(Vector<F>),
 }
 
-pub enum Instruction<F> {
-    Share(Value<F>),
-    SymShare(Value<F>),
+impl<F> From<F> for Value<F> {
+    fn from(value: F) -> Self {
+        Value::Single(value)
+    }
+}
+impl<F> From<Vector<F>> for Value<F> {
+    fn from(value: Vector<F>) -> Self {
+        Value::Vector(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Const(u16);
+
+#[derive(Debug, Clone, Copy)]
+pub enum Instruction {
+    Share(Const),
+    SymShare(Const),
     Recv(Id),
     RecvVec(Id),
     Recombine,
     Add,
-    MulCon(Value<F>),
+    MulCon(Const),
     Mul,
     Sub,
+    Load(Const),
 }
 
 // TODO: Handle vectorized shares
@@ -37,7 +54,10 @@ enum SharedValue<S: InteractiveSharedMany> {
     Vector(S::VectorShare),
 }
 
-pub struct Script<F>(Vec<Instruction<F>>);
+pub struct Script<F> {
+    constants: Vec<Value<F>>,
+    instructions: Vec<Instruction>,
+}
 
 pub struct Engine<C: SplitChannel, S: InteractiveShared, R> {
     network: Network<C>,
@@ -111,9 +131,12 @@ where
     pub async fn execute(&mut self, script: &Script<F>) -> F {
         let mut stack = Stack::new();
         let mut results = vec![];
+        let constants = &script.constants;
 
-        for opcode in script.0.iter() {
-            self.step(&mut stack, &mut results, opcode).await.unwrap();
+        for opcode in script.instructions.iter() {
+            self.step(&mut stack, &mut results, constants, opcode)
+                .await
+                .unwrap();
         }
 
         results.pop().unwrap()
@@ -123,22 +146,29 @@ where
         &mut self,
         stack: &mut Stack<S>,
         results: &mut Vec<F>,
-        opcode: &Instruction<F>,
+        constants: &[Value<F>],
+        opcode: &Instruction,
     ) -> Result<(), S::Error> {
         let ctx = &mut self.context;
         let mut coms = &mut self.network;
         let mut rng = &mut self.rng;
         let fueltank = &mut self.fueltank;
         match opcode {
-            Instruction::Share(Value::Single(f)) => {
-                let share = S::share(ctx, *f, &mut rng, &mut coms).await?;
-                stack.push_single(share)
+            Instruction::Share(addr) => {
+                let f = &constants[addr.0 as usize];
+                match f {
+                    Value::Single(f) => {
+                        let share = S::share(ctx, *f, &mut rng, &mut coms).await?;
+                        stack.push_single(share)
+                    }
+                    Value::Vector(fs) => {
+                        let share = S::share_many(ctx, fs, &mut rng, &mut coms).await?;
+                        stack.push_vector(share)
+                    }
+                }
             }
-            Instruction::Share(Value::Vector(f)) => {
-                let share = S::share_many(ctx, f, &mut rng, &mut coms).await?;
-                stack.push_vector(share)
-            }
-            Instruction::SymShare(f) => {
+            Instruction::SymShare(addr) => {
+                let f = &constants[addr.0 as usize];
                 match f {
                     Value::Single(f) => {
                         let shares = S::symmetric_share(ctx, *f, &mut rng, &mut coms).await?;
@@ -151,7 +181,6 @@ where
                         stack.stack.extend(shares) // dirty hack
                     }
                 }
-                //stack.append(&mut shares);
             }
             Instruction::Recv(id) => {
                 let share = S::receive_share(ctx, &mut coms, *id).await?;
@@ -184,17 +213,19 @@ where
                     _ => panic!("Unsupported operation"),
                 }
             }
-            Instruction::MulCon(f) => {
-                let a = stack.pop();
-                match (a, f) {
-                    (SharedValue::Single(a), Value::Single(f)) => stack.push_single(a * *f),
-                    (SharedValue::Vector(a), Value::Vector(f)) => {
-                        todo!("Need to have vector * vector in place")
+            Instruction::MulCon(addr) => {
+                let constant = &constants[addr.0 as usize];
+                match (stack.pop(), constant) {
+                    (SharedValue::Single(a), Value::Single(constant)) => {
+                        stack.push_single(a * *constant)
                     }
+                    (SharedValue::Vector(a), Value::Vector(constant)) => {
+                        todo!("vector mult")
+                        //stack.push_vector(a * &constant)
+                    }
+                    (SharedValue::Single(_), Value::Vector(_)) => todo!(),
                     (SharedValue::Vector(_), Value::Single(_)) => todo!(),
-                    (SharedValue::Single(s), Value::Vector(f)) => panic!(),
-                };
-                todo!()
+                }
             }
             Instruction::Mul => {
                 let x = stack.pop();
@@ -214,6 +245,9 @@ where
                     (SharedValue::Single(_), SharedValue::Vector(_)) => todo!(),
                 };
             }
+            _ => {
+                todo!()
+            }
         }
         Ok(())
     }
@@ -227,7 +261,7 @@ mod tests {
         algebra::{self, element::Element32},
         net::{agency::Broadcast, connection::DuplexConnection, network::InMemoryNetwork, Id},
         testing::{self, mock},
-        vm::{Engine, Instruction, Value},
+        vm::{Const, Engine, Instruction, Value},
     };
 
     pub fn dumb_engine(
@@ -257,11 +291,14 @@ mod tests {
                 let mut engine = dumb_engine(net);
                 use Instruction::{Add, Recombine, SymShare};
                 let val = Element32::from(val);
-                let script = crate::vm::Script(vec![
-                    SymShare(Value::Single(val)), // add two to the stack.
-                    Add,
-                    Recombine,
-                ]);
+                let script = crate::vm::Script {
+                    constants: vec![Value::Single(val)],
+                    instructions: vec![
+                        SymShare(Const(0)), // add two to the stack.
+                        Add,
+                        Recombine,
+                    ],
+                };
                 let res: u32 = engine.execute(&script).await.into();
                 engine.network.shutdown().await.unwrap();
                 res
@@ -276,14 +313,25 @@ mod tests {
     async fn add_two_again() {
         use Instruction::{Add, Recombine, Recv, Share};
         let a = Element32::from(42u32);
-        let a = crate::vm::Script(vec![
-            Share(Value::Single(a)), // +1
-            Recv(Id(1)),             // +1
-            Add,                     // -1
-            Recombine,               // -1
-        ]);
+        let a = crate::vm::Script {
+            constants: vec![Value::Single(a)],
+            instructions: vec![
+                Share(Const(0)), // +1
+                Recv(Id(1)),     // +1
+                Add,             // -1
+                Recombine,       // -1
+            ],
+        };
         let b = Element32::from(57u32);
-        let b = crate::vm::Script(vec![Recv(Id(0)), Share(Value::Single(b)), Add, Recombine]);
+        let b = crate::vm::Script {
+            constants: vec![Value::Single(b)],
+            instructions: vec![
+                Recv(Id(0)),     // +1
+                Share(Const(0)), // +1
+                Add,             // -1
+                Recombine,       // -1
+            ],
+        };
         let results = testing::Cluster::new(2)
             .with_args([a, b])
             .run_with_args(|net, script| async move {

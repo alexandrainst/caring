@@ -7,43 +7,48 @@ use std::{
 use crate::{
     algebra::math::Vector,
     net::Id,
-    vm::{Instruction, Script, Value},
+    vm::{Const, Instruction, Script, Value},
 };
 
+#[derive(Debug)]
 pub struct Exp<F> {
-    exp: Vec<Instruction<F>>,
+    constants: Vec<Value<F>>,
+    instructions: Vec<Instruction>,
 }
 
 impl<F> Exp<F> {
-    pub fn share(secret: impl Into<F>) -> Self {
+    fn empty() -> Self {
         Self {
-            exp: vec![Instruction::Share(Value::Single(secret.into()))],
+            constants: vec![],
+            instructions: vec![],
+        }
+    }
+    fn add_constant(&mut self, value: impl Into<Value<F>>) -> Const {
+        self.constants.push(value.into());
+        Const(self.constants.len() as u16 - 1)
+    }
+
+    fn constant_op(value: impl Into<Value<F>>, opcode: Instruction) -> Self {
+        let constants = vec![value.into()];
+        Self {
+            instructions: vec![opcode],
+            constants,
         }
     }
 
+    pub fn share(secret: impl Into<F>) -> Self {
+        Self::constant_op(secret.into(), Instruction::Share(Const(0)))
+    }
+
     pub fn share_vec(secret: impl Into<Vector<F>>) -> Self {
-        Self {
-            exp: vec![Instruction::Share(Value::Vector(secret.into()))],
-        }
+        Self::constant_op(secret.into(), Instruction::Share(Const(0)))
     }
 
     pub fn receive_input(id: Id) -> Self {
         Self {
-            exp: vec![Instruction::Recv(id)],
+            constants: vec![],
+            instructions: vec![Instruction::Recv(id)],
         }
-    }
-
-    pub fn open(mut self) -> Self {
-        self.exp.push(Instruction::Recombine);
-        self
-    }
-
-    pub fn finalize(self) -> Script<F> {
-        Script(self.exp)
-    }
-
-    fn empty() -> Self {
-        Self { exp: vec![] }
     }
 
     pub fn share_or_receive<const N: usize>(input: impl Into<F>, me: Id) -> [Self; N] {
@@ -52,20 +57,50 @@ impl<F> Exp<F> {
             let id = Id(i);
             if id == me {
                 let f = input.take().expect("We only do this once.");
-                Exp::share(f)
+                Self::share(f)
             } else {
-                Exp::receive_input(id)
+                Self::receive_input(id)
             }
         })
+    }
+    pub fn open(mut self) -> Self {
+        self.instructions.push(Instruction::Recombine);
+        self
+    }
+
+    pub fn finalize(self) -> Script<F> {
+        let Self {
+            constants,
+            instructions,
+        } = self;
+        Script {
+            constants,
+            instructions,
+        }
+    }
+
+    fn append(&mut self, mut other: Self) {
+        let n = self.constants.len() as u16;
+        self.constants.append(&mut other.constants);
+        for opcode in other.instructions.iter_mut() {
+            match opcode {
+                Instruction::Share(addr) => addr.0 += n,
+                Instruction::SymShare(addr) => addr.0 += n,
+                Instruction::Load(addr) => addr.0 += n,
+                Instruction::MulCon(addr) => addr.0 += n,
+                _ => (),
+            }
+        }
+        self.instructions.append(&mut other.instructions);
     }
 }
 
 impl<F> Add for Exp<F> {
     type Output = Self;
 
-    fn add(mut self, mut rhs: Self) -> Self::Output {
-        self.exp.append(&mut rhs.exp);
-        self.exp.push(Instruction::Add);
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self.append(rhs);
+        self.instructions.push(Instruction::Add);
         self
     }
 }
@@ -73,9 +108,9 @@ impl<F> Add for Exp<F> {
 impl<F> Mul for Exp<F> {
     type Output = Self;
 
-    fn mul(mut self, mut rhs: Self) -> Self::Output {
-        self.exp.append(&mut rhs.exp);
-        self.exp.push(Instruction::Mul);
+    fn mul(mut self, rhs: Self) -> Self::Output {
+        self.append(rhs);
+        self.instructions.push(Instruction::Mul);
         self
     }
 }
@@ -84,7 +119,8 @@ impl<F> Mul<F> for Exp<F> {
     type Output = Self;
 
     fn mul(mut self, rhs: F) -> Self::Output {
-        self.exp.push(Instruction::MulCon(Value::Single(rhs)));
+        let addr = self.add_constant(rhs);
+        self.instructions.push(Instruction::MulCon(addr));
         self
     }
 }
@@ -92,9 +128,9 @@ impl<F> Mul<F> for Exp<F> {
 impl<F> Sub for Exp<F> {
     type Output = Self;
 
-    fn sub(mut self, mut rhs: Self) -> Self::Output {
-        self.exp.append(&mut rhs.exp);
-        self.exp.push(Instruction::Sub);
+    fn sub(mut self, rhs: Self) -> Self::Output {
+        self.append(rhs);
+        self.instructions.push(Instruction::Sub);
         self
     }
 }
@@ -123,6 +159,7 @@ mod test {
                         let [a, b, c] = E::share_or_receive(inputs[id], me);
                         let sum = a + b + c;
                         let res = sum.open();
+                        dbg!(&res);
                         res.finalize()
                     })
                     .collect::<Vec<_>>(),
