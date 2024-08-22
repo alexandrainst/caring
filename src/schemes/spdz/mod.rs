@@ -1641,7 +1641,7 @@ mod test {
         let mut files = [tempfile::tempfile().unwrap(), tempfile::tempfile().unwrap()];
         let known_to_each = vec![1, 2];
         let number_of_triplets = 2;
-        preprocessing::write_preproc_to_file(
+        preprocessing::write_context(
             &mut files,
             known_to_each,
             number_of_triplets,
@@ -1650,8 +1650,8 @@ mod test {
         .unwrap();
         files[0].rewind().unwrap();
         files[1].rewind().unwrap();
-        let p1_context: SpdzContext<F> = preprocessing::read_preproc_from_file(&mut files[0]);
-        let p2_context: SpdzContext<F> = preprocessing::read_preproc_from_file(&mut files[1]);
+        let p1_context: SpdzContext<F> = preprocessing::load_context(&mut files[0]);
+        let p2_context: SpdzContext<F> = preprocessing::load_context(&mut files[1]);
         // unpacking
         let p1_params = p1_context.params;
         let p2_params = p2_context.params;

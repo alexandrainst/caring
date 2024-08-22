@@ -1,24 +1,29 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::time::Duration;
+use std::time;
 use std::{fs::File, hint::black_box, io::Seek, thread};
+use std::{io::Write, time::Duration};
 use wecare::*;
 
 fn precompute(n: usize) -> (File, File) {
+    let clock = time::Instant::now();
     print!("\nPrecomputing...");
+    let _ = std::io::stdout().flush();
     let ctx1 = tempfile::tempfile().unwrap();
     let ctx2 = tempfile::tempfile().unwrap();
     let mut files = [ctx1, ctx2];
-    do_preproc(&mut files, vec![n, n], false);
+    do_preproc(&mut files, &[n, n], false);
     let [mut ctx1, mut ctx2] = files;
     ctx1.rewind().unwrap();
     ctx2.rewind().unwrap();
-    println!(" Complete!");
+    println!(" Complete! (took {:#?})", clock.elapsed());
     (ctx1, ctx2)
 }
 
 fn build_spdz_engines() -> (Engine, Engine) {
-    let (mut ctx1, mut ctx2) = precompute(2000000);
-    print!("\nSetting up engines...");
+    let (mut ctx1, mut ctx2) = precompute(10000000);
+    let clock = time::Instant::now();
+    print!("Setting up engines...");
+    let _ = std::io::stdout().flush();
     let (e1, e2) = thread::scope(|scope| {
         let e2 = scope.spawn(|| {
             Engine::setup("127.0.0.1:1234")
@@ -37,7 +42,7 @@ fn build_spdz_engines() -> (Engine, Engine) {
         });
         (e1.join().unwrap(), e2.join().unwrap())
     });
-    println!(" Complete!");
+    println!(" Complete! (took {:#?})", clock.elapsed());
     (e1, e2)
 }
 
