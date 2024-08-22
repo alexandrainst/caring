@@ -21,3 +21,7 @@ tempfile = "3.10.1"
 [[bench]]
 name = "spdz-25519"
 harness = false
+
+[[bench]]
+name = "shamir-25519"
+harness = false

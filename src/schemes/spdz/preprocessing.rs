@@ -7,11 +7,13 @@ use crate::{
 use bincode;
 use ff::PrimeField;
 use rand::SeedableRng;
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     error::Error,
     fmt,
     fs::File,
     io::{self, Write},
+    path::Path,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,7 +95,7 @@ pub struct SecretValues<F> {
     pub mac_key: F,
 }
 
-pub fn write_preproc_to_file<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
+pub fn write_context<F: PrimeField + Serialize + DeserializeOwned>(
     files: &mut [File],
     known_to_each: Vec<usize>,
     number_of_triplets: usize,
@@ -113,14 +115,23 @@ pub fn write_preproc_to_file<F: PrimeField + serde::Serialize + serde::de::Deser
     Ok(())
 }
 
-pub fn read_preproc_from_file<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
+pub fn load_context<F: PrimeField + Serialize + DeserializeOwned>(
     file: &mut File,
 ) -> SpdzContext<F> {
     // TODO: return Result instead.
-    bincode::deserialize_from(file).unwrap()
+    let buffered = std::io::BufReader::new(file);
+    bincode::deserialize_from(buffered).unwrap()
 }
 
-pub fn dealer_preproc<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
+pub async fn load_context_async<F: PrimeField + Serialize + DeserializeOwned>(
+    file: &Path,
+) -> SpdzContext<F> {
+    let contents = tokio::fs::read(file).await.unwrap();
+    // TODO: return Result instead.
+    bincode::deserialize_from(&*contents).unwrap()
+}
+
+pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
     mut rng: impl rand::Rng,
     known_to_each: Vec<usize>,
     number_of_triplets: usize,
@@ -247,13 +258,13 @@ pub fn dealer_preproc<F: PrimeField + serde::Serialize + serde::de::DeserializeO
     (contexts, secret_values)
 }
 
-impl<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned> SpdzContext<F> {
+impl<F: PrimeField + Serialize + DeserializeOwned> SpdzContext<F> {
     fn empty(number_of_parties: usize, mac_key_share: F, who_am_i: Id) -> Self {
         generate_empty_context(number_of_parties, mac_key_share, who_am_i)
     }
 
     pub fn from_file(mut file: File) -> Result<Self, io::Error> {
-        Ok(read_preproc_from_file(&mut file))
+        Ok(load_context(&mut file))
     }
 }
 
