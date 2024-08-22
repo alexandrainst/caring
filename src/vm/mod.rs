@@ -34,17 +34,14 @@ pub struct Const(u16);
 pub enum Instruction {
     Share(Const),
     SymShare(Const),
+    MulCon(Const),
     Recv(Id),
     RecvVec(Id),
     Recombine,
     Add,
-    MulCon(Const),
     Mul,
     Sub,
-    Load(Const),
 }
-
-// TODO: Handle vectorized shares
 
 enum SharedValue<S: InteractiveSharedMany> {
     Single(S),
@@ -236,7 +233,7 @@ where
                     (SharedValue::Vector(x), SharedValue::Vector(y)) => {
                         todo!()
                     }
-                    (SharedValue::Vector(_), SharedValue::Single(y)) => {
+                    (SharedValue::Vector(_), SharedValue::Single(_y)) => {
                         todo!()
                     }
                     (SharedValue::Single(_), SharedValue::Vector(_)) => todo!(),

@@ -174,7 +174,7 @@ mod generic {
 
     impl<'a> EngineBuilder<'a> {
         pub fn build_spdz(self) -> Result<AdderEngine, MpcError> {
-            let (network, runtime) = self.semi_build()?;
+            let (network, runtime) = self.connect_network()?;
             let file = self
                 .preprocessed
                 .ok_or(MpcError("No proccesing file found"))?;
@@ -193,7 +193,7 @@ mod generic {
 
         pub fn build_shamir(self) -> Result<AdderEngine, MpcError> {
             let threshold = self.threshold.ok_or(MpcError("No threshold found"))?;
-            let (network, runtime) = self.semi_build()?;
+            let (network, runtime) = self.connect_network()?;
             if self.use_32bit_field {
                 let ids = network
                     .participants()
@@ -215,7 +215,7 @@ mod generic {
 
         pub fn build_feldman(self) -> Result<AdderEngine, MpcError> {
             let threshold = self.threshold.ok_or(MpcError("No threshold found"))?;
-            let (network, runtime) = self.semi_build()?;
+            let (network, runtime) = self.connect_network()?;
             let ids = network
                 .participants()
                 .map(|id| (id + 1u32).into())
@@ -225,7 +225,7 @@ mod generic {
             Ok(AdderEngine::Feldman(engine))
         }
 
-        fn semi_build(&self) -> Result<(TcpNetwork, Runtime), MpcError> {
+        fn connect_network(&self) -> Result<(TcpNetwork, Runtime), MpcError> {
             let my_addr: SocketAddr = self.my_addr.parse().unwrap();
             let others: Vec<SocketAddr> =
                 self.other_addr.iter().map(|s| s.parse().unwrap()).collect();
