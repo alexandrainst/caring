@@ -1,6 +1,7 @@
 pub mod parsing;
 
 use ff::Field;
+use itertools::Itertools;
 use rand::RngCore;
 
 use crate::{
@@ -27,6 +28,31 @@ impl<F> From<Vector<F>> for Value<F> {
     }
 }
 
+impl<F> Value<F> {
+    pub fn convert<B>(self) -> Value<B>
+    where
+        F: Into<B>,
+    {
+        match self {
+            Value::Single(v) => Value::Single(v.into()),
+            Value::Vector(v) => Value::Vector(v.into_iter().map(|v| v.into()).collect()),
+        }
+    }
+
+    pub fn try_convert<B>(self) -> Result<Value<B>, F::Error>
+    where
+        F: TryInto<B>,
+    {
+        match self {
+            Value::Single(v) => Ok(Value::Single(v.try_into()?)),
+            Value::Vector(v) => {
+                let bs: Vector<B> = v.into_iter().map(|v| v.try_into()).try_collect()?;
+                Ok(Value::Vector(bs))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Const(u16);
 
@@ -43,6 +69,7 @@ pub enum Instruction {
     Sub,
 }
 
+#[derive(Clone, Debug)]
 enum SharedValue<S: InteractiveSharedMany> {
     Single(S),
     Vector(S::VectorShare),
@@ -82,7 +109,7 @@ impl<S: InteractiveSharedMany> Stack<S> {
     }
 
     pub fn pop(&mut self) -> SharedValue<S> {
-        self.stack.pop().unwrap()
+        self.stack.pop().expect("No value found")
     }
 
     pub fn pop_single(&mut self) -> S {
@@ -238,9 +265,6 @@ where
                     }
                     (SharedValue::Single(_), SharedValue::Vector(_)) => todo!(),
                 };
-            }
-            _ => {
-                todo!()
             }
         }
         Ok(())

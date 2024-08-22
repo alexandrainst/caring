@@ -1,24 +1,14 @@
-use curve25519_dalek::{constants, Scalar};
-use ff::PrimeField;
+use curve25519_dalek::Scalar;
 use fixed::{FixedI128, FixedI32};
 use rand::rngs::StdRng;
 
-use std::{
-    error::Error,
-    ops::{Add, Sub},
-};
 
 use caring::{
     algebra::element::Element32,
-    net::connection::{Connection, TcpConnection},
+    net::connection::TcpConnection,
     schemes::{feldman, shamir, spdz},
-    vm::{self, parsing::Exp, Instruction, Value},
+    vm::{self, parsing::Exp},
 };
-
-pub enum Expr {
-    Curve25519(vm::parsing::Exp<curve25519_dalek::Scalar>),
-    Element32(vm::parsing::Exp<Element32>),
-}
 
 pub enum Number {
     Float(f64),
@@ -80,6 +70,57 @@ impl TryFrom<Number> for Scalar {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum UnknownNumber{
+    U32(u32),
+    U64(u64),
+    U128(u128),
+}
+
+
+impl UnknownNumber {
+
+    pub fn to_u64(self) -> u64 {
+        match self {
+            UnknownNumber::U32(a) => a.into(),
+            UnknownNumber::U64(a) => a,
+            UnknownNumber::U128(a) => a as u64
+        }
+    }
+
+    pub fn to_i64(self) -> i64 {
+        todo!()
+    }
+
+    pub fn to_f64(self) -> u64 {
+        match self {
+            UnknownNumber::U32(val) => {
+                let val = FixedI32::<16>::from_bits(val as i32);
+                val.to_num()
+            }
+            UnknownNumber::U64(_) => todo!(),
+            UnknownNumber::U128(val) => {
+                let num = FixedI128::<64>::from_bits(val as i128);
+                num.to_num()
+            },
+        }
+    }
+}
+
+impl From<Element32> for UnknownNumber {
+    fn from(value: Element32) -> Self {
+        let value: u32 = value.into();
+        Self::U32(value)
+    }
+}
+
+impl From<Scalar> for UnknownNumber {
+    fn from(value: Scalar) -> Self {
+        let val = u128::from_le_bytes(value.as_bytes()[0..128 / 8].try_into().unwrap());
+        Self::U128(val)
+    }
+}
+
 type ShamirEngine<F> = vm::Engine<TcpConnection, shamir::Share<F>, StdRng>;
 type SpdzEngine<F> = vm::Engine<TcpConnection, spdz::Share<F>, StdRng>;
 type FeldmanEngine<F, G> = vm::Engine<TcpConnection, feldman::VerifiableShare<F, G>, StdRng>;
@@ -89,38 +130,8 @@ type ShamirElement32Engine = ShamirEngine<caring::algebra::element::Element32>;
 type SpdzCurve25519Engine = SpdzEngine<curve25519_dalek::Scalar>;
 type SpdzElement32Engine = SpdzEngine<caring::algebra::element::Element32>;
 
-pub struct Expression {
-    constants: Vec<Number>,
-    instructions: Vec<Instruction>,
-}
 
-impl Add for Expr {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Expr::Curve25519(a), Expr::Curve25519(b)) => Expr::Curve25519(a + b),
-            (Expr::Element32(a), Expr::Element32(b)) => Expr::Element32(a + b),
-            _ => {
-                panic!("Incompatible")
-            }
-        }
-    }
-}
-
-impl Sub for Expr {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Expr::Curve25519(a), Expr::Curve25519(b)) => Self::Curve25519(a - b),
-            (Expr::Element32(a), Expr::Element32(b)) => Self::Element32(a - b),
-            _ => {
-                panic!("Incompatible")
-            }
-        }
-    }
-}
+pub type Expr = Exp<Number>;
 
 pub enum Engine {
     Spdz(SpdzCurve25519Engine),
@@ -128,27 +139,18 @@ pub enum Engine {
 }
 
 impl Engine {
-    pub async fn execute(&mut self, expr: Expression) {
-        match self {
+    pub async fn execute(&mut self, expr: Expr) -> UnknownNumber {
+        let res: UnknownNumber = match self {
             Engine::Spdz(engine) => {
-                let constants = expr
-                    .constants
-                    .into_iter()
-                    .map(|x| Value::Single(x.try_into().unwrap()))
-                    .collect();
-                let exp = Exp::from_parts(constants, expr.instructions);
-                engine.execute(&exp.open().finalize()).await;
+                let res = engine.execute(&expr.open().try_finalize().unwrap()).await;
+                res.into()
             }
             Engine::Shamir(engine) => {
-                let constants = expr
-                    .constants
-                    .into_iter()
-                    .map(|x| Value::Single(x.try_into().unwrap()))
-                    .collect();
-                let exp = Exp::from_parts(constants, expr.instructions);
-                engine.execute(&exp.open().finalize()).await;
+                engine.execute(&expr.open().try_finalize().unwrap()).await.into()
             }
             _ => panic!("unsupported!"),
-        }
+        };
+
+        res
     }
 }
