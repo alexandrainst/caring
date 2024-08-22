@@ -1,3 +1,4 @@
+use itertools::Itertools;
 /// Pseudo-parsing direct to an array-backed AST which just is a bytecode stack.
 use std::{
     array,
@@ -116,16 +117,38 @@ impl<F> Exp<F> {
     }
 }
 
-impl<F> Opened<F> {
-    pub fn finalize(self) -> Script<F> {
+impl<T> Opened<T> {
+    pub fn finalize<F>(self) -> Script<F>
+    where
+        T: Into<F>,
+    {
         let Exp {
             constants,
             instructions,
         } = self.0;
+        let constants = constants.into_iter().map(|v| v.convert()).collect();
         Script {
             constants,
             instructions,
         }
+    }
+
+    pub fn try_finalize<F>(self) -> Result<Script<F>, T::Error>
+    where
+        T: TryInto<F>,
+    {
+        let Exp {
+            constants,
+            instructions,
+        } = self.0;
+        let constants = constants
+            .into_iter()
+            .map(|v| v.try_convert())
+            .try_collect()?;
+        Ok(Script {
+            constants,
+            instructions,
+        })
     }
 }
 
