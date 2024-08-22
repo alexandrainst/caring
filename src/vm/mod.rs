@@ -1,5 +1,7 @@
 pub mod parsing;
 
+use std::future::Future;
+
 use ff::Field;
 use itertools::Itertools;
 use rand::RngCore;
@@ -268,6 +270,14 @@ where
             }
         }
         Ok(())
+    }
+
+    pub async fn raw<Func, Out>(&mut self, routine: Func) -> Out
+    where
+        Func: async Fn(&mut Network<C>, &S::Context, &mut R) -> Out,
+    {
+        // TODO: Add other resources.
+        routine(&mut self.network, &mut self.context, &mut self.rng).await
     }
 }
 

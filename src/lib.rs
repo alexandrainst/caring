@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 #![allow(clippy::cast_possible_truncation)]
 #![feature(async_fn_traits)]
+#![feature(async_closure)]
 
 pub mod algebra;
 pub mod net;
