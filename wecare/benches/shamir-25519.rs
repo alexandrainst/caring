@@ -1,4 +1,4 @@
-use wecare::vm::blocking;
+use wecare::vm::{blocking, FieldKind};
 use criterion::{criterion_group, criterion_main, Criterion};
 use wecare::{vm::SchemeKind, vm::Engine};
 use std::{io::Write, time::Duration};
@@ -14,6 +14,7 @@ fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
                 .address("127.0.0.1:1234")
                 .participant("127.0.0.1:1235")
                 .scheme(SchemeKind::Shamir)
+                .field(FieldKind::Curve25519)
                 .single_threaded_runtime()
                 .connect_blocking().unwrap()
                 .build()
@@ -25,6 +26,7 @@ fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
                 .address("127.0.0.1:1235")
                 .participant("127.0.0.1:1234")
                 .scheme(SchemeKind::Shamir)
+                .field(FieldKind::Curve25519)
                 .single_threaded_runtime()
                 .connect_blocking().unwrap()
                 .build()
