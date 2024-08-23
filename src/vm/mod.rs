@@ -1,7 +1,5 @@
 pub mod parsing;
 
-use std::future::Future;
-
 use ff::Field;
 use itertools::{Either, Itertools};
 use rand::RngCore;
@@ -298,7 +296,7 @@ where
                     (SharedValue::Single(a), Value::Single(constant)) => {
                         stack.push_single(a * *constant)
                     }
-                    (SharedValue::Vector(a), Value::Vector(constant)) => {
+                    (SharedValue::Vector(_a), Value::Vector(_constant)) => {
                         todo!("vector mult")
                         //stack.push_vector(a * &constant)
                     }
@@ -315,7 +313,7 @@ where
                         let z = beaver_multiply(ctx, x, y, triple, &mut coms).await?;
                         stack.push_single(z)
                     }
-                    (SharedValue::Vector(x), SharedValue::Vector(y)) => {
+                    (SharedValue::Vector(_x), SharedValue::Vector(_y)) => {
                         todo!()
                     }
                     (SharedValue::Vector(_), SharedValue::Single(_y)) => {

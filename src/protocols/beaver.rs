@@ -143,13 +143,13 @@ pub async fn beaver_multiply_vector<
     F: Field,
     S: InteractiveSharedMany<Value = F> + std::ops::Mul<S::Value, Output = S>,
 >(
-    ctx: &mut S::Context,
-    x: S::VectorShare,
-    y: S::VectorShare,
-    triples: &[BeaverTriple<S>],
-    coms: impl Communicate,
+    _ctx: &mut S::Context,
+    _x: S::VectorShare,
+    _y: S::VectorShare,
+    _triples: &[BeaverTriple<S>],
+    _coms: impl Communicate,
 ) {
-    //
+    todo!()
 }
 
 #[derive(Clone)]

@@ -345,7 +345,6 @@ mod test {
             .with_args(
                 (0..3)
                     .map(|id| {
-                        let me = Id(id);
                         type E = Exp<Element32>;
                         let exp = E::symmetric_share(inputs[id]);
                         let [a, b, c]: [E; 3] = exp.concrete(id, 3).try_into().unwrap();

@@ -9,13 +9,11 @@ use caring::{
     net::{agency::Broadcast, connection::TcpConnection, network::TcpNetwork},
     schemes::{
         feldman,
-        interactive::{InteractiveShared, InteractiveSharedMany},
         shamir, spdz,
     },
     vm::{self, parsing::{Exp, Opened}, Value},
 };
 
-use crate::Mapping;
 
 pub enum Number {
     Float(f64),
@@ -178,7 +176,7 @@ impl Engine {
 
 
     pub async fn sum(&mut self, nums: &[f64]) -> Vec<f64> {
-        let nums : Vector<_> = nums.into_iter().map(|v| Number::Float(*v)).collect();
+        let nums : Vector<_> = nums.iter().map(|v| Number::Float(*v)).collect();
         let program = {
             let explist = Expr::symmetric_share_vec(nums);
             explist.sum().open()
@@ -254,7 +252,7 @@ impl<'a> EngineBuilder<'a> {
     pub async fn connect(mut self) -> Result<Self, &'static str> {
         let network = TcpNetwork::connect(self.own.unwrap(), &self.peers)
             .await
-            .map_err(|e| "Bad thing happened")?;
+            .map_err(|_| "Bad thing happened")?;
 
         self.network = Some(network);
         Ok(self)
@@ -315,7 +313,7 @@ impl<'a> EngineBuilder<'a> {
 pub mod blocking {
     use caring::vm::{parsing::Opened, Value};
 
-    use crate::vm::{Expr, UnknownNumber};
+    use crate::vm::UnknownNumber;
 
     pub struct Engine {
         parent: super::Engine,

@@ -151,7 +151,7 @@ impl<F: Field + Serialize + DeserializeOwned + PartialEq + Send + Sync> SharedMa
     ) -> Vec<Self::Vectorized> {
         Share::share_many_naive(ctx, secrets, rng)
             .into_iter()
-            .map(|v| Vector::from_vec(v))
+            .map(Vector::from_vec)
             .collect()
     }
 
