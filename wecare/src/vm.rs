@@ -1,4 +1,4 @@
-use std::{fs::File, net::SocketAddr, path::Path};
+use std::{fs::File, net::{SocketAddr, ToSocketAddrs}};
 
 use curve25519_dalek::{RistrettoPoint, Scalar};
 use fixed::{FixedI128, FixedI32};
@@ -8,8 +8,7 @@ use caring::{
     algebra::{element::Element32, math::Vector},
     net::{agency::Broadcast, connection::TcpConnection, network::TcpNetwork},
     schemes::{
-        feldman,
-        shamir, spdz,
+        feldman, shamir, spdz
     },
     vm::{self, parsing::{Exp, Opened}, Value},
 };
@@ -32,13 +31,13 @@ impl TryFrom<Number> for Element32 {
             Number::Integer(uint) => {
                 let uint: u32 = uint
                     .try_into()
-                    .map_err(|_| format!("Could not parse fit {uint} into an u32"))?;
+                    .map_err(|_| format!("Could not fit {uint} into an u32"))?;
                 Ok(Element32::from(uint))
             }
             Number::SignedInteger(int) => {
                 let int: i32 = int
                     .try_into()
-                    .map_err(|_| format!("Could not parse fit {int} into an u32"))?;
+                    .map_err(|_| format!("Could not fit {int} into an u32"))?;
                 let uint: u32 = if int.is_negative() {
                     u32::MAX / 2 - int.unsigned_abs()
                 } else {
@@ -143,6 +142,28 @@ pub enum Engine {
     Feldman25519(FeldmanEngine<Scalar, RistrettoPoint>),
 }
 
+macro_rules! delegate_await {
+    ($self:expr, $func:ident) => {
+        match $self {
+            Engine::Spdz25519(e) => {
+                e.$func().await.into()
+            },
+            Engine::Spdz32(e) => {
+                e.$func().await.into()
+            },
+            Engine::Shamir25519(e) => {
+                e.$func().await.into()
+            }
+            Engine::Shamir32(e) => {
+                e.$func().await.into()
+            },
+            Engine::Feldman25519(e) => {
+                e.$func().await.into()
+            },
+        }
+    }
+}
+
 impl Engine {
     pub fn builder<'a>() -> EngineBuilder<'a> {
         EngineBuilder::default()
@@ -184,7 +205,11 @@ impl Engine {
         self.execute(program).await.unwrap_vector().into_iter().map(|x| x.to_f64()).collect()
     }
 
+    pub async fn shutdown(self) -> Result<(), std::io::Error> {
+        delegate_await!(self, shutdown)
+    }
 }
+
 
 pub enum FieldKind {
     Curve25519,
@@ -203,28 +228,27 @@ pub struct EngineBuilder<'a> {
     peers: Vec<SocketAddr>,
     network: Option<TcpNetwork>,
     threshold: Option<u64>,
-    preprocesing: Option<&'a Path>,
+    preprocesing: Option<&'a mut File>,
     field: Option<FieldKind>,
     scheme: Option<SchemeKind>,
 }
 
 impl<'a> EngineBuilder<'a> {
-    pub fn address(mut self, addr: impl Into<SocketAddr>) -> Self {
-        self.own.replace(addr.into());
+    pub fn address(mut self, addr: impl ToSocketAddrs) -> Self {
+        // TODO: Handle this better
+        self.own.replace(addr.to_socket_addrs().unwrap().next().unwrap());
         self
     }
 
-    pub fn participant(mut self, addr: impl Into<SocketAddr>) -> Self {
-        self.peers.push(addr.into());
+    pub fn participant(mut self, addr: impl ToSocketAddrs) -> Self {
+        // TODO: Handle this better
+        self.peers.push(addr.to_socket_addrs().unwrap().next().unwrap());
         self
     }
 
-    pub fn participants<I, T>(mut self, addrs: I) -> Self
-    where
-        I: IntoIterator<Item = T>,
-        T: Into<SocketAddr>,
+    pub fn participants(mut self, addrs: impl ToSocketAddrs) -> Self
     {
-        let addrs = addrs.into_iter().map(|s| s.into());
+        let addrs = addrs.to_socket_addrs().unwrap();
         self.peers.extend(addrs);
         self
     }
@@ -234,8 +258,8 @@ impl<'a> EngineBuilder<'a> {
         self
     }
 
-    pub fn preprocessed(mut self, path: &'a Path) -> Self {
-        self.preprocesing = Some(path);
+    pub fn preprocessed(mut self, file: &'a mut File) -> Self {
+        self.preprocesing = Some(file);
         self
     }
 
@@ -284,15 +308,13 @@ impl<'a> EngineBuilder<'a> {
                 Engine::Shamir32(vm::Engine::new(context, network, rng))
             }
             (SchemeKind::Spdz, FieldKind::Curve25519) => {
-                let path = self.preprocesing.expect("Missing preproc!");
-                let mut file = File::open(path).unwrap();
-                let context = spdz::preprocessing::load_context(&mut file);
+                let file = self.preprocesing.expect("Missing preproc!");
+                let context = spdz::preprocessing::load_context(file);
                 Engine::Spdz25519(vm::Engine::new(context, network, rng))
             }
             (SchemeKind::Spdz, FieldKind::Element32) => {
-                let path = self.preprocesing.expect("Missing preproc!");
-                let mut file = File::open(path).unwrap();
-                let context = spdz::preprocessing::load_context(&mut file);
+                let file = self.preprocesing.expect("Missing preproc!");
+                let context = spdz::preprocessing::load_context(file);
                 Engine::Spdz32(vm::Engine::new(context, network, rng))
             }
             (SchemeKind::Feldman, FieldKind::Curve25519) => {
@@ -328,6 +350,7 @@ pub mod blocking {
     impl<'a> super::EngineBuilder<'a> {
         pub fn single_threaded_runtime(self) -> EngineBuilder<'a> {
             let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
                 .build()
                 .unwrap();
             EngineBuilder {
@@ -336,11 +359,11 @@ pub mod blocking {
             }
         }
         pub fn multi_threaded_runtime(self) -> EngineBuilder<'a> {
-            let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
-            EngineBuilder {
-                parent: self,
-                runtime,
-            }
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            EngineBuilder { parent: self, runtime }
         }
     }
 
@@ -352,6 +375,14 @@ pub mod blocking {
             self.parent = parent;
             Ok(self)
         }
+
+        pub fn build(self) -> Engine {
+            let parent = self.parent.build();
+            Engine {
+                runtime: self.runtime,
+                parent
+            }
+        }
     }
 
     impl Engine {
@@ -361,6 +392,10 @@ pub mod blocking {
 
         pub fn sum(&mut self, nums: &[f64]) -> Vec<f64> {
             self.runtime.block_on( self.parent.sum(nums))
+        }
+
+        pub fn shutdown(self) -> Result<(), std::io::Error> {
+            self.runtime.block_on( self.parent.shutdown())
         }
     }
 }

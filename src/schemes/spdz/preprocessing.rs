@@ -30,9 +30,7 @@ impl fmt::Display for PreProcError {
             }
             PreProcError::MissingForSharingElement => {
                 write!(f, "Not enough pre shared random elements.")
-            } // _ => {
-              //     write!(f, "Not enough preprocessing available")
-              // }
+            }
         }
     }
 }

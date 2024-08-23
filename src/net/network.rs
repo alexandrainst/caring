@@ -33,6 +33,7 @@ use crate::net::{
 ///
 /// * `connections`: Connections, one for each peer, sorted by their index, skipping our own index.
 /// * `index`: My own index
+#[derive(Debug)]
 pub struct Network<C: SplitChannel> {
     // NOTE:
     // We could also insert a 'fake' Connection into the set for the representation of ourselves.

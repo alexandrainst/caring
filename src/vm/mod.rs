@@ -6,9 +6,12 @@ use rand::RngCore;
 
 use crate::{
     algebra::math::Vector,
-    net::{agency::Broadcast, network::Network, Id, SplitChannel},
+    net::{agency::Broadcast, connection::TcpConnection, network::Network, Id, SplitChannel},
     protocols::beaver::{beaver_multiply, BeaverTriple},
-    schemes::interactive::{InteractiveShared, InteractiveSharedMany},
+    schemes::{
+        interactive::{InteractiveShared, InteractiveSharedMany},
+        Shared,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -104,6 +107,7 @@ pub struct Script<F> {
     instructions: Vec<Instruction>,
 }
 
+#[derive(Debug)]
 pub struct Engine<C: SplitChannel, S: InteractiveShared, R> {
     network: Network<C>,
     context: S::Context,
@@ -351,6 +355,12 @@ where
     {
         // TODO: Add other resources.
         routine(&mut self.network, &mut self.context, &mut self.rng).await
+    }
+}
+
+impl<S: InteractiveShared, R> Engine<TcpConnection, S, R> {
+    pub async fn shutdown(self) -> Result<(), std::io::Error> {
+        self.network.shutdown().await
     }
 }
 
