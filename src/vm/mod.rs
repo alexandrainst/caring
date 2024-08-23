@@ -3,12 +3,12 @@ pub mod parsing;
 use std::future::Future;
 
 use ff::Field;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use rand::RngCore;
 
 use crate::{
     algebra::math::Vector,
-    net::{network::Network, Id, SplitChannel},
+    net::{agency::Broadcast, network::Network, Id, SplitChannel},
     protocols::beaver::{beaver_multiply, BeaverTriple},
     schemes::interactive::{InteractiveShared, InteractiveSharedMany},
 };
@@ -17,6 +17,29 @@ use crate::{
 pub enum Value<F> {
     Single(F),
     Vector(Vector<F>),
+}
+
+impl<F> Value<F> {
+    pub fn unwrap_single(self) -> F {
+        match self {
+            Value::Single(v) => v,
+            _ => panic!("Was vector and not a single!"),
+        }
+    }
+
+    pub fn unwrap_vector(self) -> Vector<F> {
+        match self {
+            Value::Vector(v) => v,
+            _ => panic!("Was single and not a vector!"),
+        }
+    }
+
+    pub fn map<U>(self, func: impl Fn(F) -> U) -> Value<U> {
+        match self {
+            Value::Single(a) => Value::Single(func(a)),
+            Value::Vector(a) => Value::Vector(a.into_iter().map(func).collect()),
+        }
+    }
 }
 
 impl<F> From<F> for Value<F> {
@@ -69,6 +92,7 @@ pub enum Instruction {
     Add,
     Mul,
     Sub,
+    Sum(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -127,6 +151,31 @@ impl<S: InteractiveSharedMany> Stack<S> {
             _ => panic!("no valid value found"),
         }
     }
+
+    pub fn take_singles(&mut self, n: usize) -> impl Iterator<Item = S> + '_ {
+        self.stack.drain(0..n).map(|v| match v {
+            SharedValue::Single(v) => v,
+            _ => panic!(),
+        })
+    }
+
+    pub fn take_vectors(&mut self, n: usize) -> impl Iterator<Item = S::VectorShare> + '_ {
+        self.stack.drain(0..n).map(|v| match v {
+            SharedValue::Vector(v) => v,
+            _ => panic!(),
+        })
+    }
+
+    pub fn take(
+        &mut self,
+        n: usize,
+    ) -> Either<impl Iterator<Item = S> + '_, impl Iterator<Item = S::VectorShare> + '_> {
+        match self.stack.last() {
+            Some(SharedValue::Single(_)) => Either::Left(self.take_singles(n)),
+            Some(SharedValue::Vector(_)) => Either::Right(self.take_vectors(n)),
+            None => panic!(),
+        }
+    }
 }
 
 impl<C, S, R, F> Engine<C, S, R>
@@ -151,9 +200,9 @@ where
 
     // TODO: Superscalar execution when awaiting.
 
-    pub async fn execute(&mut self, script: &Script<F>) -> F {
+    pub async fn execute(&mut self, script: &Script<F>) -> Value<F> {
         let mut stack = Stack::new();
-        let mut results = vec![];
+        let mut results: Vec<Value<_>> = vec![];
         let constants = &script.constants;
 
         for opcode in script.instructions.iter() {
@@ -168,7 +217,7 @@ where
     async fn step(
         &mut self,
         stack: &mut Stack<S>,
-        results: &mut Vec<F>,
+        results: &mut Vec<Value<F>>,
         constants: &[Value<F>],
         opcode: &Instruction,
     ) -> Result<(), S::Error> {
@@ -214,9 +263,16 @@ where
                 stack.push_vector(share)
             }
             Instruction::Recombine => {
-                let share = stack.pop_single();
-                let f = S::recombine(ctx, share, &mut coms).await?;
-                results.push(f);
+                match stack.pop() {
+                    SharedValue::Single(share) => {
+                        let f = S::recombine(ctx, share, &mut coms).await?;
+                        results.push(Value::Single(f));
+                    }
+                    SharedValue::Vector(share) => {
+                        let f = S::recombine_many(ctx, share, &mut coms).await?;
+                        results.push(Value::Vector(f));
+                    }
+                };
             }
             Instruction::Add => {
                 let a = stack.pop();
@@ -268,13 +324,32 @@ where
                     (SharedValue::Single(_), SharedValue::Vector(_)) => todo!(),
                 };
             }
+            Instruction::Sum(size) => {
+                // Zero is a sentinal value that represents the party size.
+                let size = if *size == 0 {
+                    self.network.size()
+                } else {
+                    *size
+                };
+                let res = match stack.take(size) {
+                    Either::Left(iter) => {
+                        let res = iter.reduce(|s, acc| acc + s).unwrap();
+                        SharedValue::Single(res)
+                    }
+                    Either::Right(iter) => {
+                        let res = iter.reduce(|s, acc| acc + &s).unwrap();
+                        SharedValue::Vector(res)
+                    }
+                };
+                stack.push(res)
+            }
         }
         Ok(())
     }
 
     pub async fn raw<Func, Out>(&mut self, routine: Func) -> Out
     where
-        Func: async Fn(&mut Network<C>, &S::Context, &mut R) -> Out,
+        Func: async Fn(&mut Network<C>, &mut S::Context, &mut R) -> Out,
     {
         // TODO: Add other resources.
         routine(&mut self.network, &mut self.context, &mut self.rng).await
@@ -327,7 +402,7 @@ mod tests {
                         Recombine,
                     ],
                 };
-                let res: u32 = engine.execute(&script).await.into();
+                let res: u32 = engine.execute(&script).await.unwrap_single().into();
                 engine.network.shutdown().await.unwrap();
                 res
             })
@@ -364,7 +439,7 @@ mod tests {
             .with_args([a, b])
             .run_with_args(|net, script| async move {
                 let mut engine = dumb_engine(net);
-                let res: u32 = engine.execute(&script).await.into();
+                let res: u32 = engine.execute(&script).await.unwrap_single().into();
                 engine.network.shutdown().await.unwrap();
                 res
             })

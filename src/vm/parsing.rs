@@ -2,6 +2,7 @@ use itertools::Itertools;
 /// Pseudo-parsing direct to an array-backed AST which just is a bytecode stack.
 use std::{
     array,
+    iter::Sum,
     ops::{Add, Mul, Sub},
 };
 
@@ -18,6 +19,13 @@ pub struct Exp<F> {
     instructions: Vec<Instruction>,
 }
 
+// A dynamicly sized list of expressions.
+#[derive(Debug)]
+pub struct ExpList<F> {
+    constant: Value<F>,
+}
+
+// An opened expression (last step)
 #[derive(Debug)]
 pub struct Opened<F>(Exp<F>);
 
@@ -46,6 +54,20 @@ impl<F> Exp<F> {
         Self {
             instructions: vec![opcode],
             constants,
+        }
+    }
+
+    // This is slighty cursed.
+    pub fn symmetric_share(secret: impl Into<F>) -> ExpList<F> {
+        ExpList {
+            constant: Value::Single(secret.into()),
+        }
+    }
+
+    // This is slighty cursed.
+    pub fn symmetric_share_vec(secret: impl Into<Vector<F>>) -> ExpList<F> {
+        ExpList {
+            constant: Value::Vector(secret.into()),
         }
     }
 
@@ -109,6 +131,7 @@ impl<F> Exp<F> {
                 | Instruction::RecvVec(_)
                 | Instruction::Recombine
                 | Instruction::Add
+                | Instruction::Sum(_)
                 | Instruction::Mul
                 | Instruction::Sub => (),
             }
@@ -152,6 +175,35 @@ impl<T> Opened<T> {
     }
 }
 
+impl<F> ExpList<F> {
+    /// Promise that the explist is `size` long
+    ///
+    /// This will then assume that there a `size` on the stack when executing.
+    pub fn concrete(self, own: usize, size: usize) -> Vec<Exp<F>> {
+        let mut me = Some(Exp {
+            constants: vec![self.constant],
+            instructions: vec![Instruction::SymShare(Const(0))],
+        });
+        (0..size)
+            .map(|id| {
+                if id == own {
+                    me.take().unwrap()
+                } else {
+                    Exp::empty()
+                }
+            })
+            .collect()
+    }
+
+    pub fn sum(self) -> Exp<F> {
+        use Instruction as I;
+        Exp {
+            constants: vec![self.constant],
+            instructions: vec![I::SymShare(Const(0)), I::Sum(0)],
+        }
+    }
+}
+
 impl<F> Add for Exp<F> {
     type Output = Self;
 
@@ -189,6 +241,17 @@ impl<F> Sub for Exp<F> {
         self.append(rhs);
         self.instructions.push(Instruction::Sub);
         self
+    }
+}
+
+impl<F> Sum for Exp<F> {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        let (mut exp, size) = iter.fold((Exp::empty(), 0usize), |(mut acc, count), exp| {
+            acc.append(exp);
+            (acc, count + 1)
+        });
+        exp.instructions.push(Instruction::Sum(size));
+        exp
     }
 }
 
@@ -273,5 +336,77 @@ mod test {
 
         // 1 + 2 * 3 = 7
         assert_eq!(res, vec![7u32.into(), 7u32.into(), 7u32.into()]);
+    }
+
+    #[tokio::test]
+    async fn explist() {
+        let inputs = [1, 2, 3u32];
+        let res = Cluster::new(3)
+            .with_args(
+                (0..3)
+                    .map(|id| {
+                        let me = Id(id);
+                        type E = Exp<Element32>;
+                        let exp = E::symmetric_share(inputs[id]);
+                        let [a, b, c]: [E; 3] = exp.concrete(id, 3).try_into().unwrap();
+                        let sum = a + b * c; // no need to implement precedence!
+                        let res = sum.open();
+                        res.finalize()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .execute_mock()
+            .await
+            .unwrap();
+
+        // 1 + 2 * 3 = 7
+        assert_eq!(res, vec![7u32.into(), 7u32.into(), 7u32.into()]);
+    }
+
+    #[tokio::test]
+    async fn sum() {
+        let inputs = [1, 2, 3u32];
+        let res = Cluster::new(3)
+            .with_args(
+                (0..3)
+                    .map(|id| {
+                        let me = Id(id);
+                        type E = Exp<Element32>;
+                        let [a, b, c] = E::share_and_receive(inputs[id], me);
+                        let sum: E = [a, b, c].into_iter().sum();
+                        let res = sum.open();
+                        res.finalize()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .execute_mock()
+            .await
+            .unwrap();
+
+        // 1 + 2 + 3 = 6
+        assert_eq!(res, vec![6u32.into(), 6u32.into(), 6u32.into()]);
+    }
+
+    #[tokio::test]
+    async fn sum_explist() {
+        let inputs = [1, 2, 3u32];
+        let res = Cluster::new(3)
+            .with_args(
+                (0..3)
+                    .map(|id| {
+                        type E = Exp<Element32>;
+                        let exp = E::symmetric_share(inputs[id]);
+                        let sum = exp.sum();
+                        let res = sum.open();
+                        res.finalize()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .execute_mock()
+            .await
+            .unwrap();
+
+        // 1 + 2 + 3 = 6
+        assert_eq!(res, vec![6u32.into(), 6u32.into(), 6u32.into()]);
     }
 }

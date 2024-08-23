@@ -1656,6 +1656,7 @@ name = "wecare"
 version = "0.1.0"
 dependencies = [
  "caring",
+ "castaway",
  "criterion",
  "curve25519-dalek",
  "enum_dispatch",
