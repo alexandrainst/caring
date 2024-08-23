@@ -13,12 +13,12 @@ use crate::{
 };
 
 /// Beaver (Multiplication) Triple
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BeaverTriple<S> {
     pub shares: (S, S, S),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BeaverPower<S: Shared> {
     val: S,
     powers: Vec<S>,
