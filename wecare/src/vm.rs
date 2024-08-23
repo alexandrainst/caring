@@ -12,7 +12,7 @@ use caring::{
         interactive::{InteractiveShared, InteractiveSharedMany},
         shamir, spdz,
     },
-    vm::{self, parsing::Exp},
+    vm::{self, parsing::{Exp, Opened}, Value},
 };
 
 use crate::Mapping;
@@ -97,7 +97,7 @@ impl UnknownNumber {
         todo!()
     }
 
-    pub fn to_f64(self) -> u64 {
+    pub fn to_f64(self) -> f64 {
         match self {
             UnknownNumber::U32(val) => {
                 let val = FixedI32::<16>::from_bits(val as i32);
@@ -150,61 +150,42 @@ impl Engine {
         EngineBuilder::default()
     }
 
-    pub async fn execute(&mut self, expr: Expr) -> UnknownNumber {
-        let res: UnknownNumber = match self {
+    pub async fn execute(&mut self, expr: Opened<Number>) -> Value<UnknownNumber> {
+        let res: Value<UnknownNumber> = match self {
             Engine::Spdz25519(engine) => {
-                let res = engine.execute(&expr.open().try_finalize().unwrap()).await;
-                res.into()
+                let res = engine.execute(&expr.try_finalize().unwrap()).await;
+                res.map(|x| x.into())
             }
             Engine::Shamir32(engine) => engine
-                .execute(&expr.open().try_finalize().unwrap())
+                .execute(&expr.try_finalize().unwrap())
                 .await
-                .into(),
+                .map(|x|x.into()),
             Engine::Spdz32(engine) => {
-                let res = engine.execute(&expr.open().try_finalize().unwrap()).await;
-                res.into()
+                let res = engine.execute(&expr.try_finalize().unwrap()).await;
+                res.map(|x| x.into())
             }
             Engine::Shamir25519(engine) => {
-                let res = engine.execute(&expr.open().try_finalize().unwrap()).await;
-                res.into()
+                let res = engine.execute(&expr.try_finalize().unwrap()).await;
+                res.map(|x| x.into())
             }
             Engine::Feldman25519(engine) => {
-                let res = engine.execute(&expr.open().try_finalize().unwrap()).await;
-                res.into()
+                let res = engine.execute(&expr.try_finalize().unwrap()).await;
+                res.map(|x| x.into())
             }
         };
         res
     }
 
-    // pub async fn raw<S, Func, O>(&mut self, routine: Func) -> O
-    //     where S: InteractiveShared,
-    //           Func: async Fn(&mut TcpNetwork, &mut S::Context, &mut StdRng) -> O
-    // {
-    //     match self {
-    //         Engine::Spdz25519(e) => { e.raw(routine).await },
-    //         Engine::Spdz32(e) => e.raw(routine).await,
-    //         Engine::Shamir25519(_) => todo!(),
-    //         Engine::Shamir32(_) => todo!(),
-    //         Engine::Feldman25519(_) => todo!(),
-    //     }
-    // }
 
-    // compatilbity.
-    // pub async fn mpc_sum<F: Mapping, S: InteractiveSharedMany<Value = F>>(&mut self, nums: &[f64]) -> Option<Vec<f64>>
-    // where
-    //     <S as InteractiveSharedMany>::VectorShare: std::iter::Sum,
-    // {
-    //     self.raw(async |net, ctx, rng| {
-    //         let nums: Vec<_> = nums.iter().map(|&num| F::from_f64(num)).collect();
-    //         let shares: Vec<S::VectorShare> =
-    //             S::symmetric_share_many(ctx, &nums, rng, net) .await .unwrap();
-    //         let sum: S::VectorShare = shares.into_iter().sum();
-    //         let res: Vector<F> = S::recombine_many(ctx, sum, net).await.unwrap();
-    //
-    //         let res = res.into_iter().map(|x| F::into_f64(x)).collect();
-    //         Some(res)
-    //     }).await
-    // }
+    pub async fn sum(&mut self, nums: &[f64]) -> Vec<f64> {
+        let nums : Vector<_> = nums.into_iter().map(|v| Number::Float(*v)).collect();
+        let program = {
+            let explist = Expr::symmetric_share_vec(nums);
+            explist.sum().open()
+        };
+        self.execute(program).await.unwrap_vector().into_iter().map(|x| x.to_f64()).collect()
+    }
+
 }
 
 pub enum FieldKind {
@@ -332,6 +313,8 @@ impl<'a> EngineBuilder<'a> {
 }
 
 pub mod blocking {
+    use caring::vm::{parsing::Opened, Value};
+
     use crate::vm::{Expr, UnknownNumber};
 
     pub struct Engine {
@@ -374,9 +357,12 @@ pub mod blocking {
     }
 
     impl Engine {
-        pub fn execute(&mut self, expr: Expr) -> UnknownNumber {
-            self.runtime
-                .block_on(async { self.parent.execute(expr).await })
+        pub fn execute(&mut self, expr: Opened<super::Number>) -> Value<UnknownNumber> {
+            self.runtime.block_on(self.parent.execute(expr))
+        }
+
+        pub fn sum(&mut self, nums: &[f64]) -> Vec<f64> {
+            self.runtime.block_on( self.parent.sum(nums))
         }
     }
 }
