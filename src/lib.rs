@@ -6,14 +6,13 @@
 #![feature(async_closure)]
 
 pub mod algebra;
+mod help;
+pub mod marker;
 pub mod net;
 pub mod ot;
 mod protocols;
 pub mod schemes;
-
-mod help;
-pub mod marker;
-
-#[cfg(test)]
-mod testing;
 pub mod vm;
+
+#[cfg(any(test, feature = "test"))]
+pub mod testing;

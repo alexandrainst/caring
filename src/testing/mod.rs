@@ -1,6 +1,5 @@
 //! This module documents various tools which can be used to test or benchmark schemes.
 pub mod mock;
-pub mod tapping;
 
 use crate::{
     algebra::element::Element32,
