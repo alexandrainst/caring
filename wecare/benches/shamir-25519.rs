@@ -1,8 +1,8 @@
-use wecare::vm::{blocking, FieldKind};
 use criterion::{criterion_group, criterion_main, Criterion};
-use wecare::{vm::SchemeKind, vm::Engine};
-use std::{io::Write, time::Duration};
 use std::{hint::black_box, thread};
+use std::{io::Write, time::Duration};
+use wecare::vm::{blocking, FieldKind};
+use wecare::{vm::Engine, vm::SchemeKind};
 
 fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
     let clock = std::time::Instant::now();
@@ -16,9 +16,9 @@ fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
                 .scheme(SchemeKind::Shamir)
                 .field(FieldKind::Curve25519)
                 .single_threaded_runtime()
-                .connect_blocking().unwrap()
+                .connect_blocking()
+                .unwrap()
                 .build()
-
         });
         let e1 = scope.spawn(|| {
             thread::sleep(Duration::from_millis(200));
@@ -28,7 +28,8 @@ fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
                 .scheme(SchemeKind::Shamir)
                 .field(FieldKind::Curve25519)
                 .single_threaded_runtime()
-                .connect_blocking().unwrap()
+                .connect_blocking()
+                .unwrap()
                 .build()
         });
         (e1.join().unwrap(), e2.join().unwrap())

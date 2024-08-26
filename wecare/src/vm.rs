@@ -1,4 +1,7 @@
-use std::{fs::File, net::{SocketAddr, ToSocketAddrs}};
+use std::{
+    fs::File,
+    net::{SocketAddr, ToSocketAddrs},
+};
 
 use curve25519_dalek::{RistrettoPoint, Scalar};
 use fixed::{FixedI128, FixedI32};
@@ -6,18 +9,37 @@ use rand::{rngs::StdRng, SeedableRng};
 
 use caring::{
     algebra::{element::Element32, math::Vector},
-    net::{agency::Broadcast, connection::TcpConnection, network::TcpNetwork},
-    schemes::{
-        feldman, shamir, spdz
+    net::{agency::Broadcast, connection::TcpConnection, network::TcpNetwork, Id},
+    schemes::{feldman, shamir, spdz},
+    vm::{
+        self,
+        parsing::{Exp, Opened},
+        Value,
     },
-    vm::{self, parsing::{Exp, Opened}, Value},
 };
-
 
 pub enum Number {
     Float(f64),
     Integer(u64),
     SignedInteger(i64),
+}
+
+impl From<f64> for Number {
+    fn from(value: f64) -> Self {
+        Number::Float(value)
+    }
+}
+
+impl From<u64> for Number {
+    fn from(value: u64) -> Self {
+        Number::Integer(value)
+    }
+}
+
+impl From<i64> for Number {
+    fn from(value: i64) -> Self {
+        Number::SignedInteger(value)
+    }
 }
 
 impl TryFrom<Number> for Element32 {
@@ -142,26 +164,28 @@ pub enum Engine {
     Feldman25519(FeldmanEngine<Scalar, RistrettoPoint>),
 }
 
+macro_rules! delegate {
+    ($self:expr, $func:ident) => {
+        match $self {
+            Engine::Spdz25519(e) => e.$func().into(),
+            Engine::Spdz32(e) => e.$func().into(),
+            Engine::Shamir25519(e) => e.$func().into(),
+            Engine::Shamir32(e) => e.$func().into(),
+            Engine::Feldman25519(e) => e.$func().into(),
+        }
+    };
+}
+
 macro_rules! delegate_await {
     ($self:expr, $func:ident) => {
         match $self {
-            Engine::Spdz25519(e) => {
-                e.$func().await.into()
-            },
-            Engine::Spdz32(e) => {
-                e.$func().await.into()
-            },
-            Engine::Shamir25519(e) => {
-                e.$func().await.into()
-            }
-            Engine::Shamir32(e) => {
-                e.$func().await.into()
-            },
-            Engine::Feldman25519(e) => {
-                e.$func().await.into()
-            },
+            Engine::Spdz25519(e) => e.$func().await.into(),
+            Engine::Spdz32(e) => e.$func().await.into(),
+            Engine::Shamir25519(e) => e.$func().await.into(),
+            Engine::Shamir32(e) => e.$func().await.into(),
+            Engine::Feldman25519(e) => e.$func().await.into(),
         }
-    }
+    };
 }
 
 impl Engine {
@@ -178,7 +202,7 @@ impl Engine {
             Engine::Shamir32(engine) => engine
                 .execute(&expr.try_finalize().unwrap())
                 .await
-                .map(|x|x.into()),
+                .map(|x| x.into()),
             Engine::Spdz32(engine) => {
                 let res = engine.execute(&expr.try_finalize().unwrap()).await;
                 res.map(|x| x.into())
@@ -195,21 +219,28 @@ impl Engine {
         res
     }
 
+    pub fn id(&self) -> Id {
+        delegate!(self, id)
+    }
 
     pub async fn sum(&mut self, nums: &[f64]) -> Vec<f64> {
-        let nums : Vector<_> = nums.iter().map(|v| Number::Float(*v)).collect();
+        let nums: Vector<_> = nums.iter().map(|v| Number::Float(*v)).collect();
         let program = {
             let explist = Expr::symmetric_share_vec(nums);
             explist.sum().open()
         };
-        self.execute(program).await.unwrap_vector().into_iter().map(|x| x.to_f64()).collect()
+        self.execute(program)
+            .await
+            .unwrap_vector()
+            .into_iter()
+            .map(|x| x.to_f64())
+            .collect()
     }
 
     pub async fn shutdown(self) -> Result<(), std::io::Error> {
         delegate_await!(self, shutdown)
     }
 }
-
 
 pub enum FieldKind {
     Curve25519,
@@ -236,19 +267,31 @@ pub struct EngineBuilder<'a> {
 impl<'a> EngineBuilder<'a> {
     pub fn address(mut self, addr: impl ToSocketAddrs) -> Self {
         // TODO: Handle this better
-        self.own.replace(addr.to_socket_addrs().unwrap().next().unwrap());
+        self.own
+            .replace(addr.to_socket_addrs().unwrap().next().unwrap());
         self
     }
 
     pub fn participant(mut self, addr: impl ToSocketAddrs) -> Self {
         // TODO: Handle this better
-        self.peers.push(addr.to_socket_addrs().unwrap().next().unwrap());
+        self.peers
+            .push(addr.to_socket_addrs().unwrap().next().unwrap());
         self
     }
 
-    pub fn participants(mut self, addrs: impl ToSocketAddrs) -> Self
-    {
+    pub fn participants(mut self, addrs: impl ToSocketAddrs) -> Self {
         let addrs = addrs.to_socket_addrs().unwrap();
+        self.peers.extend(addrs);
+        self
+    }
+
+    pub fn participants_from<A: ToSocketAddrs>(
+        mut self,
+        addrs: impl IntoIterator<Item = A>,
+    ) -> Self {
+        let addrs = addrs
+            .into_iter()
+            .map(|a| a.to_socket_addrs().unwrap().next().unwrap());
         self.peers.extend(addrs);
         self
     }
@@ -333,7 +376,10 @@ impl<'a> EngineBuilder<'a> {
 }
 
 pub mod blocking {
-    use caring::vm::{parsing::Opened, Value};
+    use caring::{
+        net::Id,
+        vm::{parsing::Opened, Value},
+    };
 
     use crate::vm::UnknownNumber;
 
@@ -363,7 +409,10 @@ pub mod blocking {
                 .enable_all()
                 .build()
                 .unwrap();
-            EngineBuilder { parent: self, runtime }
+            EngineBuilder {
+                parent: self,
+                runtime,
+            }
         }
     }
 
@@ -380,7 +429,7 @@ pub mod blocking {
             let parent = self.parent.build();
             Engine {
                 runtime: self.runtime,
-                parent
+                parent,
             }
         }
     }
@@ -390,12 +439,93 @@ pub mod blocking {
             self.runtime.block_on(self.parent.execute(expr))
         }
 
+        pub fn id(&self) -> Id {
+            self.parent.id()
+        }
+
         pub fn sum(&mut self, nums: &[f64]) -> Vec<f64> {
-            self.runtime.block_on( self.parent.sum(nums))
+            self.runtime.block_on(self.parent.sum(nums))
         }
 
         pub fn shutdown(self) -> Result<(), std::io::Error> {
-            self.runtime.block_on( self.parent.shutdown())
+            self.runtime.block_on(self.parent.shutdown())
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{thread, time::Duration};
+
+    use crate::vm::{blocking, Engine, Expr, FieldKind, SchemeKind};
+
+    #[test]
+    fn addition() {
+        fn engine(addr: &str, peers: [&str; 2]) -> blocking::Engine {
+            Engine::builder()
+                .address(addr)
+                .participants_from(peers)
+                .scheme(SchemeKind::Shamir)
+                .field(FieldKind::Curve25519)
+                .single_threaded_runtime()
+                .connect_blocking()
+                .unwrap()
+                .build()
+        }
+        let addrs = ["127.0.0.1:3235", "127.0.0.1:3236", "127.0.0.1:3237"];
+        let res = thread::scope(|scope| {
+            [
+                scope.spawn(|| {
+                    println!("Party 0: Starting");
+                    let mut engine = engine(addrs[0], [addrs[1], addrs[2]]);
+                    let me = engine.id();
+
+                    let num = 3.0;
+                    let [a, b, c] = Expr::share_and_receive(num, me);
+                    let sum = a + b + c;
+                    let res = sum.open();
+                    let script = res;
+
+                    println!("Party 0: Executing");
+                    let res = engine.execute(script);
+                    res.unwrap_single().to_f64()
+                }),
+                scope.spawn(|| {
+                    std::thread::sleep(Duration::from_millis(50));
+                    println!("Party 1: Starting");
+                    let mut engine = engine(addrs[1], [addrs[0], addrs[2]]);
+                    let me = engine.id();
+
+                    let num = 7.0;
+                    let [a, b, c] = Expr::share_and_receive(num, me);
+                    let sum = a + b + c;
+                    let res = sum.open();
+                    let script = res;
+
+                    println!("Party 1: Executing");
+                    let res = engine.execute(script);
+                    res.unwrap_single().to_f64()
+                }),
+                scope.spawn(|| {
+                    std::thread::sleep(Duration::from_millis(100));
+                    println!("Party 2: Starting");
+                    let mut engine = engine(addrs[2], [addrs[0], addrs[1]]);
+                    let me = engine.id();
+
+                    let num = 13.0;
+                    let [a, b, c] = Expr::share_and_receive(num, me);
+                    let sum = a + b + c;
+                    let res = sum.open();
+                    let script = res;
+
+                    println!("Party 2: Executing");
+                    let res = engine.execute(script);
+                    res.unwrap_single().to_f64()
+                }),
+            ]
+            .map(|t| t.join().unwrap())
+        });
+
+        assert_eq!(&res, &[23.0, 23.0, 23.0])
     }
 }

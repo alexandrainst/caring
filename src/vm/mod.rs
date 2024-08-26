@@ -8,10 +8,7 @@ use crate::{
     algebra::math::Vector,
     net::{agency::Broadcast, connection::TcpConnection, network::Network, Id, SplitChannel},
     protocols::beaver::{beaver_multiply, BeaverTriple},
-    schemes::{
-        interactive::{InteractiveShared, InteractiveSharedMany},
-        Shared,
-    },
+    schemes::interactive::{InteractiveShared, InteractiveSharedMany},
 };
 
 #[derive(Debug, Clone)]
@@ -194,6 +191,10 @@ where
             fueltank: vec![],
             rng,
         }
+    }
+
+    pub fn id(&self) -> Id {
+        self.network.id()
     }
 
     pub fn add_fuel(&mut self, fuel: &mut Vec<BeaverTriple<S>>) {

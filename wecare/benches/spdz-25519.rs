@@ -2,7 +2,10 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use std::time;
 use std::{fs::File, hint::black_box, io::Seek, thread};
 use std::{io::Write, time::Duration};
-use wecare::{do_preproc, vm::{blocking, Engine, FieldKind, SchemeKind}};
+use wecare::{
+    do_preproc,
+    vm::{blocking, Engine, FieldKind, SchemeKind},
+};
 
 fn precompute(n: usize) -> (File, File) {
     let clock = time::Instant::now();
@@ -33,9 +36,9 @@ fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
                 .scheme(SchemeKind::Spdz)
                 .field(FieldKind::Curve25519)
                 .single_threaded_runtime()
-                .connect_blocking().unwrap()
+                .connect_blocking()
+                .unwrap()
                 .build()
-
         });
         let e1 = scope.spawn(|| {
             thread::sleep(Duration::from_millis(200));
@@ -46,7 +49,8 @@ fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
                 .scheme(SchemeKind::Spdz)
                 .field(FieldKind::Curve25519)
                 .single_threaded_runtime()
-                .connect_blocking().unwrap()
+                .connect_blocking()
+                .unwrap()
                 .build()
         });
         (e1.join().unwrap(), e2.join().unwrap())

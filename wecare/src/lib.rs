@@ -1,4 +1,5 @@
 #![feature(async_closure)]
+
 pub mod vm;
 
 use caring::{
@@ -423,7 +424,7 @@ mod test {
             drop(engine);
             res
         });
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(200));
         let t2 = thread::spawn(move || {
             println!("[2] Setting up...");
             let mut engine = Engine::setup("127.0.0.1:2235")
