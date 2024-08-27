@@ -9,15 +9,15 @@ use rand::{rngs::StdRng, SeedableRng};
 
 use caring::{
     algebra::{element::Element32, math::Vector},
-    net::{agency::Broadcast, connection::TcpConnection, network::TcpNetwork, Id},
+    net::{agency::Broadcast, connection::TcpConnection, network::TcpNetwork},
     schemes::{feldman, shamir, spdz},
-    vm::{
-        self,
-        parsing::{Exp, Opened},
-        Value,
-    },
+    vm::{self, parsing::Exp},
 };
 
+pub use caring::net::Id;
+pub use caring::vm::Value;
+
+#[derive(Clone, Copy)]
 pub enum Number {
     Float(f64),
     Integer(u64),
@@ -155,6 +155,7 @@ type SpdzCurve25519Engine = SpdzEngine<curve25519_dalek::Scalar>;
 type SpdzElement32Engine = SpdzEngine<caring::algebra::element::Element32>;
 
 pub type Expr = Exp<Number>;
+pub type Opened = vm::parsing::Opened<Number>;
 
 pub enum Engine {
     Spdz25519(SpdzCurve25519Engine),
@@ -189,11 +190,11 @@ macro_rules! delegate_await {
 }
 
 impl Engine {
-    pub fn builder<'a>() -> EngineBuilder<'a> {
+    pub fn builder() -> EngineBuilder {
         EngineBuilder::default()
     }
 
-    pub async fn execute(&mut self, expr: Opened<Number>) -> Value<UnknownNumber> {
+    pub async fn execute(&mut self, expr: Opened) -> Value<UnknownNumber> {
         let res: Value<UnknownNumber> = match self {
             Engine::Spdz25519(engine) => {
                 let res = engine.execute(&expr.try_finalize().unwrap()).await;
@@ -221,6 +222,10 @@ impl Engine {
 
     pub fn id(&self) -> Id {
         delegate!(self, id)
+    }
+
+    pub fn peers(&self) -> Vec<Id> {
+        delegate!(self, peers)
     }
 
     pub async fn sum(&mut self, nums: &[f64]) -> Vec<f64> {
@@ -254,17 +259,17 @@ pub enum SchemeKind {
 }
 
 #[derive(Default)]
-pub struct EngineBuilder<'a> {
+pub struct EngineBuilder {
     own: Option<SocketAddr>,
     peers: Vec<SocketAddr>,
     network: Option<TcpNetwork>,
     threshold: Option<u64>,
-    preprocesing: Option<&'a mut File>,
+    preprocesing: Option<File>,
     field: Option<FieldKind>,
     scheme: Option<SchemeKind>,
 }
 
-impl<'a> EngineBuilder<'a> {
+impl EngineBuilder {
     pub fn address(mut self, addr: impl ToSocketAddrs) -> Self {
         // TODO: Handle this better
         self.own
@@ -301,7 +306,7 @@ impl<'a> EngineBuilder<'a> {
         self
     }
 
-    pub fn preprocessed(mut self, file: &'a mut File) -> Self {
+    pub fn preprocessed(mut self, file: File) -> Self {
         self.preprocesing = Some(file);
         self
     }
@@ -351,13 +356,13 @@ impl<'a> EngineBuilder<'a> {
                 Engine::Shamir32(vm::Engine::new(context, network, rng))
             }
             (SchemeKind::Spdz, FieldKind::Curve25519) => {
-                let file = self.preprocesing.expect("Missing preproc!");
-                let context = spdz::preprocessing::load_context(file);
+                let mut file = self.preprocesing.expect("Missing preproc!");
+                let context = spdz::preprocessing::load_context(&mut file);
                 Engine::Spdz25519(vm::Engine::new(context, network, rng))
             }
             (SchemeKind::Spdz, FieldKind::Element32) => {
-                let file = self.preprocesing.expect("Missing preproc!");
-                let context = spdz::preprocessing::load_context(file);
+                let mut file = self.preprocesing.expect("Missing preproc!");
+                let context = spdz::preprocessing::load_context(&mut file);
                 Engine::Spdz32(vm::Engine::new(context, network, rng))
             }
             (SchemeKind::Feldman, FieldKind::Curve25519) => {
@@ -376,10 +381,7 @@ impl<'a> EngineBuilder<'a> {
 }
 
 pub mod blocking {
-    use caring::{
-        net::Id,
-        vm::{parsing::Opened, Value},
-    };
+    use caring::{net::Id, vm::Value};
 
     use crate::vm::UnknownNumber;
 
@@ -388,13 +390,13 @@ pub mod blocking {
         runtime: tokio::runtime::Runtime,
     }
 
-    pub struct EngineBuilder<'a> {
-        parent: super::EngineBuilder<'a>,
+    pub struct EngineBuilder {
+        parent: super::EngineBuilder,
         runtime: tokio::runtime::Runtime,
     }
 
-    impl<'a> super::EngineBuilder<'a> {
-        pub fn single_threaded_runtime(self) -> EngineBuilder<'a> {
+    impl super::EngineBuilder {
+        pub fn single_threaded_runtime(self) -> EngineBuilder {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -404,7 +406,7 @@ pub mod blocking {
                 runtime,
             }
         }
-        pub fn multi_threaded_runtime(self) -> EngineBuilder<'a> {
+        pub fn multi_threaded_runtime(self) -> EngineBuilder {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
@@ -416,7 +418,7 @@ pub mod blocking {
         }
     }
 
-    impl<'a> EngineBuilder<'a> {
+    impl EngineBuilder {
         pub fn connect_blocking(mut self) -> Result<Self, &'static str> {
             let runtime = &mut self.runtime;
             let mut parent = self.parent;
@@ -435,12 +437,16 @@ pub mod blocking {
     }
 
     impl Engine {
-        pub fn execute(&mut self, expr: Opened<super::Number>) -> Value<UnknownNumber> {
+        pub fn execute(&mut self, expr: super::Opened) -> Value<UnknownNumber> {
             self.runtime.block_on(self.parent.execute(expr))
         }
 
         pub fn id(&self) -> Id {
             self.parent.id()
+        }
+
+        pub fn peers(&self) -> Vec<Id> {
+            self.parent.peers()
         }
 
         pub fn sum(&mut self, nums: &[f64]) -> Vec<f64> {

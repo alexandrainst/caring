@@ -83,6 +83,21 @@ impl<C: SplitChannel> Network<C> {
         Id((self.index + n + 1) % n)
     }
 
+    pub fn peers(&self) -> Vec<Id> {
+        let n = self.connections.len();
+        (0..=n)
+            .map(|i| Id(i))
+            .filter(|id| *id != self.id())
+            .collect_vec()
+    }
+
+    /// Returns a range for representing the participants.
+    pub fn participants(&self) -> Range<u32> {
+        let n = self.connections.len() as u32;
+        let n = n + 1; // We need to count ourselves.
+        0..n
+    }
+
     /// Broadcast a message to all other parties.
     ///
     /// Asymmetric, non-waiting
@@ -310,13 +325,6 @@ impl<C: SplitChannel> Network<C> {
         // Add it back.
         self.connections.extend(sorted);
         Ok(())
-    }
-
-    /// Returns a range for representing the participants.
-    pub fn participants(&self) -> Range<u32> {
-        let n = self.connections.len() as u32;
-        let n = n + 1; // We need to count ourselves.
-        0..n
     }
 
     async fn drop_party(_id: usize) -> Result<(), ()> {

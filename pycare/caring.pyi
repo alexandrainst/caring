@@ -1,4 +1,58 @@
+# TODO: Add documentation
+
+class Id:
+    ...
+
+class Opened:
+    ...
+
+class Computed:
+    def as_float(self) -> list[float]: ...
+    def as_integer(self) -> list[int]: ...
+
+
+class Expr:
+    @staticmethod
+    def share(num: float | int | list[float] | list[int]) -> Expr: ...
+
+    @staticmethod
+    def recv(id: Id) -> Expr: ...
+
+    @staticmethod
+    def symmetric_share(num: float | int | list[float] | list[int], id: Id, size: int) -> list[Expr]: ...
+
+    def open(self) -> Opened: ...
+
+    def __add__(self, other: Expr) -> Expr: ...
+    def __sub__(self, other: Expr) -> Expr: ...
+    def __mul__(self, other: Expr) -> Expr: ...
+    def __iadd__(self, other: Expr) -> None: ...
+    def __isub__(self, other: Expr) -> None: ...
+    def __imul__(self, other: Expr) -> None: ...
+
 class Engine:
+    def __init__(
+        self,
+        scheme: str,
+        address: str,
+        peers: list[str],
+        multithreaded: bool = False,
+        threshold: int | None = None,
+        preprocessed: str | None = None,
+    ) -> None: ...
+
+    def execute(self, script: Opened) -> Computed: ...
+
+    def id(self) -> Id: ...
+
+    def peers(self) -> list[Id]: ...
+
+
+#
+# Old stuff
+#
+
+class OldEngine:
     """
         Performs a summation with the connected parties.
         Returns the sum of all the numbers.
@@ -18,7 +72,7 @@ class Engine:
     """
         Takedown the MPC Engine, releasing the resources and dropping connections.
     """
-    def takedown(self): ...
+    def takedown(self) -> None: ...
 
 
 """
