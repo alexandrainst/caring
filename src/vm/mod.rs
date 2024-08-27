@@ -38,6 +38,13 @@ impl<F> Value<F> {
             Value::Vector(a) => Value::Vector(a.into_iter().map(func).collect()),
         }
     }
+
+    pub fn to_vec(self) -> Vec<F> {
+        match self {
+            Value::Single(s) => vec![s],
+            Value::Vector(v) => v.into(),
+        }
+    }
 }
 
 impl<F> From<F> for Value<F> {
@@ -195,6 +202,10 @@ where
 
     pub fn id(&self) -> Id {
         self.network.id()
+    }
+
+    pub fn peers(&self) -> Vec<Id> {
+        self.network.peers()
     }
 
     pub fn add_fuel(&mut self, fuel: &mut Vec<BeaverTriple<S>>) {

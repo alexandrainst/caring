@@ -3,7 +3,7 @@ use itertools::Itertools;
 use std::{
     array,
     iter::Sum,
-    ops::{Add, Mul, Sub},
+    ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
 };
 
 use crate::{
@@ -13,20 +13,20 @@ use crate::{
 };
 
 /// An expression stack
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Exp<F> {
     constants: Vec<Value<F>>,
     instructions: Vec<Instruction>,
 }
 
 // A dynamicly sized list of expressions.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ExpList<F> {
     constant: Value<F>,
 }
 
 // An opened expression (last step)
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Opened<F>(Exp<F>);
 
 impl<F> Exp<F> {
@@ -44,7 +44,7 @@ impl<F> Exp<F> {
         }
     }
 
-    fn add_constant(&mut self, value: impl Into<Value<F>>) -> Const {
+    fn append_constant(&mut self, value: impl Into<Value<F>>) -> Const {
         self.constants.push(value.into());
         Const(self.constants.len() as u16 - 1)
     }
@@ -110,6 +110,25 @@ impl<F> Exp<F> {
                 Self::receive_input(id)
             }
         })
+    }
+
+    /// Share and receive based on your given Id
+    ///
+    /// * `input`: Your input to secret-share
+    /// * `me`: Your Id
+    pub fn share_and_receive_n(input: impl Into<F>, me: Id, n: usize) -> Vec<Self> {
+        let mut input: Option<F> = Some(input.into());
+        (0..n)
+            .map(|i| {
+                let id = Id(i);
+                if id == me {
+                    let f = input.take().expect("We only do this once.");
+                    Self::share(f)
+                } else {
+                    Self::receive_input(id)
+                }
+            })
+            .collect()
     }
 
     /// Open the secret value
@@ -204,6 +223,27 @@ impl<F> ExpList<F> {
     }
 }
 
+impl<F> AddAssign for Exp<F> {
+    fn add_assign(&mut self, rhs: Self) {
+        self.append(rhs);
+        self.instructions.push(Instruction::Add);
+    }
+}
+
+impl<F> SubAssign for Exp<F> {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.append(rhs);
+        self.instructions.push(Instruction::Sub);
+    }
+}
+
+impl<F> MulAssign for Exp<F> {
+    fn mul_assign(&mut self, rhs: Self) {
+        self.append(rhs);
+        self.instructions.push(Instruction::Mul);
+    }
+}
+
 impl<F> Add for Exp<F> {
     type Output = Self;
 
@@ -228,7 +268,7 @@ impl<F> Mul<F> for Exp<F> {
     type Output = Self;
 
     fn mul(mut self, rhs: F) -> Self::Output {
-        let addr = self.add_constant(rhs);
+        let addr = self.append_constant(rhs);
         self.instructions.push(Instruction::MulCon(addr));
         self
     }
