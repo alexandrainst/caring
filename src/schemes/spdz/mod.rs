@@ -9,7 +9,7 @@
 // TODO: make costum errors.
 use crate::{
     algebra::math::Vector,
-    net::{agency::Broadcast, mux, Id},
+    net::{agency::Broadcast, Id},
     protocols::commitments::{commit, verify_commit},
     schemes::interactive::InteractiveSharedMany,
 };
@@ -356,8 +356,8 @@ fn create_shares<F: PrimeField>(
     params: &SpdzParams<F>,
 ) -> Result<(Vec<Share<F>>, Vec<F>), preprocessing::PreProcError> {
     let n = vals.len();
-    let my_randomness = &mut for_sharing.rand_known_to_me.vals;
-    let their_randomness = &mut for_sharing.rand_known_to_i.shares[params.who_am_i.0];
+    let my_randomness = &mut for_sharing.my_randomness;
+    let their_randomness = &mut for_sharing.party_fuel[params.who_am_i.0].shares;
 
     // We will consume the last `n` values, so we need to ensure their are `n`
     if n > my_randomness.len() || n > their_randomness.len() {
@@ -388,7 +388,7 @@ fn create_foreign_share<F: PrimeField>(
     // TODO: Kill this vvvv
     // We really should be able to pass in a list that is only `m` long
     // and drain it.
-    let randoms = &mut for_sharing.rand_known_to_i.shares[sharer.0];
+    let randoms = &mut for_sharing.party_fuel[sharer.0].shares;
 
     let n = corrections.len();
     if n > randoms.len() {
@@ -473,10 +473,10 @@ where
     }
 
     let opened_shares = opened_vals_sum.iter().zip(macs_to_shares);
-    let mut ds: Vec<F> = opened_shares
+    let ds: Vec<F> = opened_shares
         .map(|(v, m)| params.mac_key_share * v - m)
         .collect();
-    let this_went_well = check_all_d(&mut ds, network, random_element).await;
+    let this_went_well = check_all_d(&ds, network, random_element).await;
     if this_went_well {
         opened_vals_sum
     } else {
@@ -537,7 +537,7 @@ where
 // Now the random element is commited to and bradcasted together with the d's, instead of after.
 // - This is not problematic as the d's can't be altered after they are committed to, so they still can't depend on the random element
 pub async fn check_all_d<F>(
-    partially_opened_vals: &mut Vec<F>,
+    partially_opened_vals: &[F],
     network: &mut impl Broadcast,
     random_element: F,
 ) -> bool
@@ -560,7 +560,6 @@ where
 
     // Then we make a random linear combination of all the values, commit, broadcast, verify that it is zero
     let lin_comp = linear_combinations(random_val_shares.into_iter().sum(), partially_opened_vals);
-    partially_opened_vals.clear();
     let lin_comps_commitments = network
         .symmetric_broadcast(commit(&lin_comp))
         .await
@@ -575,12 +574,12 @@ where
     zero == F::from_u128(0)
 }
 
-fn linear_combinations<F: PrimeField>(random_element: F, elements: &mut [F]) -> F {
+fn linear_combinations<F: PrimeField>(random_element: F, elements: &[F]) -> F {
     let r_elms: Vec<F> = (1..=elements.len())
         .map(|i| power(&random_element, i))
         .collect();
     elements
-        .iter_mut()
+        .iter()
         .zip(r_elms)
         .fold(F::from_u128(0), |acc, (e, r)| acc + r * (*e))
 }
@@ -647,10 +646,10 @@ mod test {
         let p2_params = p2_context.params;
         let mut p1_preprocessed = p1_context.preprocessed;
         let mut p2_preprocessed = p2_context.preprocessed;
-        let p1_known_to_pi = p1_preprocessed.for_sharing.rand_known_to_i.shares;
-        let p2_known_to_pi = p2_preprocessed.for_sharing.rand_known_to_i.shares;
-        let p1_known_to_me = p1_preprocessed.for_sharing.rand_known_to_me.vals;
-        let p2_known_to_me = p2_preprocessed.for_sharing.rand_known_to_me.vals;
+        let p1_known_to_pi: Vec<Vec<_>> = p1_preprocessed.for_sharing.bad_habits();
+        let p2_known_to_pi = p2_preprocessed.for_sharing.bad_habits();
+        let p1_known_to_me = p1_preprocessed.for_sharing.my_randomness;
+        let p2_known_to_me = p2_preprocessed.for_sharing.my_randomness;
         let p1_triplet_1 = p1_preprocessed
             .triplets
             .get_triplet()
@@ -973,9 +972,10 @@ mod test {
                 partial_opening(&elm, &params, &mut network, &mut partially_opened_vals).await;
             assert!(val1_guess == val1);
             //if !check_all_d(&partially_opened_vals, &mut network).await {
-            if !check_all_d(&mut partially_opened_vals, &mut network, random_element).await {
+            if !check_all_d(&partially_opened_vals, &mut network, random_element).await {
                 panic!("Someone cheated")
             }
+            partially_opened_vals.clear();
         }
 
         let mut taskset = tokio::task::JoinSet::new();
@@ -1224,7 +1224,8 @@ mod test {
             .await;
             assert!(expected_res.val == res);
             let rng = rand::rngs::mock::StepRng::new(42, 7);
-            assert!(check_all_d(&mut context.opened_values, &mut network, F::random(rng)).await);
+            assert!(check_all_d(&context.opened_values, &mut network, F::random(rng)).await);
+            context.opened_values.clear();
 
             let res = open_res(
                 res_share,
@@ -1441,7 +1442,8 @@ mod test {
             // Checking all partially opened values
             let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
             let random_element = F::random(&mut rng);
-            assert!(check_all_d(&mut context.opened_values, &mut network, random_element).await);
+            assert!(check_all_d(&context.opened_values, &mut network, random_element).await);
+            context.opened_values.clear();
 
             // opening(and checking) val_5
             let res = open_res(val_5, &mut network, &context.params, &context.opened_values).await;
@@ -1668,10 +1670,10 @@ mod test {
         let mac = p1_params.mac_key_share + p2_params.mac_key_share;
         let mut p1_preprocessed = p1_context.preprocessed;
         let mut p2_preprocessed = p2_context.preprocessed;
-        let p1_known_to_pi = p1_preprocessed.for_sharing.rand_known_to_i.shares;
-        let p2_known_to_pi = p2_preprocessed.for_sharing.rand_known_to_i.shares;
-        let p1_known_to_me = p1_preprocessed.for_sharing.rand_known_to_me.vals;
-        let p2_known_to_me = p2_preprocessed.for_sharing.rand_known_to_me.vals;
+        let p1_known_to_pi = p1_preprocessed.for_sharing.bad_habits();
+        let p2_known_to_pi = p2_preprocessed.for_sharing.bad_habits();
+        let p1_known_to_me = p1_preprocessed.for_sharing.my_randomness;
+        let p2_known_to_me = p2_preprocessed.for_sharing.my_randomness;
         let p1_triplet_1 = p1_preprocessed
             .triplets
             .get_triplet()
