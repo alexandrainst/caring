@@ -40,15 +40,24 @@ impl Error for PreProcError {}
 // ToDo: we should probably make getters for all the fields, and make them private, spdz needs to use the values, but not alter them.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PreprocessedValues<F: PrimeField> {
+    // change to beaver module
     pub triplets: Triplets<F>,
+
     pub for_sharing: ForSharing<F>,
 }
 
 // TODO: Document this
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForSharing<F: PrimeField> {
-    pub rand_known_to_i: RandomKnownToPi<F>, // consider boxed slices for the outer vec
-    pub rand_known_to_me: RandomKnownToMe<F>,
+    /// Fuel per Party
+    pub party_fuel: Vec<Fuel<F>>, // consider boxed slices for the outer vec
+    pub my_randomness: Vec<F>,
+}
+
+impl<F: PrimeField> ForSharing<F> {
+    pub fn bad_habits(&self) -> Vec<Vec<spdz::Share<F>>> {
+        self.party_fuel.iter().map(|f| f.shares.clone()).collect()
+    }
 }
 
 /// Multiplication triplet fuel tank
@@ -80,13 +89,8 @@ impl<F: PrimeField> MultiplicationTriple<F> {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RandomKnownToPi<F: PrimeField> {
-    pub shares: Vec<Vec<spdz::Share<F>>>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RandomKnownToMe<F: PrimeField> {
-    pub vals: Vec<F>,
+pub struct Fuel<F: PrimeField> {
+    pub shares: Vec<spdz::Share<F>>,
 }
 
 pub struct SecretValues<F> {
@@ -160,14 +164,11 @@ pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
                     val: ri,
                     mac: r_mac_i,
                 };
-                contexts[i].preprocessed.for_sharing.rand_known_to_i.shares[me].push(ri_share);
+                contexts[i].preprocessed.for_sharing.party_fuel[me]
+                    .shares
+                    .push(ri_share);
                 if me == i {
-                    contexts[me]
-                        .preprocessed
-                        .for_sharing
-                        .rand_known_to_me
-                        .vals
-                        .push(r);
+                    contexts[me].preprocessed.for_sharing.my_randomness.push(r);
                 }
             }
             let r2 = ri_rest;
@@ -179,16 +180,11 @@ pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
             contexts[number_of_parties - 1]
                 .preprocessed
                 .for_sharing
-                .rand_known_to_i
-                .shares[me]
+                .party_fuel[me]
+                .shares
                 .push(r2_share);
             if me == number_of_parties - 1 {
-                contexts[me]
-                    .preprocessed
-                    .for_sharing
-                    .rand_known_to_me
-                    .vals
-                    .push(r);
+                contexts[me].preprocessed.for_sharing.my_randomness.push(r);
             }
         }
     }
@@ -271,18 +267,16 @@ fn generate_empty_context<F: PrimeField>(
     mac_key_share: F,
     who_am_i: Id,
 ) -> SpdzContext<F> {
-    let rand_known_to_i = RandomKnownToPi {
-        shares: vec![vec![]; number_of_parties],
-    };
-    let rand_known_to_me = RandomKnownToMe { vals: vec![] };
+    let rand_known_to_i = vec![Fuel { shares: vec![] }; number_of_parties];
+    let rand_known_to_me = vec![];
     let triplets = Triplets {
         multiplication_triplets: vec![],
     };
     let p_preprosvals = PreprocessedValues {
         triplets,
         for_sharing: ForSharing {
-            rand_known_to_i,
-            rand_known_to_me,
+            party_fuel: rand_known_to_i,
+            my_randomness: rand_known_to_me,
         },
     };
     SpdzContext {
