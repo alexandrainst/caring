@@ -1,6 +1,7 @@
 // Preprocessing
 
 use crate::{
+    algebra::math::Vector,
     net::Id,
     schemes::spdz::{self, SpdzContext},
 };
@@ -50,8 +51,17 @@ pub struct PreprocessedValues<F: PrimeField> {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForSharing<F: PrimeField> {
     /// Fuel per Party
-    pub party_fuel: Vec<Fuel<F>>, // consider boxed slices for the outer vec
+    pub party_fuel: Vec<FuelTank<F>>, // consider boxed slices for the outer vec
     pub my_randomness: Vec<F>,
+}
+
+impl<F: PrimeField> ForSharing<F> {
+    pub fn empty(party_size: usize) -> Self {
+        Self {
+            party_fuel: vec![FuelTank::default(); party_size],
+            my_randomness: vec![],
+        }
+    }
 }
 
 impl<F: PrimeField> ForSharing<F> {
@@ -88,8 +98,8 @@ impl<F: PrimeField> MultiplicationTriple<F> {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Fuel<F: PrimeField> {
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FuelTank<F: PrimeField> {
     pub shares: Vec<spdz::Share<F>>,
 }
 
@@ -143,51 +153,57 @@ pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
     let mac_keys: Vec<F> = (0..number_of_parties)
         .map(|_| F::random(&mut rng))
         .collect();
-    let mut contexts: Vec<SpdzContext<F>> = (0..number_of_parties)
+    let mut ctxs: Vec<SpdzContext<F>> = (0..number_of_parties)
         .map(|i| SpdzContext::empty(number_of_parties, mac_keys[i], Id(i)))
         .collect();
     let mac_key = mac_keys.into_iter().sum();
 
     // Filling the context
     // First with values used for easy sharing
+    let mut parties = vec![ForSharing::empty(number_of_parties); number_of_parties];
     for (me, kte) in known_to_each.into_iter().enumerate() {
-        for _ in 0..kte {
-            let r = F::random(&mut rng);
-            let mut r_mac = r * mac_key;
-            let mut ri_rest = r;
-            for i in 0..number_of_parties - 1 {
-                let ri = F::random(&mut rng);
-                ri_rest -= ri;
-                let r_mac_i = F::random(&mut rng);
-                r_mac -= r_mac_i;
-                let ri_share = spdz::Share {
-                    val: ri,
-                    mac: r_mac_i,
-                };
-                contexts[i].preprocessed.for_sharing.party_fuel[me]
-                    .shares
-                    .push(ri_share);
-                if me == i {
-                    contexts[me].preprocessed.for_sharing.my_randomness.push(r);
-                }
+        let r = Vector::from_vec(vec![F::random(&mut rng); kte]);
+        let mut r_mac = r.clone() * mac_key;
+        let mut ri_rest = r.clone();
+
+        // party_i
+        (0..number_of_parties - 1).for_each(|i| {
+            let for_sharing = &mut parties[i];
+            let ri = Vector::from_vec(vec![F::random(&mut rng); kte]);
+            ri_rest -= &ri;
+            let r_mac_i = Vector::from_vec(vec![F::random(&mut rng); kte]);
+            r_mac -= &r_mac_i;
+
+            let mut ri_share: Vec<_> = ri
+                .into_iter()
+                .zip(r_mac_i)
+                .map(|(val, mac)| spdz::Share { val, mac })
+                .collect();
+            for_sharing.party_fuel[me].shares.append(&mut ri_share);
+            if me == i {
+                let mut r = r.to_vec();
+                for_sharing.my_randomness.append(&mut r);
             }
-            let r2 = ri_rest;
-            //let r_mac_2 = r_mac;
-            let r2_share = spdz::Share {
-                val: r2,
-                mac: r_mac,
-            };
-            contexts[number_of_parties - 1]
-                .preprocessed
-                .for_sharing
-                .party_fuel[me]
-                .shares
-                .push(r2_share);
-            if me == number_of_parties - 1 {
-                contexts[me].preprocessed.for_sharing.my_randomness.push(r);
-            }
+        });
+        let r2 = ri_rest;
+        let mut r2_share: Vec<_> = r2
+            .into_iter()
+            .zip(r_mac)
+            .map(|(val, mac)| spdz::Share { val, mac })
+            .collect();
+        parties[number_of_parties - 1].party_fuel[me]
+            .shares
+            .append(&mut r2_share);
+        if me == number_of_parties - 1 {
+            let mut r = r.to_vec();
+            parties[me].my_randomness.append(&mut r);
         }
     }
+
+    for (ctx, for_sharing) in ctxs.iter_mut().zip(parties.into_iter()) {
+        ctx.preprocessed.for_sharing = for_sharing
+    }
+
     // Now filling in triplets
 
     for _ in 0..number_of_triplets {
@@ -229,7 +245,7 @@ pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
             };
             let triplet = MultiplicationTriple::new(ai_share, bi_share, ci_share);
 
-            contexts[i]
+            ctxs[i]
                 .preprocessed
                 .triplets
                 .multiplication_triplets
@@ -240,7 +256,7 @@ pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
         let ci_share = spdz::Share { val: c, mac: c_mac };
         let triplet = MultiplicationTriple::new(ai_share, bi_share, ci_share);
 
-        contexts[number_of_parties - 1]
+        ctxs[number_of_parties - 1]
             .preprocessed
             .triplets
             .multiplication_triplets
@@ -249,7 +265,7 @@ pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
 
     // TODO: The secret values are only there for testing/ develompent purposes, consider removing it.
     let secret_values = SecretValues { mac_key };
-    (contexts, secret_values)
+    (ctxs, secret_values)
 }
 
 impl<F: PrimeField + Serialize + DeserializeOwned> SpdzContext<F> {
@@ -267,7 +283,7 @@ fn generate_empty_context<F: PrimeField>(
     mac_key_share: F,
     who_am_i: Id,
 ) -> SpdzContext<F> {
-    let rand_known_to_i = vec![Fuel { shares: vec![] }; number_of_parties];
+    let rand_known_to_i = vec![FuelTank { shares: vec![] }; number_of_parties];
     let rand_known_to_me = vec![];
     let triplets = Triplets {
         multiplication_triplets: vec![],
