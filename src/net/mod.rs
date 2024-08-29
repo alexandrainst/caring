@@ -105,6 +105,7 @@ pub struct Id(pub usize);
 /// Tune to a specific channel
 pub trait Tuneable {
     type TuningError: Error + Send + 'static;
+    type Channel: SplitChannel + Send;
 
     fn id(&self) -> Id;
 
@@ -118,10 +119,13 @@ pub trait Tuneable {
         id: Id,
         msg: &T,
     ) -> impl Future<Output = Result<(), Self::TuningError>> + Send;
+
+    fn channels(&mut self) -> &mut [Self::Channel];
 }
 
-impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
-    type TuningError = R::TuningError;
+impl<'a, N: Tuneable + ?Sized> Tuneable for &'a mut N {
+    type TuningError = N::TuningError;
+    type Channel = N::Channel;
 
     fn id(&self) -> Id {
         (**self).id()
@@ -140,6 +144,10 @@ impl<'a, R: Tuneable + ?Sized> Tuneable for &'a mut R {
         msg: &T,
     ) -> impl Future<Output = Result<(), Self::TuningError>> + Send {
         (**self).send_to(id, msg)
+    }
+
+    fn channels(&mut self) -> &mut [Self::Channel] {
+        (**self).channels()
     }
 }
 

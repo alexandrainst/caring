@@ -19,7 +19,7 @@ use tokio_util::bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::{
     help,
-    net::{network::Network, Channel, RecvBytes, SendBytes, SplitChannel},
+    net::{network::Network, Channel, RecvBytes, SendBytes, SplitChannel, Tuneable},
 };
 
 #[derive(Debug, Error)]
@@ -161,7 +161,7 @@ impl SplitChannel for MuxConn {
 ///     gateway.drive().await.unwrap();
 /// });
 ///
-/// tokio::spawn( async {// party 2
+/// tokio::spawn(async {// party 2
 ///     let con = c2;
 ///     let (mut gateway, mut m1) = Gateway::single(con);
 ///     let mut m2 = gateway.muxify();
@@ -175,7 +175,7 @@ impl SplitChannel for MuxConn {
 ///     });
 ///     gateway.drive().await.unwrap();
 /// });
-/// })
+/// # })
 /// ```
 pub struct Gateway<C>
 where
@@ -399,6 +399,20 @@ where
     ) -> (NetworkGateway<&mut C>, Vec<MuxNet>) {
         let net = net.as_mut();
         NetworkGateway::<&mut C>::multiplex(net, n)
+    }
+
+    pub fn multiplexify<'tun, T>(
+        tuneable: &'tun mut T,
+        n: usize,
+    ) -> (NetworkGateway<&'tun mut C>, Vec<Network<MuxConn>>)
+    where
+        T: Tuneable<Channel = C>,
+    {
+        let index = tuneable.id().0;
+        let channels: &'tun mut [C] = tuneable.channels();
+        let connections: Vec<&'tun mut C> = channels.iter_mut().collect();
+        let network = Network { connections, index };
+        NetworkGateway::<&'tun mut C>::multiplex(network, n)
     }
 
     pub async fn drive(self) -> Result<Self, GatewayError<C::Error>> {
