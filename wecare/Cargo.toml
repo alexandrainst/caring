@@ -14,6 +14,8 @@ fixed = "2.0.0-alpha.28.0"
 enum_dispatch = "0.3.13"
 ff = "0.13.0"
 castaway = "0.2.3"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
 
 [dev-dependencies]
 caring = { path = "..", features = ["test"]}

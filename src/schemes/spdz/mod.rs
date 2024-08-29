@@ -9,7 +9,7 @@
 // TODO: make costum errors.
 use crate::{
     algebra::math::Vector,
-    net::{agency::Broadcast, Id},
+    net::{agency::Broadcast, mux, Id},
     protocols::commitments::{commit, verify_commit},
     schemes::interactive::InteractiveSharedMany,
 };
@@ -211,7 +211,7 @@ impl<F> InteractiveSharedMany for Share<F>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    type VectorShare = crate::algebra::math::Vector<Share<F>>;
+    type VectorShare = Vector<Share<F>>;
 
     async fn share_many(
         ctx: &mut Self::Context,
@@ -323,7 +323,7 @@ async fn receive_shares<F: PrimeField + Serialize + DeserializeOwned>(
         Ok(vec) => vec,
         Err(e) => return Err(e.into()),
     };
-    Ok(create_shares_from(
+    Ok(create_foreign_share(
         &corrections,
         for_sharing,
         who_is_sending,
@@ -355,42 +355,50 @@ fn create_shares<F: PrimeField>(
     for_sharing: &mut ForSharing<F>,
     params: &SpdzParams<F>,
 ) -> Result<(Vec<Share<F>>, Vec<F>), preprocessing::PreProcError> {
-    let mut res_share: Vec<Share<F>> = vec![];
-    let mut res_correction: Vec<F> = vec![];
-    for val in vals {
-        let Some(r) = for_sharing.rand_known_to_me.vals.pop() else {
-            return Err(preprocessing::PreProcError::MissingForSharingElement);
-        };
-        let Some(r_share) = for_sharing.rand_known_to_i.shares[params.who_am_i.0].pop() else {
-            return Err(preprocessing::PreProcError::MissingForSharingElement);
-        };
-        let correction = *val - r;
-        let share = r_share.add_public(correction, params.who_am_i == Id(0), params);
-        res_share.push(share);
-        res_correction.push(correction);
+    let n = vals.len();
+    let my_randomness = &mut for_sharing.rand_known_to_me.vals;
+    let their_randomness = &mut for_sharing.rand_known_to_i.shares[params.who_am_i.0];
+
+    // We will consume the last `n` values, so we need to ensure their are `n`
+    if n > my_randomness.len() || n > their_randomness.len() {
+        return Err(preprocessing::PreProcError::MissingForSharingElement);
     }
+
+    let (res_share, res_correction) = vals
+        .iter()
+        .zip(my_randomness.drain(my_randomness.len() - n..).rev())
+        .zip(their_randomness.drain(their_randomness.len() - n..).rev())
+        .map(|((val, r), r_share)| {
+            let correction = *val - r;
+            let share = r_share.add_public(correction, params.who_am_i == Id(0), params);
+            (share, correction)
+        })
+        .unzip();
+
     Ok((res_share, res_correction))
 }
 
 // When receiving a share, the party receiving it needs to know who send it.
-fn create_shares_from<F: PrimeField>(
+fn create_foreign_share<F: PrimeField>(
     corrections: &[F],
     for_sharing: &mut ForSharing<F>,
-    who_is_sending: Id,
+    sharer: Id,
     params: &SpdzParams<F>,
 ) -> Result<Vec<Share<F>>, preprocessing::PreProcError> {
-    let prep_rand_len = for_sharing.rand_known_to_i.shares[who_is_sending.0].len();
+    // TODO: Kill this vvvv
+    // We really should be able to pass in a list that is only `m` long
+    // and drain it.
+    let randoms = &mut for_sharing.rand_known_to_i.shares[sharer.0];
+
     let n = corrections.len();
-    if n > for_sharing.rand_known_to_i.shares[who_is_sending.0].len() {
+    if n > randoms.len() {
         return Err(preprocessing::PreProcError::MissingForSharingElement);
     }
-    let mut randoms =
-        for_sharing.rand_known_to_i.shares[who_is_sending.0].split_off(prep_rand_len - n);
-    // TODO consider changing send_shares to also use split_off instead of pop, so we don't need to reverse.
-    randoms.reverse();
-    let rc = randoms.iter().zip(corrections);
-    let shares: Vec<Share<F>> = rc
-        .map(|(&r, &c)| r.add_public(c, params.who_am_i == Id(0), params))
+    let shares: Vec<Share<F>> = randoms
+        .drain(randoms.len() - n..)
+        .rev()
+        .zip(corrections)
+        .map(|(r, &c)| r.add_public(c, params.who_am_i == Id(0), params))
         .collect();
     Ok(shares)
 }
@@ -400,14 +408,14 @@ async fn partial_opening<F: PrimeField + serde::Serialize + serde::de::Deseriali
     candidate_share: &Share<F>,
     params: &SpdzParams<F>,
     network: &mut impl Broadcast,
-    partially_opened_vals: &mut Vec<F>,
+    partially_opened: &mut Vec<F>,
 ) -> F {
     let candidate_vals = network
         .symmetric_broadcast(candidate_share.val)
         .await
         .unwrap();
     let candidate_val = candidate_vals.iter().sum();
-    partially_opened_vals.push(candidate_val * params.mac_key_share - candidate_share.mac);
+    partially_opened.push(candidate_val * params.mac_key_share - candidate_share.mac);
     candidate_val
 }
 
@@ -421,7 +429,9 @@ pub struct SpdzParams<F: PrimeField> {
 // If we do not want the context to be public, we probably need some getter functions - and some alter functions. (TODO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpdzContext<F: PrimeField> {
+    /// Needs to be verified later
     pub opened_values: Vec<F>,
+    /// Base parameters (key + id)
     pub params: SpdzParams<F>,
     pub preprocessed: preprocessing::PreprocessedValues<F>,
 }
@@ -710,7 +720,7 @@ mod test {
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
         let mut p2_prepros = p2_context.preprocessed;
-        let elm1_2 = create_shares_from(
+        let elm1_2 = create_foreign_share(
             &[correction],
             &mut p2_prepros.for_sharing,
             Id(0),
@@ -727,7 +737,7 @@ mod test {
                 .expect("Something went wrong when P2 was sending the share");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
-        let elm2_1 = create_shares_from(
+        let elm2_1 = create_foreign_share(
             &[correction],
             &mut p1_prepros.for_sharing,
             Id(1),
@@ -817,7 +827,7 @@ mod test {
         .expect("Something went wrong when P1 was sending the element.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
-        let elm1_2 = create_shares_from(
+        let elm1_2 = create_foreign_share(
             &[correction],
             &mut (p2_context.preprocessed.for_sharing),
             Id(0),
@@ -837,7 +847,7 @@ mod test {
         .expect("Something went wrong when P2 was sending the element.");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
-        let elm2_1 = create_shares_from(
+        let elm2_1 = create_foreign_share(
             &[correction],
             &mut p1_context.preprocessed.for_sharing,
             Id(1),
@@ -913,7 +923,7 @@ mod test {
         .expect("Something went wrong when P1 was sending the element.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
-        let elm1_2 = create_shares_from(
+        let elm1_2 = create_foreign_share(
             &[correction],
             &mut (p2_context.preprocessed.for_sharing),
             Id(0),
@@ -933,7 +943,7 @@ mod test {
         .expect("Something went wrong when P2 was sending the element.");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
-        let elm2_1 = create_shares_from(
+        let elm2_1 = create_foreign_share(
             &[correction],
             &mut p1_context.preprocessed.for_sharing,
             Id(1),
@@ -1000,7 +1010,7 @@ mod test {
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
         let mut p2_prepros = p2_context.preprocessed;
-        let elm1_2 = create_shares_from(
+        let elm1_2 = create_foreign_share(
             &[correction],
             &mut p2_prepros.for_sharing,
             Id(0),
@@ -1017,7 +1027,7 @@ mod test {
                 .expect("Something went wrong when P2 was sending the element.");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
-        let elm2_1 = create_shares_from(
+        let elm2_1 = create_foreign_share(
             &[correction],
             &mut p1_prepros.for_sharing,
             Id(1),
@@ -1051,7 +1061,7 @@ mod test {
             };
 
         let mut p2_prepros = p2_context.preprocessed;
-        let elm1_2 = match create_shares_from(
+        let elm1_2 = match create_foreign_share(
             &[correction],
             &mut p2_prepros.for_sharing,
             Id(0),
@@ -1071,7 +1081,7 @@ mod test {
                 Err(_) => panic!(),
             };
 
-        let elm2_1 = match create_shares_from(
+        let elm2_1 = match create_foreign_share(
             &[correction],
             &mut p1_prepros.for_sharing,
             Id(1),
@@ -1110,7 +1120,7 @@ mod test {
             };
 
         let mut p2_prepros = p2_context.preprocessed;
-        let elm1_2 = match create_shares_from(
+        let elm1_2 = match create_foreign_share(
             &[correction],
             &mut p2_prepros.for_sharing,
             Id(0),
@@ -1146,7 +1156,7 @@ mod test {
             };
 
         let p2_prepros = &mut p2_context.preprocessed;
-        let elm1_2 = match create_shares_from(
+        let elm1_2 = match create_foreign_share(
             &[correction],
             &mut p2_prepros.for_sharing,
             Id(0),
@@ -1166,7 +1176,7 @@ mod test {
                 Err(_) => panic!(),
             };
 
-        let elm2_1 = match create_shares_from(
+        let elm2_1 = match create_foreign_share(
             &[correction],
             &mut p1_prepros.for_sharing,
             Id(1),
@@ -1261,7 +1271,7 @@ mod test {
             };
 
         let mut p2_prepros = p2_context.preprocessed;
-        let elm1_2 = match create_shares_from(
+        let elm1_2 = match create_foreign_share(
             &[correction],
             &mut p2_prepros.for_sharing,
             Id(0),
@@ -1305,7 +1315,7 @@ mod test {
         };
 
         let mut p2_prepros = p2_context.preprocessed;
-        let elm1_2 = create_shares_from(
+        let elm1_2 = create_foreign_share(
             &[correction],
             &mut p2_prepros.for_sharing,
             Id(0),

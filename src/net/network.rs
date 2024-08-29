@@ -54,7 +54,7 @@ type NetResult<T, C: Channel> = std::result::Result<T, NetworkError<C::RecvError
 
 // PERFORMANCE: serialize in network once when broadcasting.
 impl<C: SplitChannel> Network<C> {
-    pub(crate) fn id_to_index(&self, Id(id): Id) -> usize {
+    fn id_to_index(&self, Id(id): Id) -> usize {
         let n = self.connections.len() + 1;
         if id < self.index {
             id
@@ -465,6 +465,11 @@ impl<C: SplitChannel> Tuneable for Network<C> {
                 id: idx as u32,
                 source: e,
             })
+    }
+
+    type Channel = C;
+    fn channels(&mut self) -> &mut [C] {
+        &mut self.connections
     }
 }
 

@@ -1,8 +1,16 @@
-from caring import Expr, Engine
+from caring import Expr, Engine, preproc
 
-engine = Engine(scheme="shamir-25519", address="localhost:1234", peers=["localhost:1235"], threshold=1)
+preproc(12, "./context1.bin", "./context2.bin")
 
-[a, b]  = Expr.symmetric_share(23, id=engine.id(), size=2)
+engine = Engine(
+    scheme="spdz-25519",
+    address="localhost:1234",
+    peers=["localhost:1235"],
+    threshold=1,
+    preprocessed="./context1.bin"
+)
+
+[a, b]  = Expr.symmetric_share([23, 3], id=engine.id(), size=2)
 
 c = a + b;
 
