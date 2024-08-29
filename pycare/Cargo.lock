@@ -1431,6 +1431,8 @@ dependencies = [
  "fixed",
  "rand",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
