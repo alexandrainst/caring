@@ -7,7 +7,7 @@ use crate::{
 };
 use bincode;
 use ff::PrimeField;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     error::Error,
@@ -143,31 +143,24 @@ pub async fn load_context_async<F: PrimeField + Serialize + DeserializeOwned>(
     bincode::deserialize_from(&*contents).unwrap()
 }
 
-pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
-    mut rng: impl rand::Rng,
-    known_to_each: Vec<usize>,
-    number_of_triplets: usize,
-    number_of_parties: usize,
-) -> (Vec<SpdzContext<F>>, SecretValues<F>) {
-    // TODO: tjek that the arguments are consistent
-    let mac_keys: Vec<F> = (0..number_of_parties)
-        .map(|_| F::random(&mut rng))
-        .collect();
-    let mut ctxs: Vec<SpdzContext<F>> = (0..number_of_parties)
-        .map(|i| SpdzContext::empty(number_of_parties, mac_keys[i], Id(i)))
-        .collect();
-    let mac_key = mac_keys.into_iter().sum();
+fn dealer_preshares<F: PrimeField>(
+    mut rng: impl Rng,
+    per_party: &[usize],
+    num_of_parties: usize,
+) -> (Vec<F>, Vec<ForSharing<F>>) {
+    let mac_keys: Vec<F> = (0..num_of_parties).map(|_| F::random(&mut rng)).collect();
+    let mac_key = mac_keys.iter().sum();
 
     // Filling the context
     // First with values used for easy sharing
-    let mut parties = vec![ForSharing::empty(number_of_parties); number_of_parties];
-    for (me, kte) in known_to_each.into_iter().enumerate() {
+    let mut parties = vec![ForSharing::empty(num_of_parties); num_of_parties];
+    for (me, &kte) in per_party.iter().enumerate() {
         let r = Vector::from_vec(vec![F::random(&mut rng); kte]);
         let mut r_mac = r.clone() * mac_key;
         let mut ri_rest = r.clone();
 
         // party_i
-        (0..number_of_parties - 1).for_each(|i| {
+        (0..num_of_parties - 1).for_each(|i| {
             let for_sharing = &mut parties[i];
             let ri = Vector::from_vec(vec![F::random(&mut rng); kte]);
             ri_rest -= &ri;
@@ -191,14 +184,33 @@ pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
             .zip(r_mac)
             .map(|(val, mac)| spdz::Share { val, mac })
             .collect();
-        parties[number_of_parties - 1].party_fuel[me]
+        parties[num_of_parties - 1].party_fuel[me]
             .shares
             .append(&mut r2_share);
-        if me == number_of_parties - 1 {
+        if me == num_of_parties - 1 {
             let mut r = r.to_vec();
             parties[me].my_randomness.append(&mut r);
         }
     }
+
+    (mac_keys, parties)
+}
+
+pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
+    mut rng: impl rand::Rng,
+    known_to_each: Vec<usize>,
+    number_of_triplets: usize,
+    number_of_parties: usize,
+) -> (Vec<SpdzContext<F>>, SecretValues<F>) {
+    // TODO: tjek that the arguments are consistent
+    let (mac_keys, parties) = dealer_preshares(&mut rng, &known_to_each, number_of_parties);
+
+    // TODO: don't recalculate this
+    let mac_key = mac_keys.iter().sum();
+
+    let mut ctxs: Vec<SpdzContext<F>> = (0..number_of_parties)
+        .map(|i| SpdzContext::empty(number_of_parties, mac_keys[i], Id(i)))
+        .collect();
 
     for (ctx, for_sharing) in ctxs.iter_mut().zip(parties.into_iter()) {
         ctx.preprocessed.for_sharing = for_sharing
