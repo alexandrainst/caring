@@ -19,7 +19,7 @@ use ff::PrimeField;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 
-use self::preprocessing::ForSharing;
+use self::preprocessing::PreShareTank;
 
 pub mod preprocessing;
 use std::{
@@ -63,6 +63,19 @@ mod ops {
             *self -= *rhs;
         }
     }
+
+    // Mutliplication between a share and a public value
+    // This operation is symmetric
+    impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
+        type Output = Share<F>;
+
+        fn mul(self, rhs: F) -> Self::Output {
+            Share {
+                val: self.val * rhs,
+                mac: self.mac * rhs,
+            }
+        }
+    }
 }
 
 impl<F: PrimeField> Share<F> {
@@ -87,19 +100,6 @@ impl<F: PrimeField> Share<F> {
     }
 }
 
-// Mutliplication between a share and a public value
-// This operation is symmetric
-impl<F: PrimeField> std::ops::Mul<F> for Share<F> {
-    type Output = Share<F>;
-
-    fn mul(self, rhs: F) -> Self::Output {
-        Share {
-            val: self.val * rhs,
-            mac: self.mac * rhs,
-        }
-    }
-}
-
 pub async fn secret_mult<F>(
     s1: Share<F>,
     s2: Share<F>,
@@ -116,13 +116,14 @@ where
         Err(e) => return Err(e),
     };
     let is_chosen_party = params.who_am_i == Id(0);
+    let (a, b, c) = triplet.shares;
 
-    let e = s1 - triplet.a;
-    let d = s2 - triplet.b;
+    let e = s1 - a;
+    let d = s2 - b;
     let e = partial_opening(&e, params, network, opened_values).await;
     let d = partial_opening(&d, params, network, opened_values).await;
-    let res =
-        (triplet.c + triplet.b * e + triplet.a * d).add_public(e * d, is_chosen_party, params);
+
+    let res = (c + b * e + a * d).add_public(e * d, is_chosen_party, params);
     Ok(res)
 }
 
@@ -300,7 +301,7 @@ where
 // TODO: Kill this with fire
 pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
     secrets: Option<Vec<F>>, // TODO: remove option.
-    for_sharing: &mut ForSharing<F>,
+    for_sharing: &mut PreShareTank<F>,
     params: &SpdzParams<F>,
     who_is_sending: Id,
     network: &mut impl Broadcast,
@@ -316,7 +317,7 @@ pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwne
 async fn receive_shares<F: PrimeField + Serialize + DeserializeOwned>(
     network: &mut impl Broadcast,
     who_is_sending: Id,
-    for_sharing: &mut ForSharing<F>,
+    for_sharing: &mut PreShareTank<F>,
     params: &SpdzParams<F>,
 ) -> Result<Vec<Share<F>>, Box<dyn Error>> {
     let corrections: Vec<_> = match network.recv_from(who_is_sending).await {
@@ -333,7 +334,7 @@ async fn receive_shares<F: PrimeField + Serialize + DeserializeOwned>(
 
 async fn send_shares<F: PrimeField + Serialize + DeserializeOwned>(
     secrets: &[F],
-    for_sharing: &mut ForSharing<F>,
+    for_sharing: &mut PreShareTank<F>,
     params: &SpdzParams<F>,
     network: &mut impl Broadcast,
 ) -> Result<Vec<Share<F>>, Box<dyn Error>> {
@@ -352,7 +353,7 @@ async fn send_shares<F: PrimeField + Serialize + DeserializeOwned>(
 
 fn create_shares<F: PrimeField>(
     vals: &[F],
-    for_sharing: &mut ForSharing<F>,
+    for_sharing: &mut PreShareTank<F>,
     params: &SpdzParams<F>,
 ) -> Result<(Vec<Share<F>>, Vec<F>), preprocessing::PreProcError> {
     let n = vals.len();
@@ -381,7 +382,7 @@ fn create_shares<F: PrimeField>(
 // When receiving a share, the party receiving it needs to know who send it.
 fn create_foreign_share<F: PrimeField>(
     corrections: &[F],
-    for_sharing: &mut ForSharing<F>,
+    for_sharing: &mut PreShareTank<F>,
     sharer: Id,
     params: &SpdzParams<F>,
 ) -> Result<Vec<Share<F>>, preprocessing::PreProcError> {
@@ -685,18 +686,18 @@ mod test {
         assert!(s1.val == s3);
         assert!(s1.mac == s3 * mac);
 
-        let a1 = p1_triplet_1.a + p2_triplet_1.a;
-        let b1 = p1_triplet_1.b + p2_triplet_1.b;
-        let c1 = p1_triplet_1.c + p2_triplet_1.c;
+        let a1 = p1_triplet_1.shares.0 + p2_triplet_1.shares.0;
+        let b1 = p1_triplet_1.shares.1 + p2_triplet_1.shares.1;
+        let c1 = p1_triplet_1.shares.2 + p2_triplet_1.shares.2;
 
         assert!(a1.val * b1.val == c1.val);
         assert!(a1.val * mac == a1.mac);
         assert!(b1.val * mac == b1.mac);
         assert!(c1.val * mac == c1.mac);
 
-        let a2 = p1_triplet_2.a + p2_triplet_2.a;
-        let b2 = p1_triplet_2.b + p2_triplet_2.b;
-        let c2 = p1_triplet_2.c + p2_triplet_2.c;
+        let a2 = p1_triplet_2.shares.0 + p2_triplet_2.shares.0;
+        let b2 = p1_triplet_2.shares.1 + p2_triplet_2.shares.1;
+        let c2 = p1_triplet_2.shares.2 + p2_triplet_2.shares.2;
 
         assert!(a2.val * b2.val == c2.val);
         assert!(a2.val * mac == a2.mac);
@@ -1707,18 +1708,18 @@ mod test {
         assert!(s1.val == s3);
         assert!(s1.mac == s3 * mac);
 
-        let a1 = p1_triplet_1.a + p2_triplet_1.a;
-        let b1 = p1_triplet_1.b + p2_triplet_1.b;
-        let c1 = p1_triplet_1.c + p2_triplet_1.c;
+        let a1 = p1_triplet_1.shares.0 + p2_triplet_1.shares.0;
+        let b1 = p1_triplet_1.shares.1 + p2_triplet_1.shares.1;
+        let c1 = p1_triplet_1.shares.2 + p2_triplet_1.shares.2;
 
         assert!(a1.val * b1.val == c1.val);
         assert!(a1.val * mac == a1.mac);
         assert!(b1.val * mac == b1.mac);
         assert!(c1.val * mac == c1.mac);
 
-        let a2 = p1_triplet_2.a + p2_triplet_2.a;
-        let b2 = p1_triplet_2.b + p2_triplet_2.b;
-        let c2 = p1_triplet_2.c + p2_triplet_2.c;
+        let a2 = p1_triplet_2.shares.0 + p2_triplet_2.shares.0;
+        let b2 = p1_triplet_2.shares.1 + p2_triplet_2.shares.1;
+        let c2 = p1_triplet_2.shares.2 + p2_triplet_2.shares.2;
 
         assert!(a2.val * b2.val == c2.val);
         assert!(a2.val * mac == a2.mac);

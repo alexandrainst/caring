@@ -3,6 +3,7 @@
 use crate::{
     algebra::math::Vector,
     net::Id,
+    protocols::beaver,
     schemes::spdz::{self, SpdzContext},
 };
 use bincode;
@@ -44,18 +45,18 @@ pub struct PreprocessedValues<F: PrimeField> {
     // change to beaver module
     pub triplets: Triplets<F>,
 
-    pub for_sharing: ForSharing<F>,
+    pub for_sharing: PreShareTank<F>,
 }
 
 // TODO: Document this
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForSharing<F: PrimeField> {
+pub struct PreShareTank<F: PrimeField> {
     /// Fuel per Party
     pub party_fuel: Vec<FuelTank<F>>, // consider boxed slices for the outer vec
     pub my_randomness: Vec<F>,
 }
 
-impl<F: PrimeField> ForSharing<F> {
+impl<F: PrimeField> PreShareTank<F> {
     pub fn empty(party_size: usize) -> Self {
         Self {
             party_fuel: vec![FuelTank::default(); party_size],
@@ -64,7 +65,7 @@ impl<F: PrimeField> ForSharing<F> {
     }
 }
 
-impl<F: PrimeField> ForSharing<F> {
+impl<F: PrimeField> PreShareTank<F> {
     pub fn bad_habits(&self) -> Vec<Vec<spdz::Share<F>>> {
         self.party_fuel.iter().map(|f| f.shares.clone()).collect()
     }
@@ -85,16 +86,11 @@ impl<F: PrimeField> Triplets<F> {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MultiplicationTriple<F: PrimeField> {
-    pub a: spdz::Share<F>,
-    pub b: spdz::Share<F>,
-    pub c: spdz::Share<F>,
-}
+pub type MultiplicationTriple<F: PrimeField> = beaver::BeaverTriple<spdz::Share<F>>;
 
 impl<F: PrimeField> MultiplicationTriple<F> {
     pub fn new(a: spdz::Share<F>, b: spdz::Share<F>, c: spdz::Share<F>) -> Self {
-        MultiplicationTriple { a, b, c }
+        MultiplicationTriple { shares: (a, b, c) }
     }
 }
 
@@ -147,21 +143,20 @@ fn dealer_preshares<F: PrimeField>(
     mut rng: impl Rng,
     per_party: &[usize],
     num_of_parties: usize,
-) -> (Vec<F>, Vec<ForSharing<F>>) {
+) -> (Vec<F>, Vec<PreShareTank<F>>) {
     let mac_keys: Vec<F> = (0..num_of_parties).map(|_| F::random(&mut rng)).collect();
     let mac_key = mac_keys.iter().sum();
 
     // Filling the context
     // First with values used for easy sharing
-    let mut parties = vec![ForSharing::empty(num_of_parties); num_of_parties];
+    let mut parties = vec![PreShareTank::empty(num_of_parties); num_of_parties];
     for (me, &kte) in per_party.iter().enumerate() {
         let r = Vector::from_vec(vec![F::random(&mut rng); kte]);
         let mut r_mac = r.clone() * mac_key;
         let mut ri_rest = r.clone();
 
         // party_i
-        (0..num_of_parties - 1).for_each(|i| {
-            let for_sharing = &mut parties[i];
+        for (i, party) in parties[0..num_of_parties - 1].iter_mut().enumerate() {
             let ri = Vector::from_vec(vec![F::random(&mut rng); kte]);
             ri_rest -= &ri;
             let r_mac_i = Vector::from_vec(vec![F::random(&mut rng); kte]);
@@ -172,12 +167,12 @@ fn dealer_preshares<F: PrimeField>(
                 .zip(r_mac_i)
                 .map(|(val, mac)| spdz::Share { val, mac })
                 .collect();
-            for_sharing.party_fuel[me].shares.append(&mut ri_share);
+            party.party_fuel[me].shares.append(&mut ri_share);
             if me == i {
                 let mut r = r.to_vec();
-                for_sharing.my_randomness.append(&mut r);
+                party.my_randomness.append(&mut r);
             }
-        });
+        }
         let r2 = ri_rest;
         let mut r2_share: Vec<_> = r2
             .into_iter()
@@ -302,7 +297,7 @@ fn generate_empty_context<F: PrimeField>(
     };
     let p_preprosvals = PreprocessedValues {
         triplets,
-        for_sharing: ForSharing {
+        for_sharing: PreShareTank {
             party_fuel: rand_known_to_i,
             my_randomness: rand_known_to_me,
         },
