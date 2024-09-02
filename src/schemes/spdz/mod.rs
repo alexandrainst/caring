@@ -50,7 +50,12 @@ mod ops {
 
     use ff::PrimeField;
 
-    use super::Share;
+    use crate::{
+        net::{agency::Broadcast, Id},
+        schemes::spdz::{partial_opening, preprocessing},
+    };
+
+    use super::{Share, SpdzParams};
 
     impl<F: PrimeField> AddAssign<&Self> for Share<F> {
         fn add_assign(&mut self, rhs: &Self) {
@@ -76,55 +81,56 @@ mod ops {
             }
         }
     }
-}
 
-impl<F: PrimeField> Share<F> {
-    #[must_use]
-    pub fn add_public(self, val: F, is_chosen_party: bool, params: &SpdzParams<F>) -> Self {
-        let mac_key_share = params.mac_key_share;
-        let val_val = if is_chosen_party { val } else { F::ZERO };
-        Share {
-            val: self.val + val_val,
-            mac: self.mac + val * mac_key_share,
+    impl<F: PrimeField> Share<F> {
+        #[must_use]
+        pub fn add_public(self, val: F, is_chosen_party: bool, params: &SpdzParams<F>) -> Self {
+            let mac_key_share = params.mac_key_share;
+            let val_val = if is_chosen_party { val } else { F::ZERO };
+            Share {
+                val: self.val + val_val,
+                mac: self.mac + val * mac_key_share,
+            }
+        }
+
+        #[must_use]
+        pub fn sub_public(self, val: F, chosen_one: bool, params: &SpdzParams<F>) -> Self {
+            let mac_key_share = params.mac_key_share;
+            let val_val = if chosen_one { val } else { F::ZERO };
+            Share {
+                val: self.val - val_val,
+                mac: self.mac - val * mac_key_share,
+            }
         }
     }
 
-    #[must_use]
-    pub fn sub_public(self, val: F, chosen_one: bool, params: &SpdzParams<F>) -> Self {
-        let mac_key_share = params.mac_key_share;
-        let val_val = if chosen_one { val } else { F::ZERO };
-        Share {
-            val: self.val - val_val,
-            mac: self.mac - val * mac_key_share,
-        }
+    // Harmonize this with the beaver impl.
+    pub async fn secret_mult<F>(
+        s1: Share<F>,
+        s2: Share<F>,
+        triplets: &mut preprocessing::Triplets<F>,
+        params: &SpdzParams<F>,
+        opened_values: &mut Vec<F>,
+        network: &mut impl Broadcast,
+    ) -> Result<Share<F>, preprocessing::PreProcError>
+    where
+        F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
+    {
+        let triplet = match triplets.get_triplet() {
+            Ok(tri) => tri,
+            Err(e) => return Err(e),
+        };
+        let is_chosen_party = params.who_am_i == Id(0);
+        let (a, b, c) = triplet.shares;
+
+        let e = s1 - a;
+        let d = s2 - b;
+        let e = partial_opening(&e, params, network, opened_values).await;
+        let d = partial_opening(&d, params, network, opened_values).await;
+
+        let res = (c + b * e + a * d).add_public(e * d, is_chosen_party, params);
+        Ok(res)
     }
-}
-
-pub async fn secret_mult<F>(
-    s1: Share<F>,
-    s2: Share<F>,
-    triplets: &mut preprocessing::Triplets<F>,
-    params: &SpdzParams<F>,
-    opened_values: &mut Vec<F>,
-    network: &mut impl Broadcast,
-) -> Result<Share<F>, preprocessing::PreProcError>
-where
-    F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
-{
-    let triplet = match triplets.get_triplet() {
-        Ok(tri) => tri,
-        Err(e) => return Err(e),
-    };
-    let is_chosen_party = params.who_am_i == Id(0);
-    let (a, b, c) = triplet.shares;
-
-    let e = s1 - a;
-    let d = s2 - b;
-    let e = partial_opening(&e, params, network, opened_values).await;
-    let d = partial_opening(&d, params, network, opened_values).await;
-
-    let res = (c + b * e + a * d).add_public(e * d, is_chosen_party, params);
-    Ok(res)
 }
 
 impl<F> InteractiveShared for Share<F>
@@ -298,22 +304,6 @@ where
     }
 }
 
-// TODO: Kill this with fire
-pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
-    secrets: Option<Vec<F>>, // TODO: remove option.
-    for_sharing: &mut PreShareTank<F>,
-    params: &SpdzParams<F>,
-    who_is_sending: Id,
-    network: &mut impl Broadcast,
-) -> Result<Vec<Share<F>>, Box<dyn error::Error>> {
-    let is_chosen_one = params.who_am_i == who_is_sending;
-    if is_chosen_one {
-        send_shares(&secrets.unwrap(), for_sharing, params, network).await
-    } else {
-        receive_shares(network, who_is_sending, for_sharing, params).await
-    }
-}
-
 async fn receive_shares<F: PrimeField + Serialize + DeserializeOwned>(
     network: &mut impl Broadcast,
     who_is_sending: Id,
@@ -324,12 +314,8 @@ async fn receive_shares<F: PrimeField + Serialize + DeserializeOwned>(
         Ok(vec) => vec,
         Err(e) => return Err(e.into()),
     };
-    Ok(create_foreign_share(
-        &corrections,
-        for_sharing,
-        who_is_sending,
-        params,
-    )?)
+    let preshares = for_sharing.get_fuel_mut(who_is_sending);
+    Ok(create_foreign_share(&corrections, preshares, params)?)
 }
 
 async fn send_shares<F: PrimeField + Serialize + DeserializeOwned>(
@@ -382,21 +368,19 @@ fn create_shares<F: PrimeField>(
 // When receiving a share, the party receiving it needs to know who send it.
 fn create_foreign_share<F: PrimeField>(
     corrections: &[F],
-    for_sharing: &mut PreShareTank<F>,
-    sharer: Id,
+    preshares: &mut Vec<Share<F>>,
     params: &SpdzParams<F>,
 ) -> Result<Vec<Share<F>>, preprocessing::PreProcError> {
     // TODO: Kill this vvvv
     // We really should be able to pass in a list that is only `m` long
     // and drain it.
-    let randoms = &mut for_sharing.party_fuel[sharer.0].shares;
 
     let n = corrections.len();
-    if n > randoms.len() {
+    if n > preshares.len() {
         return Err(preprocessing::PreProcError::MissingForSharingElement);
     }
-    let shares: Vec<Share<F>> = randoms
-        .drain(randoms.len() - n..)
+    let shares: Vec<Share<F>> = preshares
+        .drain(preshares.len() - n..)
         .rev()
         .zip(corrections)
         .map(|(r, &c)| r.add_public(c, params.who_am_i == Id(0), params))
@@ -599,9 +583,28 @@ mod test {
     use rand::SeedableRng;
     use std::io::Seek;
 
-    use crate::{algebra::element::Element32, net::network::InMemoryNetwork, testing::Cluster};
+    use crate::{
+        algebra::element::Element32, net::network::InMemoryNetwork,
+        schemes::spdz::ops::secret_mult, testing::Cluster,
+    };
 
     use super::*;
+
+    // Legacy function only used in tests
+    pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
+        secrets: Option<Vec<F>>, // TODO: remove option.
+        for_sharing: &mut PreShareTank<F>,
+        params: &SpdzParams<F>,
+        who_is_sending: Id,
+        network: &mut impl Broadcast,
+    ) -> Result<Vec<Share<F>>, Box<dyn error::Error>> {
+        let is_chosen_one = params.who_am_i == who_is_sending;
+        if is_chosen_one {
+            send_shares(&secrets.unwrap(), for_sharing, params, network).await
+        } else {
+            receive_shares(network, who_is_sending, for_sharing, params).await
+        }
+    }
 
     // All these tests use dealer preprosessing
     fn dummie_preproc() -> (
@@ -722,8 +725,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = create_foreign_share(
             &[correction],
-            &mut p2_prepros.for_sharing,
-            Id(0),
+            &mut p2_prepros.for_sharing.party_fuel[0].shares,
             &p2_context.params,
         )
         .expect("Something went wrong while P2 was receiving the share.")[0];
@@ -739,8 +741,7 @@ mod test {
 
         let elm2_1 = create_foreign_share(
             &[correction],
-            &mut p1_prepros.for_sharing,
-            Id(1),
+            &mut p1_prepros.for_sharing.party_fuel[1].shares,
             &p1_context.params,
         )
         .expect("Something went wrong while P1 was receiving the share")[0];
@@ -829,8 +830,7 @@ mod test {
 
         let elm1_2 = create_foreign_share(
             &[correction],
-            &mut (p2_context.preprocessed.for_sharing),
-            Id(0),
+            p2_context.preprocessed.for_sharing.get_fuel_mut(Id(0)),
             &p2_context.params,
         )
         .expect("Something went worng when P2 was receiving the element")[0];
@@ -849,8 +849,7 @@ mod test {
 
         let elm2_1 = create_foreign_share(
             &[correction],
-            &mut p1_context.preprocessed.for_sharing,
-            Id(1),
+            p1_context.preprocessed.for_sharing.get_fuel_mut(Id(1)),
             &p1_context.params,
         )
         .expect("Something went worng when P1 was receiving the element")[0];
@@ -925,8 +924,7 @@ mod test {
 
         let elm1_2 = create_foreign_share(
             &[correction],
-            &mut (p2_context.preprocessed.for_sharing),
-            Id(0),
+            p2_context.preprocessed.for_sharing.get_fuel_mut(Id(0)),
             &p2_context.params,
         )
         .expect("Something went worng when P2 was receiving the element")[0];
@@ -945,8 +943,7 @@ mod test {
 
         let elm2_1 = create_foreign_share(
             &[correction],
-            &mut p1_context.preprocessed.for_sharing,
-            Id(1),
+            p1_context.preprocessed.for_sharing.get_fuel_mut(Id(1)),
             &p1_context.params,
         )
         .expect("Something went worng when P1 was receiving the element")[0];
@@ -1013,8 +1010,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = create_foreign_share(
             &[correction],
-            &mut p2_prepros.for_sharing,
-            Id(0),
+            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
             &p2_context.params,
         )
         .expect("Something went wrong when P2 was receiving the element.")[0];
@@ -1030,8 +1026,7 @@ mod test {
 
         let elm2_1 = create_foreign_share(
             &[correction],
-            &mut p1_prepros.for_sharing,
-            Id(1),
+            p1_prepros.for_sharing.get_fuel_mut(Id(1)),
             &p1_context.params,
         )
         .expect("Something went wrong when P1 was receiving the element.")[0];
@@ -1064,8 +1059,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
             &[correction],
-            &mut p2_prepros.for_sharing,
-            Id(0),
+            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
             &p2_context.params,
         ) {
             Ok(s) => s[0],
@@ -1084,8 +1078,7 @@ mod test {
 
         let elm2_1 = match create_foreign_share(
             &[correction],
-            &mut p1_prepros.for_sharing,
-            Id(1),
+            p1_prepros.for_sharing.get_fuel_mut(Id(1)),
             &p1_context.params,
         ) {
             Ok(s) => s[0],
@@ -1123,8 +1116,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
             &[correction],
-            &mut p2_prepros.for_sharing,
-            Id(0),
+            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
             &p2_context.params,
         ) {
             Ok(s) => s[0],
@@ -1159,8 +1151,7 @@ mod test {
         let p2_prepros = &mut p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
             &[correction],
-            &mut p2_prepros.for_sharing,
-            Id(0),
+            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
             &p2_context.params,
         ) {
             Ok(s) => s[0],
@@ -1179,8 +1170,7 @@ mod test {
 
         let elm2_1 = match create_foreign_share(
             &[correction],
-            &mut p1_prepros.for_sharing,
-            Id(1),
+            p1_prepros.for_sharing.get_fuel_mut(Id(1)),
             &p1_context.params,
         ) {
             Ok(s) => s[0],
@@ -1275,8 +1265,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
             &[correction],
-            &mut p2_prepros.for_sharing,
-            Id(0),
+            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
             &p2_context.params,
         ) {
             Ok(s) => s[0],
@@ -1319,8 +1308,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = create_foreign_share(
             &[correction],
-            &mut p2_prepros.for_sharing,
-            Id(0),
+            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
             &p2_context.params,
         )
         .unwrap()[0];
