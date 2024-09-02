@@ -98,7 +98,11 @@ impl<Arg> Cluster<Arg> {
             .into_iter()
             .zip(self.args.into_iter())
             .map(|(p, arg)| {
+                let id = p.index;
                 let fut = prg(p, arg);
+                use tracing::Instrument;
+                let span = tracing::info_span!("Player", id = id);
+                let fut = fut.instrument(span);
                 tokio::spawn(fut)
             })
             .collect();

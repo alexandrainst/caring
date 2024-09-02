@@ -28,7 +28,7 @@ use futures::Future;
 use itertools::Itertools;
 
 pub trait Broadcast: Send {
-    type BroadcastError: Error + Send + 'static;
+    type BroadcastError: Error + Send + Sync + 'static;
     // type Error: Error + 'static;
 
     /// Broadcast a message to all other parties.

@@ -85,10 +85,7 @@ impl<C: SplitChannel> Network<C> {
 
     pub fn peers(&self) -> Vec<Id> {
         let n = self.connections.len();
-        (0..=n)
-            .map(|i| Id(i))
-            .filter(|id| *id != self.id())
-            .collect_vec()
+        (0..=n).map(Id).filter(|id| *id != self.id()).collect_vec()
     }
 
     /// Returns a range for representing the participants.

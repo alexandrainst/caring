@@ -9,7 +9,7 @@
 // TODO: make costum errors.
 use crate::{
     algebra::math::Vector,
-    net::{agency::Broadcast, Id},
+    net::{agency::Broadcast, mux, Id},
     protocols::commitments::{commit, verify_commit},
     schemes::{interactive::InteractiveSharedMany, spdz::preprocessing::FuelTank},
 };
@@ -19,13 +19,10 @@ use ff::PrimeField;
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 
-use self::preprocessing::PreShareTank;
-
+use futures_concurrency::prelude::*;
 pub mod preprocessing;
-use std::{
-    convert::Infallible,
-    error::{self, Error},
-};
+use std::{convert::Infallible, error::Error};
+use tracing::Instrument;
 
 // Should we allow Field or use PrimeField?
 #[derive(
@@ -148,8 +145,8 @@ where
         mut coms: impl Communicate,
     ) -> Result<Self, Infallible> {
         let params = &ctx.params;
-        let for_sharing = &mut ctx.preprocessed.for_sharing;
-        let res = send_shares(&[secret], for_sharing, params, &mut coms)
+        let (fuel, rand) = &mut ctx.preprocessed.for_sharing.get_own();
+        let res = send_shares(&[secret], fuel, rand, params, &mut coms)
             .await
             .unwrap();
         Ok(res[0])
@@ -163,28 +160,45 @@ where
     ) -> Result<Vec<Self>, Self::Error> {
         let number_of_parties = Broadcast::size(&coms);
         let me = ctx.params.who_am_i;
-        let mut shares: Vec<Share<F>> = vec![];
-        for turn in 0..number_of_parties {
-            let turn = Id(turn);
-            // TODO: Concurrency.
-            if turn == me {
-                let s = send_shares(
-                    &[secret],
-                    &mut ctx.preprocessed.for_sharing,
-                    &ctx.params,
-                    &mut coms,
-                )
-                .await
-                .unwrap();
-                shares.push(s[0]);
-            } else {
-                let fueltank = &mut ctx.preprocessed.for_sharing.get_fuel_mut(turn);
-                let s = receive_shares(&mut coms, fueltank, &ctx.params)
+        let (gateway, mut muxes) = mux::NetworkGateway::multiplexify(&mut coms, number_of_parties);
+        let params = &ctx.params;
+        let (my_fueltank, randomness, others) = ctx.preprocessed.for_sharing.split();
+
+        let mut special = muxes.remove(me.0);
+
+        let futs: Vec<_> = muxes
+            .into_iter()
+            .zip(others)
+            .map(async |(mut coms, fueltank)| {
+                let id = fueltank.party.0;
+                let span = tracing::info_span!("Receiving", from = id);
+                let s = receive_shares(&mut coms, fueltank, params)
                     .await
-                    .unwrap();
-                shares.push(s[0]);
-            }
-        }
+                    .map(|s| s[0]);
+                coms.shutdown().instrument(span).await;
+                s
+            })
+            .collect();
+        let mine = async {
+            let span = tracing::info_span!("Sending");
+            let s = send_shares(&[secret], my_fueltank, randomness, params, &mut special)
+                .instrument(span)
+                .await
+                .map(|s| s[0]);
+            special.shutdown().await;
+            s
+        };
+
+        let (my_result, results, driver) = (mine, futs.join(), gateway.drive()).join().await;
+        tracing::info!("Complete!");
+        let _ = driver.expect("TODO: Error handling for networking");
+
+        let my_share = my_result.unwrap();
+
+        // TODO: Weird issue with `try_join`
+        let mut shares: Vec<_> = results.into_iter().map(|x| x.unwrap()).collect();
+        shares.insert(me.0, my_share);
+
         Ok(shares)
     }
 
@@ -221,8 +235,8 @@ where
         mut coms: impl Communicate,
     ) -> Result<Self::VectorShare, Self::Error> {
         let params = &ctx.params;
-        let for_sharing = &mut ctx.preprocessed.for_sharing;
-        let res = send_shares(secret, for_sharing, params, &mut coms)
+        let (fuel, rand) = &mut ctx.preprocessed.for_sharing.get_own();
+        let res = send_shares(secret, fuel, rand, params, &mut coms)
             .await
             .unwrap();
         Ok(res.into())
@@ -235,30 +249,34 @@ where
         mut coms: impl Communicate,
     ) -> Result<Vec<Self::VectorShare>, Self::Error> {
         let number_of_parties = Broadcast::size(&coms);
-        let nums: Vec<_> = secret.into();
         let me = ctx.params.who_am_i;
-        let mut shares: Vec<crate::algebra::math::Vector<Share<F>>> = vec![];
-        for turn in 0..number_of_parties {
-            let turn = Id(turn);
-            // TODO: Concurrency.
-            if turn == me {
-                let s = send_shares(
-                    &nums,
-                    &mut ctx.preprocessed.for_sharing,
-                    &ctx.params,
-                    &mut coms,
-                )
-                .await
-                .unwrap();
-                shares.push(s.into());
-            } else {
-                let fueltank = &mut ctx.preprocessed.for_sharing.get_fuel_mut(turn);
-                let s = receive_shares(&mut coms, fueltank, &ctx.params)
+        let (gateway, mut muxes) = mux::NetworkGateway::multiplexify(&mut coms, number_of_parties);
+        let params = &ctx.params;
+        let (my_fueltank, randomness, others) = ctx.preprocessed.for_sharing.split();
+
+        let mut special = muxes.remove(me.0);
+
+        let futs: Vec<_> = muxes
+            .into_iter()
+            .zip(others)
+            .map(async |(mut coms, fueltank)| {
+                receive_shares(&mut coms, fueltank, params)
                     .await
-                    .unwrap();
-                shares.push(s.into());
-            }
-        }
+                    .map(|s| s.into())
+            })
+            .collect();
+        let mine =
+            async { send_shares(secret, my_fueltank, randomness, params, &mut special).await };
+
+        let (my_result, results, driver) = (mine, futs.join(), gateway.drive()).join().await;
+        let _ = driver.expect("TODO: Error handling for networking");
+
+        let my_share = my_result.unwrap();
+
+        // TODO: Weird issue with `try_join`
+        let mut shares: Vec<_> = results.into_iter().map(|x| x.unwrap()).collect();
+        shares.insert(me.0, my_share.into());
+
         Ok(shares)
     }
 
@@ -296,7 +314,7 @@ async fn receive_shares<F: PrimeField + Serialize + DeserializeOwned>(
     network: &mut impl Broadcast,
     fueltank: &mut FuelTank<F>,
     params: &SpdzParams<F>,
-) -> Result<Vec<Share<F>>, Box<dyn Error>> {
+) -> Result<Vec<Share<F>>, Box<dyn Error + Send + Sync + 'static>> {
     let corrections: Vec<_> = match network.recv_from(fueltank.party).await {
         Ok(vec) => vec,
         Err(e) => return Err(e.into()),
@@ -310,12 +328,13 @@ async fn receive_shares<F: PrimeField + Serialize + DeserializeOwned>(
 
 async fn send_shares<F: PrimeField + Serialize + DeserializeOwned>(
     secrets: &[F],
-    for_sharing: &mut PreShareTank<F>,
+    fueltank: &mut FuelTank<F>,
+    randomness: &mut Vec<F>,
     params: &SpdzParams<F>,
     network: &mut impl Broadcast,
-) -> Result<Vec<Share<F>>, Box<dyn Error>> {
+) -> Result<Vec<Share<F>>, Box<dyn Error + Send + Sync + 'static>> {
     // TODO: return some error
-    let res = create_shares(secrets, for_sharing, params);
+    let res = create_shares(secrets, fueltank, randomness, params);
     let (shares, corrections) = match res {
         Ok((shares, corrections)) => (shares, corrections),
         Err(e) => return Err(e.into()),
@@ -329,12 +348,17 @@ async fn send_shares<F: PrimeField + Serialize + DeserializeOwned>(
 
 fn create_shares<F: PrimeField>(
     vals: &[F],
-    for_sharing: &mut PreShareTank<F>,
+    fueltank: &mut FuelTank<F>,
+    randomness: &mut Vec<F>,
     params: &SpdzParams<F>,
 ) -> Result<(Vec<Share<F>>, Vec<F>), preprocessing::PreProcError> {
+    assert_eq!(
+        fueltank.party, params.who_am_i,
+        "Fueltank does not match params"
+    );
     let n = vals.len();
-    let my_randomness = &mut for_sharing.my_randomness;
-    let their_randomness = &mut for_sharing.party_fuel[params.who_am_i.0].shares;
+    let my_randomness = randomness;
+    let their_randomness = &mut fueltank.shares;
 
     // We will consume the last `n` values, so we need to ensure their are `n`
     if n > my_randomness.len() || n > their_randomness.len() {
@@ -568,10 +592,12 @@ fn power<F: std::ops::MulAssign + Clone + std::ops::Mul<Output = F>>(base: &F, e
 #[cfg(test)]
 mod test {
 
+    use crate::schemes::spdz::{self, preprocessing::PreShareTank};
     use ff::Field;
     use rand::thread_rng;
     use rand::SeedableRng;
     use std::io::Seek;
+    use tracing_subscriber::fmt::format::FmtSpan;
 
     use crate::{
         algebra::element::Element32, net::network::InMemoryNetwork,
@@ -580,6 +606,44 @@ mod test {
 
     use super::*;
 
+    #[tokio::test]
+    async fn symmetric_sharing() {
+        let subscriber = tracing_subscriber::fmt()
+            .compact()
+            .with_line_number(true)
+            .with_target(true)
+            .without_time()
+            .with_ansi(true)
+            .with_span_events(FmtSpan::ACTIVE)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+
+        let rng = rand::rngs::mock::StepRng::new(7, 32);
+        let (ctxs, _secrets) = preprocessing::dealer_preproc::<Element32>(rng, &[1, 1, 1], 0, 3);
+
+        let res: Vec<u32> = Cluster::new(3)
+            .with_args(ctxs)
+            .run_with_args(async |mut coms, mut ctx| {
+                let rng = rand::rngs::mock::StepRng::new(7, 32);
+                let secret = Element32::from(33u32);
+                let shares = spdz::Share::symmetric_share(&mut ctx, secret, rng, &mut coms)
+                    .instrument(tracing::info_span!("Sharing"))
+                    .await
+                    .unwrap();
+
+                let share = shares[0] + shares[1] + shares[2];
+                spdz::Share::recombine(&mut ctx, share, &mut coms)
+                    .instrument(tracing::info_span!("Recombining"))
+                    .await
+                    .map(|x| x.into())
+                    .unwrap()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(&res, &[99, 99, 99u32]);
+    }
+
     // Legacy function only used in tests
     pub async fn share<F: PrimeField + serde::Serialize + serde::de::DeserializeOwned>(
         secrets: Option<Vec<F>>, // TODO: remove option.
@@ -587,10 +651,11 @@ mod test {
         params: &SpdzParams<F>,
         who_is_sending: Id,
         network: &mut impl Broadcast,
-    ) -> Result<Vec<Share<F>>, Box<dyn error::Error>> {
+    ) -> Result<Vec<Share<F>>, Box<dyn Error + Send + Sync + 'static>> {
         let is_chosen_one = params.who_am_i == who_is_sending;
         if is_chosen_one {
-            send_shares(&secrets.unwrap(), for_sharing, params, network).await
+            let (fuel, rand) = for_sharing.get_own();
+            send_shares(&secrets.unwrap(), fuel, rand, params, network).await
         } else {
             let fueltank = for_sharing.get_fuel_mut(who_is_sending);
             receive_shares(network, fueltank, params).await
@@ -610,7 +675,7 @@ mod test {
         let number_of_parties = 2;
         let (mut contexts, secret_values) = preprocessing::dealer_preproc(
             rng,
-            known_to_each,
+            &known_to_each,
             number_of_triplets,
             number_of_parties,
         );
@@ -628,7 +693,7 @@ mod test {
         let number_of_parties = 2;
         let (mut contexts, secret_values) = preprocessing::dealer_preproc(
             rng,
-            known_to_each,
+            &known_to_each,
             number_of_triplets,
             number_of_parties,
         );
@@ -708,8 +773,10 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed;
         let elm1 = F::from_u128(56u128);
+
+        let (fueltank, randomness) = p1_prepros.for_sharing.get_own();
         let (elm1_1_v, correction_v) =
-            create_shares(&[elm1], &mut p1_prepros.for_sharing, &p1_context.params)
+            create_shares(&[elm1], fueltank, randomness, &p1_context.params)
                 .expect("Something went wrong while P1 was sending the share.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
@@ -725,8 +792,9 @@ mod test {
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
+        let (fueltank, randomness) = p2_prepros.for_sharing.get_own();
         let (elm2_2_v, correction_v) =
-            create_shares(&[elm2], &mut p2_prepros.for_sharing, &p2_context.params)
+            create_shares(&[elm2], fueltank, randomness, &p2_context.params)
                 .expect("Something went wrong when P2 was sending the share");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
@@ -751,7 +819,7 @@ mod test {
         let number_of_parties = 2;
         let (mut contexts, _) = preprocessing::dealer_preproc(
             rng,
-            known_to_each,
+            &known_to_each,
             number_of_triplets,
             number_of_parties,
         );
@@ -810,13 +878,10 @@ mod test {
         let (mut p1_context, mut p2_context, secret_values) = dummie_preproc();
 
         // P1 shares an element
+        let (fuel, rand) = p1_context.preprocessed.for_sharing.get_own();
         let elm1 = F::from_u128(56u128);
-        let (elm1_1_v, correction_v) = create_shares(
-            &[elm1],
-            &mut p1_context.preprocessed.for_sharing,
-            &p1_context.params,
-        )
-        .expect("Something went wrong when P1 was sending the element.");
+        let (elm1_1_v, correction_v) = create_shares(&[elm1], fuel, rand, &p1_context.params)
+            .expect("Something went wrong when P1 was sending the element.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
         let elm1_2 = create_foreign_share(
@@ -830,12 +895,9 @@ mod test {
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2_v, correction_v) = create_shares(
-            &[elm2],
-            &mut p2_context.preprocessed.for_sharing,
-            &p2_context.params,
-        )
-        .expect("Something went wrong when P2 was sending the element.");
+        let (fuel, rand) = p2_context.preprocessed.for_sharing.get_own();
+        let (elm2_2_v, correction_v) = create_shares(&[elm2], fuel, rand, &p2_context.params)
+            .expect("Something went wrong when P2 was sending the element.");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
         let elm2_1 = create_foreign_share(
@@ -905,12 +967,9 @@ mod test {
 
         // P1 shares an element
         let elm1 = F::from_u128(56u128);
-        let (elm1_1_v, correction_v) = create_shares(
-            &[elm1],
-            &mut p1_context.preprocessed.for_sharing,
-            &p1_context.params,
-        )
-        .expect("Something went wrong when P1 was sending the element.");
+        let (fuel, rand) = p1_context.preprocessed.for_sharing.get_own();
+        let (elm1_1_v, correction_v) = create_shares(&[elm1], fuel, rand, &p1_context.params)
+            .expect("Something went wrong when P1 was sending the element.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
         let elm1_2 = create_foreign_share(
@@ -924,12 +983,9 @@ mod test {
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2_v, correction_v) = create_shares(
-            &[elm2],
-            &mut p2_context.preprocessed.for_sharing,
-            &p2_context.params,
-        )
-        .expect("Something went wrong when P2 was sending the element.");
+        let (fuel, rand) = p2_context.preprocessed.for_sharing.get_own();
+        let (elm2_2_v, correction_v) = create_shares(&[elm2], fuel, rand, &p2_context.params)
+            .expect("Something went wrong when P2 was sending the element.");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
         let elm2_1 = create_foreign_share(
@@ -993,9 +1049,9 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1_v, correction_v) =
-            create_shares(&[elm1], &mut p1_prepros.for_sharing, &p1_context.params)
-                .expect("Something went wrong when P1 was sending the element.");
+        let (fuel, rand) = p1_prepros.for_sharing.get_own();
+        let (elm1_1_v, correction_v) = create_shares(&[elm1], fuel, rand, &p1_context.params)
+            .expect("Something went wrong when P1 was sending the element.");
         let (elm1_1, correction) = (elm1_1_v[0], correction_v[0]);
 
         let mut p2_prepros = p2_context.preprocessed;
@@ -1010,9 +1066,9 @@ mod test {
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2_v, correction_v) =
-            create_shares(&[elm2], &mut p2_prepros.for_sharing, &p2_context.params)
-                .expect("Something went wrong when P2 was sending the element.");
+        let (fuel, rand) = p2_prepros.for_sharing.get_own();
+        let (elm2_2_v, correction_v) = create_shares(&[elm2], fuel, rand, &p2_context.params)
+            .expect("Something went wrong when P2 was sending the element.");
         let (elm2_2, correction) = (elm2_2_v[0], correction_v[0]);
 
         let elm2_1 = create_foreign_share(
@@ -1041,11 +1097,11 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) =
-            match create_shares(&[elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
-                Ok((e, c)) => (e[0], c[0]),
-                Err(_) => panic!(),
-            };
+        let (fuel, rand) = p1_prepros.for_sharing.get_own();
+        let (elm1_1, correction) = match create_shares(&[elm1], fuel, rand, &p1_context.params) {
+            Ok((e, c)) => (e[0], c[0]),
+            Err(_) => panic!(),
+        };
 
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
@@ -1061,11 +1117,11 @@ mod test {
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) =
-            match create_shares(&[elm2], &mut p2_prepros.for_sharing, &p2_context.params) {
-                Ok((e, c)) => (e[0], c[0]),
-                Err(_) => panic!(),
-            };
+        let (fuel, rand) = p2_prepros.for_sharing.get_own();
+        let (elm2_2, correction) = match create_shares(&[elm2], fuel, rand, &p2_context.params) {
+            Ok((e, c)) => (e[0], c[0]),
+            Err(_) => panic!(),
+        };
 
         let elm2_1 = match create_foreign_share(
             &[correction],
@@ -1094,15 +1150,15 @@ mod test {
         let pub_constant = F::from_u128(8711u128);
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed;
+        let (fuel, rand) = p1_prepros.for_sharing.get_own();
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) =
-            match create_shares(&[elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
-                Ok((e, c)) => (e[0], c[0]),
-                Err(e) => {
-                    println!("Error: {}", e);
-                    panic!()
-                }
-            };
+        let (elm1_1, correction) = match create_shares(&[elm1], fuel, rand, &p1_context.params) {
+            Ok((e, c)) => (e[0], c[0]),
+            Err(e) => {
+                println!("Error: {}", e);
+                panic!()
+            }
+        };
 
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
@@ -1133,11 +1189,11 @@ mod test {
         // P1 shares an element
         let p1_prepros = &mut p1_context.preprocessed;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) =
-            match create_shares(&[elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
-                Ok((e, c)) => (e[0], c[0]),
-                Err(_) => panic!(),
-            };
+        let (fuel, rand) = p1_prepros.for_sharing.get_own();
+        let (elm1_1, correction) = match create_shares(&[elm1], fuel, rand, &p1_context.params) {
+            Ok((e, c)) => (e[0], c[0]),
+            Err(_) => panic!(),
+        };
 
         let p2_prepros = &mut p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
@@ -1153,11 +1209,11 @@ mod test {
 
         // P2 shares an element
         let elm2 = F::from_u128(18u128);
-        let (elm2_2, correction) =
-            match create_shares(&[elm2], &mut p2_prepros.for_sharing, &p2_context.params) {
-                Ok((e, c)) => (e[0], c[0]),
-                Err(_) => panic!(),
-            };
+        let (fuel, rand) = p2_prepros.for_sharing.get_own();
+        let (elm2_2, correction) = match create_shares(&[elm2], fuel, rand, &p2_context.params) {
+            Ok((e, c)) => (e[0], c[0]),
+            Err(_) => panic!(),
+        };
 
         let elm2_1 = match create_foreign_share(
             &[correction],
@@ -1247,11 +1303,11 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed;
         let elm1 = F::from_u128(56u128);
-        let (elm1_1, correction) =
-            match create_shares(&[elm1], &mut p1_prepros.for_sharing, &p1_context.params) {
-                Ok((e, c)) => (e[0], c[0]),
-                Err(_) => panic!(),
-            };
+        let (fuel, rand) = p1_prepros.for_sharing.get_own();
+        let (elm1_1, correction) = match create_shares(&[elm1], fuel, rand, &p1_context.params) {
+            Ok((e, c)) => (e[0], c[0]),
+            Err(_) => panic!(),
+        };
 
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
@@ -1290,9 +1346,9 @@ mod test {
         // P1 shares an element
         let mut p1_prepros = p1_context.preprocessed;
         let elm1 = F::from_u128(56u128);
+        let (fuel, rand) = p1_prepros.for_sharing.get_own();
         let (elm1_1, correction) = {
-            let (e, c) =
-                create_shares(&[elm1], &mut p1_prepros.for_sharing, &p1_context.params).unwrap();
+            let (e, c) = create_shares(&[elm1], fuel, rand, &p1_context.params).unwrap();
             (e[0], c[0])
         };
 
@@ -1343,7 +1399,7 @@ mod test {
         let number_of_parties = 2;
         let (mut contexts, _secret_values) = preprocessing::dealer_preproc(
             rng,
-            known_to_each,
+            &known_to_each,
             number_of_triplets,
             number_of_parties,
         );
@@ -1457,7 +1513,7 @@ mod test {
         let number_of_parties = 2;
         let (mut contexts, _secret_values) = preprocessing::dealer_preproc(
             rng,
-            known_to_each,
+            &known_to_each,
             number_of_triplets,
             number_of_parties,
         );
@@ -1526,7 +1582,7 @@ mod test {
         let number_of_parties = 2;
         let (mut contexts, _secret_values) = preprocessing::dealer_preproc(
             rng,
-            known_to_each,
+            &known_to_each,
             number_of_triplets,
             number_of_parties,
         );
