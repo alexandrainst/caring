@@ -11,7 +11,7 @@ use crate::{
     algebra::math::Vector,
     net::{agency::Broadcast, Id},
     protocols::commitments::{commit, verify_commit},
-    schemes::interactive::InteractiveSharedMany,
+    schemes::{interactive::InteractiveSharedMany, spdz::preprocessing::FuelTank},
 };
 use crate::{net::Communicate, schemes::interactive::InteractiveShared};
 use derive_more::{Add, AddAssign, Sub, SubAssign};
@@ -178,14 +178,10 @@ where
                 .unwrap();
                 shares.push(s[0]);
             } else {
-                let s = receive_shares(
-                    &mut coms,
-                    turn,
-                    &mut ctx.preprocessed.for_sharing,
-                    &ctx.params,
-                )
-                .await
-                .unwrap();
+                let fueltank = &mut ctx.preprocessed.for_sharing.get_fuel_mut(turn);
+                let s = receive_shares(&mut coms, fueltank, &ctx.params)
+                    .await
+                    .unwrap();
                 shares.push(s[0]);
             }
         }
@@ -198,10 +194,8 @@ where
         from: Id,
     ) -> Result<Self, Infallible> {
         let params = &ctx.params;
-        let for_sharing = &mut ctx.preprocessed.for_sharing;
-        let res = receive_shares(&mut coms, from, for_sharing, params)
-            .await
-            .unwrap();
+        let fueltank = &mut ctx.preprocessed.for_sharing.get_fuel_mut(from);
+        let res = receive_shares(&mut coms, fueltank, params).await.unwrap();
         Ok(res[0])
     }
 
@@ -258,14 +252,10 @@ where
                 .unwrap();
                 shares.push(s.into());
             } else {
-                let s = receive_shares(
-                    &mut coms,
-                    turn,
-                    &mut ctx.preprocessed.for_sharing,
-                    &ctx.params,
-                )
-                .await
-                .unwrap();
+                let fueltank = &mut ctx.preprocessed.for_sharing.get_fuel_mut(turn);
+                let s = receive_shares(&mut coms, fueltank, &ctx.params)
+                    .await
+                    .unwrap();
                 shares.push(s.into());
             }
         }
@@ -278,10 +268,8 @@ where
         from: Id,
     ) -> Result<Self::VectorShare, Self::Error> {
         let params = &ctx.params;
-        let for_sharing = &mut ctx.preprocessed.for_sharing;
-        let res = receive_shares(&mut coms, from, for_sharing, params)
-            .await
-            .unwrap();
+        let fueltank = &mut ctx.preprocessed.for_sharing.get_fuel_mut(from);
+        let res = receive_shares(&mut coms, fueltank, params).await.unwrap();
         Ok(res.into())
     }
 
@@ -306,16 +294,18 @@ where
 
 async fn receive_shares<F: PrimeField + Serialize + DeserializeOwned>(
     network: &mut impl Broadcast,
-    who_is_sending: Id,
-    for_sharing: &mut PreShareTank<F>,
+    fueltank: &mut FuelTank<F>,
     params: &SpdzParams<F>,
 ) -> Result<Vec<Share<F>>, Box<dyn Error>> {
-    let corrections: Vec<_> = match network.recv_from(who_is_sending).await {
+    let corrections: Vec<_> = match network.recv_from(fueltank.party).await {
         Ok(vec) => vec,
         Err(e) => return Err(e.into()),
     };
-    let preshares = for_sharing.get_fuel_mut(who_is_sending);
-    Ok(create_foreign_share(&corrections, preshares, params)?)
+    Ok(create_foreign_share(
+        &corrections,
+        &mut fueltank.shares,
+        params,
+    )?)
 }
 
 async fn send_shares<F: PrimeField + Serialize + DeserializeOwned>(
@@ -602,7 +592,8 @@ mod test {
         if is_chosen_one {
             send_shares(&secrets.unwrap(), for_sharing, params, network).await
         } else {
-            receive_shares(network, who_is_sending, for_sharing, params).await
+            let fueltank = for_sharing.get_fuel_mut(who_is_sending);
+            receive_shares(network, fueltank, params).await
         }
     }
 
@@ -830,7 +821,7 @@ mod test {
 
         let elm1_2 = create_foreign_share(
             &[correction],
-            p2_context.preprocessed.for_sharing.get_fuel_mut(Id(0)),
+            p2_context.preprocessed.for_sharing.get_fuel_vec_mut(Id(0)),
             &p2_context.params,
         )
         .expect("Something went worng when P2 was receiving the element")[0];
@@ -849,7 +840,7 @@ mod test {
 
         let elm2_1 = create_foreign_share(
             &[correction],
-            p1_context.preprocessed.for_sharing.get_fuel_mut(Id(1)),
+            p1_context.preprocessed.for_sharing.get_fuel_vec_mut(Id(1)),
             &p1_context.params,
         )
         .expect("Something went worng when P1 was receiving the element")[0];
@@ -924,7 +915,7 @@ mod test {
 
         let elm1_2 = create_foreign_share(
             &[correction],
-            p2_context.preprocessed.for_sharing.get_fuel_mut(Id(0)),
+            p2_context.preprocessed.for_sharing.get_fuel_vec_mut(Id(0)),
             &p2_context.params,
         )
         .expect("Something went worng when P2 was receiving the element")[0];
@@ -943,7 +934,7 @@ mod test {
 
         let elm2_1 = create_foreign_share(
             &[correction],
-            p1_context.preprocessed.for_sharing.get_fuel_mut(Id(1)),
+            p1_context.preprocessed.for_sharing.get_fuel_vec_mut(Id(1)),
             &p1_context.params,
         )
         .expect("Something went worng when P1 was receiving the element")[0];
@@ -1010,7 +1001,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = create_foreign_share(
             &[correction],
-            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
+            p2_prepros.for_sharing.get_fuel_vec_mut(Id(0)),
             &p2_context.params,
         )
         .expect("Something went wrong when P2 was receiving the element.")[0];
@@ -1026,7 +1017,7 @@ mod test {
 
         let elm2_1 = create_foreign_share(
             &[correction],
-            p1_prepros.for_sharing.get_fuel_mut(Id(1)),
+            p1_prepros.for_sharing.get_fuel_vec_mut(Id(1)),
             &p1_context.params,
         )
         .expect("Something went wrong when P1 was receiving the element.")[0];
@@ -1059,7 +1050,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
             &[correction],
-            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
+            p2_prepros.for_sharing.get_fuel_vec_mut(Id(0)),
             &p2_context.params,
         ) {
             Ok(s) => s[0],
@@ -1078,7 +1069,7 @@ mod test {
 
         let elm2_1 = match create_foreign_share(
             &[correction],
-            p1_prepros.for_sharing.get_fuel_mut(Id(1)),
+            p1_prepros.for_sharing.get_fuel_vec_mut(Id(1)),
             &p1_context.params,
         ) {
             Ok(s) => s[0],
@@ -1116,7 +1107,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
             &[correction],
-            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
+            p2_prepros.for_sharing.get_fuel_vec_mut(Id(0)),
             &p2_context.params,
         ) {
             Ok(s) => s[0],
@@ -1151,7 +1142,7 @@ mod test {
         let p2_prepros = &mut p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
             &[correction],
-            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
+            p2_prepros.for_sharing.get_fuel_vec_mut(Id(0)),
             &p2_context.params,
         ) {
             Ok(s) => s[0],
@@ -1170,7 +1161,7 @@ mod test {
 
         let elm2_1 = match create_foreign_share(
             &[correction],
-            p1_prepros.for_sharing.get_fuel_mut(Id(1)),
+            p1_prepros.for_sharing.get_fuel_vec_mut(Id(1)),
             &p1_context.params,
         ) {
             Ok(s) => s[0],
@@ -1265,7 +1256,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = match create_foreign_share(
             &[correction],
-            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
+            p2_prepros.for_sharing.get_fuel_vec_mut(Id(0)),
             &p2_context.params,
         ) {
             Ok(s) => s[0],
@@ -1308,7 +1299,7 @@ mod test {
         let mut p2_prepros = p2_context.preprocessed;
         let elm1_2 = create_foreign_share(
             &[correction],
-            p2_prepros.for_sharing.get_fuel_mut(Id(0)),
+            p2_prepros.for_sharing.get_fuel_vec_mut(Id(0)),
             &p2_context.params,
         )
         .unwrap()[0];
