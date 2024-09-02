@@ -63,6 +63,10 @@ impl<F: PrimeField> PreShareTank<F> {
             my_randomness: vec![],
         }
     }
+
+    pub fn get_fuel_mut(&mut self, id: Id) -> &mut Vec<spdz::Share<F>> {
+        &mut self.party_fuel[id.0].shares
+    }
 }
 
 impl<F: PrimeField> PreShareTank<F> {
@@ -86,7 +90,7 @@ impl<F: PrimeField> Triplets<F> {
     }
 }
 
-pub type MultiplicationTriple<F: PrimeField> = beaver::BeaverTriple<spdz::Share<F>>;
+pub type MultiplicationTriple<F> = beaver::BeaverTriple<spdz::Share<F>>;
 
 impl<F: PrimeField> MultiplicationTriple<F> {
     pub fn new(a: spdz::Share<F>, b: spdz::Share<F>, c: spdz::Share<F>) -> Self {
