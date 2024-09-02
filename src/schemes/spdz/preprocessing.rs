@@ -54,14 +54,16 @@ pub struct PreShareTank<F: PrimeField> {
     /// Fuel per Party
     pub party_fuel: Vec<FuelTank<F>>, // consider boxed slices for the outer vec
     pub my_randomness: Vec<F>,
+    pub me: Id,
 }
 
 impl<F: PrimeField> PreShareTank<F> {
-    pub fn empty(party_size: usize) -> Self {
+    pub fn empty(me: Id, party_size: usize) -> Self {
         let party_fuel = (0..party_size).map(|id| FuelTank::empty(Id(id))).collect();
         Self {
             party_fuel,
             my_randomness: vec![],
+            me,
         }
     }
 
@@ -71,6 +73,25 @@ impl<F: PrimeField> PreShareTank<F> {
 
     pub fn get_fuel_mut(&mut self, id: Id) -> &mut FuelTank<F> {
         &mut self.party_fuel[id.0]
+    }
+
+    pub fn get_own(&mut self) -> (&mut FuelTank<F>, &mut Vec<F>) {
+        (&mut self.party_fuel[self.me.0], &mut self.my_randomness)
+    }
+
+    pub fn split(
+        &mut self,
+    ) -> (
+        &mut FuelTank<F>,
+        &mut Vec<F>,
+        impl IntoIterator<Item = &mut FuelTank<F>>,
+    ) {
+        let (head, tail) = self.party_fuel.split_at_mut(self.me.0);
+        let (my_fueltank, tail) = tail.split_first_mut().unwrap();
+        let others = head.iter_mut().chain(tail);
+        debug_assert_eq!(self.me, my_fueltank.party);
+
+        (my_fueltank, &mut self.my_randomness, others)
     }
 }
 
@@ -142,7 +163,7 @@ pub fn write_context<F: PrimeField + Serialize + DeserializeOwned>(
     let rng = rand_chacha::ChaCha20Rng::from_entropy();
     // Notice here that the secret values are not written to the file, No party is allowed to know the value.
     let (contexts, _): (Vec<SpdzContext<F>>, _) =
-        dealer_preproc(rng, known_to_each, number_of_triplets, number_of_parties);
+        dealer_preproc(rng, &known_to_each, number_of_triplets, number_of_parties);
     let names_and_contexts = files.iter_mut().zip(contexts);
     for (file, context) in names_and_contexts {
         let data: Vec<u8> = bincode::serialize(&context)?;
@@ -177,7 +198,9 @@ fn dealer_preshares<F: PrimeField>(
 
     // Filling the context
     // First with values used for easy sharing
-    let mut parties = vec![PreShareTank::empty(num_of_parties); num_of_parties];
+    let mut parties: Vec<_> = (0..num_of_parties)
+        .map(|id| PreShareTank::empty(Id(id), num_of_parties))
+        .collect();
     for (me, &kte) in per_party.iter().enumerate() {
         let r = Vector::from_vec(vec![F::random(&mut rng); kte]);
         let mut r_mac = r.clone() * mac_key;
@@ -221,7 +244,7 @@ fn dealer_preshares<F: PrimeField>(
 
 pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
     mut rng: impl rand::Rng,
-    known_to_each: Vec<usize>,
+    known_to_each: &[usize],
     number_of_triplets: usize,
     number_of_parties: usize,
 ) -> (Vec<SpdzContext<F>>, SecretValues<F>) {
@@ -330,6 +353,7 @@ fn generate_empty_context<F: PrimeField>(
         for_sharing: PreShareTank {
             party_fuel: rand_known_to_i,
             my_randomness: rand_known_to_me,
+            me: who_am_i,
         },
     };
     SpdzContext {
