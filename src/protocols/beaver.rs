@@ -2,6 +2,7 @@ use std::iter;
 
 use itertools::{izip, multiunzip};
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     algebra::field::Field,
@@ -13,7 +14,7 @@ use crate::{
 };
 
 /// Beaver (Multiplication) Triple
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BeaverTriple<S> {
     pub shares: (S, S, S),
 }
