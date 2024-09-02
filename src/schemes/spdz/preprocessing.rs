@@ -58,14 +58,19 @@ pub struct PreShareTank<F: PrimeField> {
 
 impl<F: PrimeField> PreShareTank<F> {
     pub fn empty(party_size: usize) -> Self {
+        let party_fuel = (0..party_size).map(|id| FuelTank::empty(Id(id))).collect();
         Self {
-            party_fuel: vec![FuelTank::default(); party_size],
+            party_fuel,
             my_randomness: vec![],
         }
     }
 
-    pub fn get_fuel_mut(&mut self, id: Id) -> &mut Vec<spdz::Share<F>> {
+    pub fn get_fuel_vec_mut(&mut self, id: Id) -> &mut Vec<spdz::Share<F>> {
         &mut self.party_fuel[id.0].shares
+    }
+
+    pub fn get_fuel_mut(&mut self, id: Id) -> &mut FuelTank<F> {
+        &mut self.party_fuel[id.0]
     }
 }
 
@@ -98,9 +103,28 @@ impl<F: PrimeField> MultiplicationTriple<F> {
     }
 }
 
-#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FuelTank<F: PrimeField> {
+    pub party: Id,
     pub shares: Vec<spdz::Share<F>>,
+}
+
+impl<F: PrimeField> FuelTank<F> {
+    pub fn empty(id: Id) -> Self {
+        Self {
+            party: id,
+            shares: Vec::new(),
+        }
+    }
+
+    pub fn subtank(&mut self, take: usize) -> Self {
+        let len = self.shares.len();
+        let shares = self.shares.drain(len - take..).collect();
+        Self {
+            party: self.party,
+            shares,
+        }
+    }
 }
 
 pub struct SecretValues<F> {
@@ -294,7 +318,9 @@ fn generate_empty_context<F: PrimeField>(
     mac_key_share: F,
     who_am_i: Id,
 ) -> SpdzContext<F> {
-    let rand_known_to_i = vec![FuelTank { shares: vec![] }; number_of_parties];
+    let rand_known_to_i = (0..number_of_parties)
+        .map(|id| FuelTank::empty(Id(id)))
+        .collect();
     let rand_known_to_me = vec![];
     let triplets = Triplets {
         multiplication_triplets: vec![],
