@@ -311,7 +311,10 @@ impl<C: SplitChannel> Network<C> {
         connections.insert(0, None);
 
         // Remove our own position, remember we are at zero.
-        let (i, _) = results.iter().find_position(|&i| *i == 0).unwrap();
+        let (i, _) = results
+            .iter()
+            .find_position(|&i| *i == 0)
+            .expect("Id zero should be in there");
         results.remove(i); // remember we have removed it to not remove it twice.
         self.index = i;
 

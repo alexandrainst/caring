@@ -198,11 +198,11 @@ where
 }
 
 #[derive(Debug, Error)]
-pub enum GatewayError<E: Error + Send + 'static> {
-    #[error("Multiplexed connection {0} disappered")]
+pub enum GatewayError {
+    #[error("Multiplexed connection {0} not found: {1}")]
     MailboxNotFound(usize, &'static str),
     #[error("Underlying connection died: {0}")]
-    DeadConnection(#[from] Arc<E>),
+    DeadConnection(#[from] Arc<dyn Error + Send + Sync + 'static>),
 }
 
 impl<C: SplitChannel + Send> Gateway<C> {
@@ -214,7 +214,7 @@ impl<C: SplitChannel + Send> Gateway<C> {
     ///   dropped and is receiving messages.
     /// - [`GatewayError::DeadConnection`] if the underlying connection have failed.
     ///
-    pub async fn drive(mut self) -> Result<Self, GatewayError<C::Error>> {
+    pub async fn drive(mut self) -> Result<Self, GatewayError> {
         // TODO: maybe have this be nonconsuming so it can be resumed after new muxes are added?
         // This however would compromise the possible destruction when errors occur,
         // thus leaving the error handling in a bad state.
@@ -262,19 +262,20 @@ impl<C: SplitChannel + Send> Gateway<C> {
                         Ok(self)
                     },
                     Err(err) => {
+                        tracing::error!("Failed to send message: {err}");
                         Err(self.propogate_error(err))
                     }
                 }
             },
             err = recv_in => {
                 let err : C::Error = err?; // return early on missing mailbox.
-                tracing::error!("Failed to handle message: {err}");
+                tracing::error!("Failed to receive message: {err}");
                 Err(self.propogate_error(err))
             },
         }
     }
 
-    fn propogate_error<E: Error + Send + Sync + 'static>(mut self, err: E) -> GatewayError<E> {
+    fn propogate_error<E: Error + Send + Sync + 'static>(mut self, err: E) -> GatewayError {
         let err = Arc::new(err);
         for [c1, c2] in self.errors.drain(..) {
             // ignore dropped connections,
@@ -362,7 +363,7 @@ impl<C: SplitChannel + Send> Gateway<C> {
 }
 
 pub struct ActiveGateway<C: SplitChannel>(
-    tokio::task::JoinHandle<Result<Gateway<C>, GatewayError<C::Error>>>,
+    tokio::task::JoinHandle<Result<Gateway<C>, GatewayError>>,
 );
 
 impl<C: SplitChannel + Send + 'static> Gateway<C> {
@@ -372,7 +373,7 @@ impl<C: SplitChannel + Send + 'static> Gateway<C> {
 }
 
 impl<C: SplitChannel + Send + 'static> ActiveGateway<C> {
-    pub async fn deactivate(self) -> Result<Gateway<C>, GatewayError<C::Error>> {
+    pub async fn deactivate(self) -> Result<Gateway<C>, GatewayError> {
         self.0.await.unwrap()
     }
 }
@@ -444,7 +445,7 @@ where
         NetworkGateway::<&'tun mut C>::multiplex(network, n)
     }
 
-    pub async fn drive(self) -> Result<Self, GatewayError<C::Error>> {
+    pub async fn drive(self) -> Result<Self, GatewayError> {
         let connections = self.gateways.len();
         let gateways = try_join_all(self.gateways.into_iter().map(Gateway::drive))
             .instrument(tracing::debug_span!("Driving gateway", connections))

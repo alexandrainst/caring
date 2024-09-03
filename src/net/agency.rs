@@ -34,6 +34,7 @@ pub trait Broadcast: Send {
     /// Broadcast a message to all other parties.
     ///
     /// * `msg`: Message to send
+    ///
     /// Returns: an error if there were problems broadcasting the message.
     fn broadcast(
         &mut self,

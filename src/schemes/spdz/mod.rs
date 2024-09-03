@@ -20,8 +20,9 @@ use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 
 use futures_concurrency::prelude::*;
+use thiserror::Error;
 pub mod preprocessing;
-use std::{convert::Infallible, error::Error};
+use std::error::Error;
 use tracing::Instrument;
 
 // Should we allow Field or use PrimeField?
@@ -130,20 +131,24 @@ mod ops {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("SpdzError: {0}")]
+pub struct SpdzError(#[from] Box<dyn Error + Send + 'static>);
+
 impl<F> InteractiveShared for Share<F>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
     type Context = SpdzContext<F>;
     type Value = F;
-    type Error = Infallible;
+    type Error = SpdzError;
 
     async fn share(
         ctx: &mut Self::Context,
         secret: Self::Value,
         _rng: impl RngCore + Send,
         mut coms: impl Communicate,
-    ) -> Result<Self, Infallible> {
+    ) -> Result<Self, SpdzError> {
         let params = &ctx.params;
         let (fuel, rand) = &mut ctx.preprocessed.for_sharing.get_own();
         let res = send_shares(&[secret], fuel, rand, params, &mut coms)
@@ -169,7 +174,7 @@ where
         let futs: Vec<_> = muxes
             .into_iter()
             .zip(others)
-            .map(async |(mut coms, fueltank)| {
+            .map(|(mut coms, fueltank)| async {
                 let id = fueltank.party.0;
                 let span = tracing::info_span!("Receiving", from = id);
                 let s = receive_shares(&mut coms, fueltank, params)
@@ -191,7 +196,9 @@ where
 
         let (my_result, results, driver) = (mine, futs.join(), gateway.drive()).join().await;
         tracing::info!("Complete!");
-        let _ = driver.expect("TODO: Error handling for networking");
+        driver
+            .inspect_err(|e| tracing::error!("Gateway error: {e}"))
+            .map_err(|e| SpdzError(Box::new(e)))?;
 
         let my_share = my_result.unwrap();
 
@@ -206,7 +213,7 @@ where
         ctx: &mut Self::Context,
         mut coms: impl Communicate,
         from: Id,
-    ) -> Result<Self, Infallible> {
+    ) -> Result<Self, SpdzError> {
         let params = &ctx.params;
         let fueltank = &mut ctx.preprocessed.for_sharing.get_fuel_mut(from);
         let res = receive_shares(&mut coms, fueltank, params).await.unwrap();
@@ -217,8 +224,8 @@ where
         ctx: &mut Self::Context,
         share: Self,
         mut network: impl Communicate,
-    ) -> Result<F, Infallible> {
-        Ok(open_res(share, &mut network, &ctx.params, &ctx.opened_values).await)
+    ) -> Result<F, SpdzError> {
+        open_res(share, &mut network, &ctx.params, &ctx.opened_values).await
     }
 }
 
@@ -482,17 +489,15 @@ where
         panic!("The check did not go though");
     }
 }
-// TODO: return an option or a result instead. - result probably makes most sense, but then we might want the costom errors first
 pub async fn open_res<F>(
     share_to_open: Share<F>,
     network: &mut impl Broadcast,
     params: &SpdzParams<F>,
     opened_values: &[F],
-) -> F
+) -> Result<F, SpdzError>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
-    // TODO rerun error instead
     // TODO: consider just calling check all - needs a random element though - either a generator or an element.
     //check_all_d(opened_values, network, random_element)
     assert!(
@@ -505,29 +510,36 @@ where
     let opened_shares = network
         .symmetric_broadcast(share_to_open.val)
         .await
-        .unwrap();
+        .map_err(|e| SpdzError(Box::new(e)))?;
     let opened_val: F = opened_shares.iter().sum();
     let d = opened_val * params.mac_key_share - share_to_open.mac;
-    let this_went_well = check_one_d(d, network).await;
+    let this_went_well = check_one_d(d, network).await?;
     if this_went_well {
-        opened_val
+        Ok(opened_val)
     } else {
+        // TODO: Proper errors
         panic!("The check did not go though");
     }
 }
 
 // An element and its mac are accepted, if the sum of the corresponding d from each party is zero.
-async fn check_one_d<F>(d: F, network: &mut impl Broadcast) -> bool
+async fn check_one_d<F>(d: F, network: &mut impl Broadcast) -> Result<bool, SpdzError>
 where
     F: PrimeField + serde::Serialize + serde::de::DeserializeOwned,
 {
     let (c, s) = commit(&d);
-    let cs = network.symmetric_broadcast((c, s)).await.unwrap();
-    let ds = network.symmetric_broadcast(d).await.unwrap();
+    let cs = network
+        .symmetric_broadcast((c, s))
+        .await
+        .map_err(|e| SpdzError(Box::new(e)))?;
+    let ds = network
+        .symmetric_broadcast(d)
+        .await
+        .map_err(|e| SpdzError(Box::new(e)))?;
     let dcs = ds.iter().zip(cs.iter());
     let verify_commitments = dcs.fold(true, |acc, (d, (c, s))| verify_commit(d, c, s) && acc);
     let ds_sum: F = ds.iter().sum();
-    (ds_sum == 0.into()) && verify_commitments
+    Ok((ds_sum == 0.into()) && verify_commitments)
 }
 
 // An element is accepted, if the sum of the corresponding d from each party is zero.
@@ -597,7 +609,6 @@ mod test {
     use rand::thread_rng;
     use rand::SeedableRng;
     use std::io::Seek;
-    use tracing_subscriber::fmt::format::FmtSpan;
 
     use crate::{
         algebra::element::Element32, net::network::InMemoryNetwork,
@@ -608,39 +619,30 @@ mod test {
 
     #[tokio::test]
     async fn symmetric_sharing() {
-        let subscriber = tracing_subscriber::fmt()
-            .compact()
-            .with_line_number(true)
-            .with_target(true)
-            .without_time()
-            .with_ansi(true)
-            .with_span_events(FmtSpan::ACTIVE)
-            .finish();
-        tracing::subscriber::set_global_default(subscriber).unwrap();
+        tracing_forest::init();
 
         let rng = rand::rngs::mock::StepRng::new(7, 32);
         let (ctxs, _secrets) = preprocessing::dealer_preproc::<Element32>(rng, &[1, 1, 1], 0, 3);
 
-        let res: Vec<u32> = Cluster::new(3)
+        let res: Vec<Result<u32, _>> = Cluster::new(3)
             .with_args(ctxs)
-            .run_with_args(async |mut coms, mut ctx| {
+            .run_with_args(|mut coms, mut ctx| async move {
                 let rng = rand::rngs::mock::StepRng::new(7, 32);
                 let secret = Element32::from(33u32);
                 let shares = spdz::Share::symmetric_share(&mut ctx, secret, rng, &mut coms)
                     .instrument(tracing::info_span!("Sharing"))
-                    .await
-                    .unwrap();
+                    .await?;
 
                 let share = shares[0] + shares[1] + shares[2];
                 spdz::Share::recombine(&mut ctx, share, &mut coms)
                     .instrument(tracing::info_span!("Recombining"))
                     .await
-                    .map(|x| x.into())
-                    .unwrap()
+                    .map(u32::from)
             })
             .await
             .unwrap();
 
+        let res: Vec<_> = res.into_iter().map(|res| res.unwrap()).collect();
         assert_eq!(&res, &[99, 99, 99u32]);
     }
 
@@ -848,7 +850,8 @@ mod test {
                 &context.opened_values,
                 //F::from_u128(8u128),
             )
-            .await;
+            .await
+            .unwrap();
             //.await.pop().expect("There should be a result");
             assert!(val == res);
         }
@@ -928,7 +931,7 @@ mod test {
                 partial_opening(&elm, &params, &mut network, &mut partially_opened_vals).await;
             assert!(val1_guess == val1);
             for d in partially_opened_vals {
-                if !check_one_d(d, &mut network).await {
+                if !check_one_d(d, &mut network).await.unwrap() {
                     // TODO: check that it actually fails, if there is a wrong value somewhere.
                     panic!("Someone cheated")
                 }
@@ -1271,7 +1274,8 @@ mod test {
                 &context.params,
                 &context.opened_values,
             )
-            .await;
+            .await
+            .unwrap();
             assert!(expected_res.val == res);
         }
 
@@ -1482,7 +1486,9 @@ mod test {
             context.opened_values.clear();
 
             // opening(and checking) val_5
-            let res = open_res(val_5, &mut network, &context.params, &context.opened_values).await;
+            let res = open_res(val_5, &mut network, &context.params, &context.opened_values)
+                .await
+                .unwrap();
             assert!(res == F::from_u128(20u128));
         }
         let mut taskset = tokio::task::JoinSet::new();

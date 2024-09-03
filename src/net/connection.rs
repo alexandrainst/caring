@@ -1,4 +1,5 @@
 //! Module for doing arbitrary communication in 'some' medium.
+//!
 //! This 'medium' can be anything that implements `AsyncRead`/`AsyncWrite`.
 //! There is built-in support for TCP and in-memory duplex-based connections.
 //!

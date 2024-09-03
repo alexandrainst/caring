@@ -7,12 +7,13 @@ use crate::{
     protocols::beaver,
     vm::{Engine, Script},
 };
+use futures::TryFutureExt;
 use rand::rngs::mock::StepRng;
-use std::future::Future;
+use std::{error::Error, future::Future};
 use tokio::task::JoinError;
 
-pub struct Cluster<Arg = ()> {
-    players: Vec<InMemoryNetwork>, //players: tokio::task::JoinSet<InMemoryNetwork>,
+pub struct Cluster<Arg = (), Net = InMemoryNetwork> {
+    players: Vec<Net>, //players: tokio::task::JoinSet<InMemoryNetwork>,
     args: Vec<Arg>,
 }
 impl Cluster {
@@ -24,7 +25,9 @@ impl Cluster {
             players,
         }
     }
+}
 
+impl<C> Cluster<(), C> {
     /// Provide arguments of type `A` to the cluster as a list with each networked party.
     /// The arguments are to be provided as a list of size eqaul to the clister
     ///
@@ -33,17 +36,17 @@ impl Cluster {
     /// use caring::testing::*;             //      party 1      party 2
     ///                                     //    v--------v   v--------v
     /// let cluster = Cluster::new(2).with_args([(1, "alice"), (2, "bob")])
-    /// cluster.run_with_args(|net, (id, name)| async move {
+    /// cluster.run_with_args(|com, (id, name)| async move {
     ///     println!("[{id}] hello from {name}");
     /// }).await.unwrap();
     ///
     /// ```
-    pub fn with_args<A>(self, args: impl Into<Vec<A>>) -> Cluster<A> {
+    pub fn with_args<A>(self, args: impl Into<Vec<A>>) -> Cluster<A, C> {
         let args: Vec<A> = args.into();
         let m = args.len();
         let n = self.players.len();
         assert_eq!(m, n, "Cluster of size {n} requies {n} arguments, got {m}");
-        Cluster {
+        Cluster::<A, C> {
             args,
             players: self.players,
         }
@@ -59,15 +62,15 @@ impl Cluster {
     pub async fn run<T, P, F>(self, prg: P) -> Result<Vec<T>, JoinError>
     where
         T: Send + 'static,
-        P: Fn(InMemoryNetwork) -> F,
+        P: Fn(C) -> F,
         F: Future<Output = T> + Send + 'static,
     {
         self.run_with_args(|p, _| prg(p)).await
     }
 }
 
-impl<Arg> Cluster<Arg> {
-    pub fn more_args<B>(self, args: impl Into<Vec<B>>) -> Cluster<(Arg, B)> {
+impl<Arg, C> Cluster<Arg, C> {
+    pub fn more_args<B>(self, args: impl Into<Vec<B>>) -> Cluster<(Arg, B), C> {
         let args: Vec<_> = self.args.into_iter().zip(args.into()).collect();
         Cluster {
             players: self.players,
@@ -90,20 +93,30 @@ impl<Arg> Cluster<Arg> {
     pub async fn run_with_args<T, P, F>(self, prg: P) -> Result<Vec<T>, JoinError>
     where
         T: Send + 'static,
-        P: Fn(InMemoryNetwork, Arg) -> F,
+        P: Fn(C, Arg) -> F,
         F: Future<Output = T> + Send + 'static,
     {
+        let n = self.players.len();
+        tracing::info!("Starting cluster with {n} players");
         let futures: Vec<_> = self
             .players
             .into_iter()
             .zip(self.args.into_iter())
-            .map(|(p, arg)| {
-                let id = p.index;
+            .enumerate()
+            .map(|(id, (p, arg))| {
                 let fut = prg(p, arg);
                 use tracing::Instrument;
                 let span = tracing::info_span!("Player", id = id);
-                let fut = fut.instrument(span);
-                tokio::spawn(fut)
+                tokio::spawn(fut.instrument(span)).inspect_err(move |e| {
+                    let reason = e.source();
+                    if e.is_panic() {
+                        tracing::error!("Player {id} panic'ed: {e}, reason: {reason:#?}");
+                    } else if e.is_cancelled() {
+                        tracing::error!("Player {id} was cancelled: {e}, reason: {reason:#?}");
+                    } else {
+                        tracing::error!("Player {id} returned an error: {e}, reason: {reason:#?}");
+                    }
+                })
             })
             .collect();
 
