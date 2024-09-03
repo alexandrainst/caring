@@ -17,6 +17,7 @@ use crate::algebra::poly::Polynomial;
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 
 /// A Shamir Secret Share
+///
 /// This is a point evaluated at `x` given a secret polynomial.
 /// Reconstruction can be done by obtaining `t` shares.
 /// Shares with the same `x` can be added together.

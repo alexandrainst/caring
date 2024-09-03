@@ -139,6 +139,7 @@ pub async fn beaver_multiply_many<
     Some(zs)
 }
 
+#[expect(clippy::extra_unused_type_parameters)]
 pub async fn beaver_multiply_vector<
     C,
     F: Field,
