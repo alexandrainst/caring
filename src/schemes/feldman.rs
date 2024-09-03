@@ -1,5 +1,6 @@
 //! This is an implementation of verifiable secret sharing using Feldman's scheme
-//! see <https://en.wikipedia.org/wiki/Verifiable_secret_sharing#Feldman's_scheme>
+//!
+//! See <https://en.wikipedia.org/wiki/Verifiable_secret_sharing#Feldman's_scheme>
 //! or <https://www.cs.umd.edu/~gasarch/TOPICS/secretsharing/feldmanVSS.pdf>
 //!
 //! The scheme can be instansiated with any field F and a corresponding group G
