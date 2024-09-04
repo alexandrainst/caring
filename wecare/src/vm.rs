@@ -331,7 +331,7 @@ impl EngineBuilder {
     }
 
     pub fn build(self) -> Engine {
-        let network = self.network.expect("No network installed!");
+        let mut network = self.network.expect("No network installed!");
         let party_count = network.size();
         let scheme = self.scheme.unwrap_or(SchemeKind::Shamir);
         let threshold = self.threshold.unwrap_or(party_count as u64);
@@ -358,11 +358,13 @@ impl EngineBuilder {
             (SchemeKind::Spdz, FieldKind::Curve25519) => {
                 let mut file = self.preprocesing.expect("Missing preproc!");
                 let context = spdz::preprocessing::load_context(&mut file);
+                network.set_id(context.params.who_am_i);
                 Engine::Spdz25519(vm::Engine::new(context, network, rng))
             }
             (SchemeKind::Spdz, FieldKind::Element32) => {
                 let mut file = self.preprocesing.expect("Missing preproc!");
                 let context = spdz::preprocessing::load_context(&mut file);
+                network.set_id(context.params.who_am_i);
                 Engine::Spdz32(vm::Engine::new(context, network, rng))
             }
             (SchemeKind::Feldman, FieldKind::Curve25519) => {
