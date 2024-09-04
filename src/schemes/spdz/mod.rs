@@ -267,7 +267,7 @@ where
         let futs: Vec<_> = muxes
             .into_iter()
             .zip(others)
-            .map(async |(mut coms, fueltank)| {
+            .map(|(mut coms, fueltank)| async move {
                 receive_shares(&mut coms, fueltank, params)
                     .await
                     .map(|s| s.into())
