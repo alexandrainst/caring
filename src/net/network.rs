@@ -6,6 +6,7 @@ use futures::prelude::*;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use tokio_util::bytes::Bytes;
+use tracing::instrument;
 
 use crate::net::{
     agency::{Broadcast, Unicast},
@@ -33,13 +34,22 @@ use crate::net::{
 ///
 /// * `connections`: Connections, one for each peer, sorted by their index, skipping our own index.
 /// * `index`: My own index
-#[derive(Debug)]
 pub struct Network<C: SplitChannel> {
     // NOTE:
     // We could also insert a 'fake' Connection into the set for the representation of ourselves.
     // However that is probably a less efficient, if nicer, abstraction.
     pub(crate) connections: Vec<C>,
     pub(crate) index: usize,
+}
+
+impl<C: SplitChannel> std::fmt::Debug for Network<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let n = self.connections.len();
+        f.debug_struct("Network")
+            .field("connections", &n)
+            .field("index", &self.index)
+            .finish()
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -372,7 +382,7 @@ impl<C: SplitChannel> Network<C> {
 impl<C: SplitChannel> Unicast for Network<C> {
     type UnicastError = NetworkError<C::RecvError, C::SendError>;
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip(msgs))]
     async fn unicast(
         &mut self,
         msgs: &[impl serde::Serialize + Sync],
@@ -380,7 +390,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
         self.unicast(msgs).await
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip(msgs))]
     async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, Self::UnicastError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
@@ -388,7 +398,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
         self.symmetric_unicast(msgs).await
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument]
     async fn receive_all<T: serde::de::DeserializeOwned + Send>(
         &mut self,
     ) -> Result<Vec<T>, Self::UnicastError> {
@@ -403,7 +413,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
 impl<C: SplitChannel> Broadcast for Network<C> {
     type BroadcastError = NetworkError<C::RecvError, C::SendError>;
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip(msg))]
     async fn broadcast(
         &mut self,
         msg: &(impl serde::Serialize + Sync),
@@ -411,7 +421,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
         self.broadcast(msg).await
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip(msg))]
     async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::BroadcastError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
@@ -419,6 +429,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
         self.symmetric_broadcast(msg).await
     }
 
+    #[tracing::instrument]
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         id: Id,
@@ -438,6 +449,7 @@ impl<C: SplitChannel> Tuneable for Network<C> {
         self.id()
     }
 
+    #[tracing::instrument]
     async fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         id: Id,
@@ -452,6 +464,7 @@ impl<C: SplitChannel> Tuneable for Network<C> {
             })
     }
 
+    #[tracing::instrument(skip(msg))]
     async fn send_to<T: serde::Serialize + Sync>(
         &mut self,
         id: Id,
