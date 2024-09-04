@@ -1,12 +1,10 @@
 //! Multiplexing Connections and Networks
 //!
-//! This moudle provides tools to multiplex channels/connections and networks
+//! This module provides tools to multiplex channels/connections and networks
 //! in order to run multiple protocols concurrently.
 
-// TODO: Add Multiplex trait with impls for Network and SplitChannel?
-
 use std::error::Error;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use futures_concurrency::prelude::*;
 use tracing::{instrument, Instrument};
@@ -322,7 +320,7 @@ impl<C: SplitChannel + Send> Gateway<C> {
     fn propogate_error<E: Error + Send + Sync + 'static>(mut self, err: E) -> GatewayError {
         let err = Arc::new(err);
         for [c1, c2] in self.errors.drain(..) {
-            // ignore dropped connections,
+            // Ignore dropped connections,
             // they can't handle errors when they don't exist.
             let _ = c1.send(MuxError::Connection(err.clone()));
             let _ = c2.send(MuxError::Connection(err.clone()));
@@ -332,7 +330,7 @@ impl<C: SplitChannel + Send> Gateway<C> {
 
     fn new(channel: C) -> (Self, UnboundedSender<MultiplexedMessage>) {
         let (outbox, inbox) = unbounded_channel();
-        let link = outbox.clone(); // needs to kept alive
+        let link = outbox.clone(); // Needs to kept alive
         let outbox = outbox.downgrade();
         let gateway = Self {
             channel,
