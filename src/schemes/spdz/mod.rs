@@ -1,12 +1,12 @@
-//
-//! This SPDZ implementation is primarely based on the following lecture by Ivan Damgård:
+//! Implementation of SPDZ
+//!
+//! This implementation is primarely based on the following lecture by Ivan Damgård:
 //! (part one:) <https://www.youtube.com/watch?v=N80DV3Brds0> (and part two:) <https://www.youtube.com/watch?v=Ce45hp24b2E>
 //!
 //! We will need some homomorphic encryption or oblivious transfer to enable preprocessing.
 //! But for now that is handled by a dealer.
 //!
 
-// TODO: make costum errors.
 use crate::{
     algebra::math::Vector,
     net::{agency::Broadcast, mux, Id},
@@ -20,10 +20,11 @@ use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 
 use futures_concurrency::prelude::*;
-use thiserror::Error;
-pub mod preprocessing;
 use std::error::Error;
+use thiserror::Error;
 use tracing::Instrument;
+
+pub mod preprocessing;
 
 // Should we allow Field or use PrimeField?
 #[derive(
@@ -260,10 +261,23 @@ where
         mut coms: impl Communicate,
     ) -> Result<Vec<Self::VectorShare>, Self::Error> {
         let number_of_parties = Broadcast::size(&coms);
-        let me = ctx.params.who_am_i;
+
         let (gateway, mut muxes) = mux::NetworkGateway::multiplexify(&mut coms, number_of_parties);
         let params = &ctx.params;
+        let me = params.who_am_i;
+
+        let fuel: Vec<_> = ctx
+            .preprocessed
+            .for_sharing
+            .party_fuel
+            .iter()
+            .map(|tank| tank.party)
+            .collect();
+        tracing::info!("Sharing as id = {me:?} with fueltanks {fuel:?}");
+        let me2 = ctx.preprocessed.for_sharing.me;
+        tracing::debug!("Processed: {:?}", me2);
         let (my_fueltank, randomness, others) = ctx.preprocessed.for_sharing.split();
+        tracing::debug!("Party: {:?} Fueltank: {:?}", &me, &my_fueltank.party);
 
         let mut special = muxes.remove(me.0);
 
@@ -1742,7 +1756,7 @@ mod test {
         let number_of_triplets = 2;
         preprocessing::write_context(
             &mut files,
-            known_to_each,
+            &known_to_each,
             number_of_triplets,
             F::from_u128(0u128),
         )

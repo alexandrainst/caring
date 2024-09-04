@@ -6,7 +6,6 @@ use futures::prelude::*;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use tokio_util::bytes::Bytes;
-use tracing::instrument;
 
 use crate::net::{
     agency::{Broadcast, Unicast},
@@ -81,6 +80,11 @@ impl<C: SplitChannel> Network<C> {
 
     pub fn id(&self) -> Id {
         Id(self.index)
+    }
+
+    pub fn set_id(&mut self, id: Id) {
+        tracing::info!("Obtained new id = {id:?}");
+        self.index = id.0;
     }
 
     pub fn prev_neighbour(&self) -> Id {
@@ -334,6 +338,9 @@ impl<C: SplitChannel> Network<C> {
         });
         // Add it back.
         self.connections.extend(sorted);
+
+        let id = self.id();
+        tracing::info!("Obtained new id = {id:?} from id-resolution");
         Ok(())
     }
 

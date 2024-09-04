@@ -29,10 +29,10 @@ thiserror = "1.0.50"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-util = { version = "0.7.9", features = ["io", "net", "io-util", "codec", "full"] }
 tracing = { version = "0.1.40", features = ["max_level_debug"]}
-tracing-forest = { version = "0.1.6", features = ["full"] }
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"
+tracing-forest = { version = "0.1.6", features = ["full"] }
 test-log = { version = "0.2.16", features = ["trace"]}
 serde_json = "1.0.121"
 tempfile = "3.10.1"

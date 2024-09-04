@@ -1,4 +1,3 @@
-
 pub mod vm;
 
 use caring::{
@@ -139,14 +138,13 @@ impl std::error::Error for MpcError {}
 
 pub fn do_preproc(files: &mut [File], number_of_shares: &[usize], use_32: bool) {
     assert_eq!(files.len(), number_of_shares.len());
-    let known_to_each = vec![number_of_shares[0], number_of_shares[1]];
     let number_of_triplets = 0;
     if use_32 {
         let num = S32::from_f64(0.0);
-        preprocessing::write_context(files, known_to_each, number_of_triplets, num).unwrap();
+        preprocessing::write_context(files, number_of_shares, number_of_triplets, num).unwrap();
     } else {
         let num = S25519::from_f64(0.0);
-        preprocessing::write_context(files, known_to_each, number_of_triplets, num).unwrap();
+        preprocessing::write_context(files, number_of_shares, number_of_triplets, num).unwrap();
     }
 }
 
@@ -173,18 +171,18 @@ mod generic {
 
     impl<'a> EngineBuilder<'a> {
         pub fn build_spdz(self) -> Result<AdderEngine, MpcError> {
-            let (network, runtime) = self.connect_network()?;
+            let (mut network, runtime) = self.connect_network()?;
             let file = self
                 .preprocessed
                 .ok_or(MpcError("No proccesing file found"))?;
             if self.use_32bit_field {
-                let mut context = preprocessing::load_context(file);
-                context.params.who_am_i = network.id();
+                let context = preprocessing::load_context(file);
+                network.set_id(context.params.who_am_i);
                 let engine = SpdzEngine32::new(network, runtime, context);
                 Ok(AdderEngine::Spdz32(engine))
             } else {
-                let mut context = preprocessing::load_context(file);
-                context.params.who_am_i = network.id();
+                let context = preprocessing::load_context(file);
+                network.set_id(context.params.who_am_i);
                 let engine = SpdzEngine::new(network, runtime, context);
                 Ok(AdderEngine::Spdz(engine))
             }
@@ -321,6 +319,7 @@ mod test {
 
     #[test]
     fn sunshine_shamir() {
+        tracing_forest::init();
         use std::thread;
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
@@ -357,6 +356,7 @@ mod test {
 
     #[test]
     fn sunshine_spdz() {
+        tracing_forest::init();
         use std::thread;
         let ctx1 = tempfile::tempfile().unwrap();
         let ctx2 = tempfile::tempfile().unwrap();
@@ -366,30 +366,33 @@ mod test {
         ctx1.rewind().unwrap();
         ctx2.rewind().unwrap();
         let t1 = thread::spawn(move || {
-            println!("[1] Setting up...");
-
+            let span = tracing::info_span!("Player-0");
+            let _enter = span.enter();
+            tracing::info!("Setting up...");
             let mut engine = Engine::setup("127.0.0.1:1234")
                 .add_participant("127.0.0.1:1235")
                 .file_to_preprocessed(&mut ctx1)
                 .build_spdz()
                 .unwrap();
-            println!("[1] Ready");
+            tracing::info!("Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
-            println!("[1] Done");
+            tracing::info!("Done");
             drop(engine);
             res
         });
         std::thread::sleep(Duration::from_millis(50));
         let t2 = thread::spawn(move || {
-            println!("[2] Setting up...");
+            let span = tracing::info_span!("Player-1");
+            let _enter = span.enter();
+            tracing::info!("Setting up...");
             let mut engine = Engine::setup("127.0.0.1:1235")
                 .add_participant("127.0.0.1:1234")
                 .file_to_preprocessed(&mut ctx2)
                 .build_spdz()
                 .unwrap();
-            println!("[2] Ready");
+            tracing::info!("Ready");
             let res = engine.mpc_sum(&[32.0]).unwrap();
-            println!("[2] Done");
+            tracing::info!("Done");
             drop(engine);
             res
         });
@@ -401,6 +404,7 @@ mod test {
 
     #[test]
     fn sunshine_spdz_for_two() {
+        tracing_forest::init();
         use std::thread;
 
         let ctx1 = tempfile::tempfile().unwrap();
@@ -411,29 +415,33 @@ mod test {
         ctx1.rewind().unwrap();
         ctx2.rewind().unwrap();
         let t1 = thread::spawn(move || {
-            println!("[1] Setting up...");
+            let span = tracing::info_span!("Player-0");
+            let _enter = span.enter();
+            tracing::info!("Setting up...");
             let mut engine = Engine::setup("127.0.0.1:2234")
                 .add_participant("127.0.0.1:2235")
                 .file_to_preprocessed(&mut ctx1)
                 .build_spdz()
                 .unwrap();
-            println!("[1] Ready");
+            tracing::info!("Ready");
             let res = engine.mpc_sum(&[32.0, 11.9]).unwrap();
-            println!("[1] Done");
+            tracing::info!("Done");
             drop(engine);
             res
         });
         std::thread::sleep(Duration::from_millis(200));
         let t2 = thread::spawn(move || {
-            println!("[2] Setting up...");
+            let span = tracing::info_span!("Player-1");
+            let _enter = span.enter();
+            tracing::info!("Setting up...");
             let mut engine = Engine::setup("127.0.0.1:2235")
                 .add_participant("127.0.0.1:2234")
                 .file_to_preprocessed(&mut ctx2)
                 .build_spdz()
                 .unwrap();
-            println!("[2] Ready");
+            tracing::info!("Ready");
             let res = engine.mpc_sum(&[32.0, 24.1]).unwrap();
-            println!("[2] Done");
+            tracing::info!("Done");
             drop(engine);
             res
         });
