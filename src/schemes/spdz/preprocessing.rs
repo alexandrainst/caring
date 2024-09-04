@@ -154,7 +154,7 @@ pub struct SecretValues<F> {
 
 pub fn write_context<F: PrimeField + Serialize + DeserializeOwned>(
     files: &mut [File],
-    known_to_each: Vec<usize>,
+    known_to_each: &[usize],
     number_of_triplets: usize,
     _: F,
 ) -> Result<(), Box<dyn Error>> {
@@ -163,7 +163,7 @@ pub fn write_context<F: PrimeField + Serialize + DeserializeOwned>(
     let rng = rand_chacha::ChaCha20Rng::from_entropy();
     // Notice here that the secret values are not written to the file, No party is allowed to know the value.
     let (contexts, _): (Vec<SpdzContext<F>>, _) =
-        dealer_preproc(rng, &known_to_each, number_of_triplets, number_of_parties);
+        dealer_preproc(rng, known_to_each, number_of_triplets, number_of_parties);
     let names_and_contexts = files.iter_mut().zip(contexts);
     for (file, context) in names_and_contexts {
         let data: Vec<u8> = bincode::serialize(&context)?;
@@ -249,7 +249,7 @@ pub fn dealer_preproc<F: PrimeField + Serialize + DeserializeOwned>(
     number_of_parties: usize,
 ) -> (Vec<SpdzContext<F>>, SecretValues<F>) {
     // TODO: tjek that the arguments are consistent
-    let (mac_keys, parties) = dealer_preshares(&mut rng, &known_to_each, number_of_parties);
+    let (mac_keys, parties) = dealer_preshares(&mut rng, known_to_each, number_of_parties);
 
     // TODO: don't recalculate this
     let mac_key = mac_keys.iter().sum();
