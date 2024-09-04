@@ -2,8 +2,23 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Sub, SubAssign};
 
 use rayon::prelude::*;
 
+use crate::algebra::math;
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-struct Vector<F>(Box<[F]>);
+#[repr(transparent)]
+pub struct Vector<F>(math::Vector<F>);
+
+impl<T> From<math::Vector<T>> for Vector<T> {
+    fn from(value: math::Vector<T>) -> Self {
+        Self(value)
+    }
+}
+
+impl<T> From<Vector<T>> for math::Vector<T> {
+    fn from(val: Vector<T>) -> Self {
+        val.0
+    }
+}
 
 macro_rules! inherent {
     ($trait2:ident, $fun2:ident, $trait1:ident, $fun1:ident) => {
@@ -13,6 +28,7 @@ macro_rules! inherent {
         {
             fn $fun1(&mut self, rhs: &Self) {
                 self.0
+                     .0
                     .par_iter_mut()
                     .zip(rhs.0.par_iter())
                     .for_each(|(a, b)| $trait1::$fun1(a, b));
@@ -71,8 +87,8 @@ inherent!(Sub, sub, SubAssign, sub_assign);
 inherent!(Div, div, DivAssign, div_assign);
 
 impl<T: Send + Sync> super::math::Vector<T> {
-    fn parallelize(self) -> Vector<T> {
-        Vector(self.into_boxed_slice())
+    pub fn parallelize(self) -> Vector<T> {
+        Vector(self)
     }
 }
 
@@ -90,8 +106,8 @@ impl<F: Send + Sync> FromParallelIterator<F> for Vector<F> {
     where
         I: IntoParallelIterator<Item = F>,
     {
-        let boxed = par_iter.into_par_iter().collect();
-        Self(boxed)
+        let boxed: Box<[_]> = par_iter.into_par_iter().collect();
+        Self(math::Vector(boxed))
     }
 }
 
@@ -106,7 +122,7 @@ where
 {
     fn mul_assign(&mut self, rhs: &B) {
         let b = rhs;
-        self.0.par_iter_mut().for_each(|a| *a *= b);
+        self.0 .0.par_iter_mut().for_each(|a| *a *= b);
     }
 }
 
@@ -127,8 +143,8 @@ where
 
     fn mul(self, rhs: B) -> Self::Output {
         let b = rhs;
-        let internal = self.0.par_iter().map(|a| a * &b).collect();
-        Vector(internal)
+        let internal: Box<[_]> = self.0 .0.par_iter().map(|a| a * &b).collect();
+        Vector(math::Vector(internal))
     }
 }
 

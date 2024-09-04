@@ -389,7 +389,7 @@ impl<C: SplitChannel> Network<C> {
 impl<C: SplitChannel> Unicast for Network<C> {
     type UnicastError = NetworkError<C::RecvError, C::SendError>;
 
-    #[tracing::instrument(skip(msgs))]
+    #[tracing::instrument(level = "trace", skip(msgs))]
     async fn unicast(
         &mut self,
         msgs: &[impl serde::Serialize + Sync],
@@ -397,7 +397,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
         self.unicast(msgs).await
     }
 
-    #[tracing::instrument(skip(msgs))]
+    #[tracing::instrument(level = "debug", skip(msgs))]
     async fn symmetric_unicast<T>(&mut self, msgs: Vec<T>) -> Result<Vec<T>, Self::UnicastError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
@@ -405,7 +405,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
         self.symmetric_unicast(msgs).await
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(level = "trace")]
     async fn receive_all<T: serde::de::DeserializeOwned + Send>(
         &mut self,
     ) -> Result<Vec<T>, Self::UnicastError> {
@@ -420,7 +420,7 @@ impl<C: SplitChannel> Unicast for Network<C> {
 impl<C: SplitChannel> Broadcast for Network<C> {
     type BroadcastError = NetworkError<C::RecvError, C::SendError>;
 
-    #[tracing::instrument(skip(msg))]
+    #[tracing::instrument(level = "trace", skip(msg))]
     async fn broadcast(
         &mut self,
         msg: &(impl serde::Serialize + Sync),
@@ -428,7 +428,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
         self.broadcast(msg).await
     }
 
-    #[tracing::instrument(skip(msg))]
+    #[tracing::instrument(level = "trace", skip(msg))]
     async fn symmetric_broadcast<T>(&mut self, msg: T) -> Result<Vec<T>, Self::BroadcastError>
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Sync,
@@ -436,7 +436,7 @@ impl<C: SplitChannel> Broadcast for Network<C> {
         self.symmetric_broadcast(msg).await
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(level = "trace")]
     fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         id: Id,
@@ -456,7 +456,7 @@ impl<C: SplitChannel> Tuneable for Network<C> {
         self.id()
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(level = "trace")]
     async fn recv_from<T: serde::de::DeserializeOwned>(
         &mut self,
         id: Id,
@@ -471,7 +471,7 @@ impl<C: SplitChannel> Tuneable for Network<C> {
             })
     }
 
-    #[tracing::instrument(skip(msg))]
+    #[tracing::instrument(level = "trace", skip(msg))]
     async fn send_to<T: serde::Serialize + Sync>(
         &mut self,
         id: Id,
@@ -537,6 +537,7 @@ impl InMemoryNetwork {
         networks
     }
 
+    #[tracing::instrument(level = "trace")]
     pub async fn shutdown(self) -> Result<(), std::io::Error> {
         let futs = self
             .connections
@@ -580,6 +581,7 @@ impl TcpNetwork {
     ///
     /// * `me`: Socket address to open to
     /// * `peers`: Socket addresses of other peers
+    #[tracing::instrument]
     pub async fn connect(me: SocketAddr, peers: &[SocketAddr]) -> NetResult<Self, TcpConnection> {
         let n = peers.len();
 
@@ -628,6 +630,7 @@ impl TcpNetwork {
         Ok(network)
     }
 
+    #[tracing::instrument]
     pub async fn shutdown(self) -> Result<(), std::io::Error> {
         let futs = self
             .connections
