@@ -4,6 +4,7 @@
 #![allow(clippy::cast_possible_truncation)]
 #![feature(async_fn_traits)]
 #![feature(async_closure)]
+#![feature(iterator_try_collect)]
 
 pub mod algebra;
 mod help;

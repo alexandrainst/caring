@@ -35,6 +35,7 @@ use tokio_util::{
     bytes::{Bytes, BytesMut},
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
+use tracing::instrument;
 
 use crate::net::{
     connection::latency::Delayed, Channel, ReceiverError, RecvBytes, SendBytes, SplitChannel,
@@ -102,6 +103,7 @@ pub struct Receiving<R: AsyncRead>(FramedRead<R, LengthDelimitedCodec>);
 impl<W: AsyncWrite + Unpin + Send> SendBytes for Sending<W> {
     type SendError = ConnectionError;
 
+    #[instrument(skip(self))]
     async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), Self::SendError> {
         SinkExt::<_>::send(&mut self.0, bytes)
             .await
@@ -112,6 +114,7 @@ impl<W: AsyncWrite + Unpin + Send> SendBytes for Sending<W> {
 impl<R: AsyncRead + Unpin + Send> RecvBytes for Receiving<R> {
     type RecvError = ConnectionError;
 
+    #[instrument(skip(self))]
     async fn recv_bytes(&mut self) -> Result<BytesMut, Self::RecvError> {
         self.0
             .next()
@@ -147,6 +150,7 @@ impl<
 {
     type SendError = ConnectionError;
 
+    #[instrument(skip(self))]
     fn send_bytes(
         &mut self,
         bytes: Bytes,
@@ -161,6 +165,7 @@ impl<
 {
     type RecvError = ConnectionError;
 
+    #[instrument(skip(self))]
     fn recv_bytes(
         &mut self,
     ) -> impl std::future::Future<Output = Result<BytesMut, Self::RecvError>> + Send {

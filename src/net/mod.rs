@@ -3,6 +3,7 @@ use std::{error::Error, future::Future};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use tokio_util::bytes::{Bytes, BytesMut};
+use tracing::instrument;
 
 pub mod agency;
 pub mod connection;

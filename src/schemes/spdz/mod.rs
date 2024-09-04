@@ -195,17 +195,18 @@ where
         };
 
         let (my_result, results, driver) = (mine, futs.join(), gateway.drive()).join().await;
-        tracing::info!("Complete!");
         driver
             .inspect_err(|e| tracing::error!("Gateway error: {e}"))
             .map_err(|e| SpdzError(Box::new(e)))?;
 
-        let my_share = my_result.unwrap();
+        let mut shares: Vec<_> = results
+            .into_iter()
+            .try_collect()
+            .map_err(|e| SpdzError(e))?;
+        let my_share = my_result.map_err(|e| SpdzError(e))?;
 
-        // TODO: Weird issue with `try_join`
-        let mut shares: Vec<_> = results.into_iter().map(|x| x.unwrap()).collect();
         shares.insert(me.0, my_share);
-
+        tracing::info!("Succes!");
         Ok(shares)
     }
 
