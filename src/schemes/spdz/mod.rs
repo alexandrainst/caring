@@ -178,9 +178,10 @@ where
                 let id = fueltank.party.0;
                 let span = tracing::info_span!("Receiving", from = id);
                 let s = receive_shares(&mut coms, fueltank, params)
+                    .instrument(span)
                     .await
                     .map(|s| s[0]);
-                coms.shutdown().instrument(span).await;
+                drop(coms);
                 s
             })
             .collect();
@@ -190,7 +191,7 @@ where
                 .instrument(span)
                 .await
                 .map(|s| s[0]);
-            special.shutdown().await;
+            drop(special);
             s
         };
 
@@ -217,7 +218,9 @@ where
     ) -> Result<Self, SpdzError> {
         let params = &ctx.params;
         let fueltank = &mut ctx.preprocessed.for_sharing.get_fuel_mut(from);
-        let res = receive_shares(&mut coms, fueltank, params).await.unwrap();
+        let res = receive_shares(&mut coms, fueltank, params)
+            .await
+            .map_err(|e| SpdzError(e))?;
         Ok(res[0])
     }
 
@@ -268,20 +271,29 @@ where
             .into_iter()
             .zip(others)
             .map(|(mut coms, fueltank)| async move {
-                receive_shares(&mut coms, fueltank, params)
+                let id = fueltank.party.0;
+                let span = tracing::info_span!("Receiving", from = id);
+                let s = receive_shares(&mut coms, fueltank, params)
+                    .instrument(span)
                     .await
-                    .map(|s| s.into())
+                    .map(|s| s.into());
+                drop(coms);
+                s
             })
             .collect();
-        let mine =
-            async { send_shares(secret, my_fueltank, randomness, params, &mut special).await };
+        let mine = async {
+            let s = send_shares(secret, my_fueltank, randomness, params, &mut special).await;
+            drop(special);
+            s
+        };
 
         let (my_result, results, driver) = (mine, futs.join(), gateway.drive()).join().await;
-        let _ = driver.expect("TODO: Error handling for networking");
+        driver
+            .inspect_err(|e| tracing::error!("Gateway error: {e}"))
+            .map_err(|e| SpdzError(Box::new(e)))?;
 
-        let my_share = my_result.unwrap();
+        let my_share = my_result.map_err(|e| SpdzError(e))?;
 
-        // TODO: Weird issue with `try_join`
         let mut shares: Vec<_> = results.into_iter().map(|x| x.unwrap()).collect();
         shares.insert(me.0, my_share.into());
 
@@ -295,7 +307,9 @@ where
     ) -> Result<Self::VectorShare, Self::Error> {
         let params = &ctx.params;
         let fueltank = &mut ctx.preprocessed.for_sharing.get_fuel_mut(from);
-        let res = receive_shares(&mut coms, fueltank, params).await.unwrap();
+        let res = receive_shares(&mut coms, fueltank, params)
+            .await
+            .map_err(|e| SpdzError(e))?;
         Ok(res.into())
     }
 
@@ -638,6 +652,36 @@ mod test {
                 spdz::Share::recombine(&mut ctx, share, &mut coms)
                     .instrument(tracing::info_span!("Recombining"))
                     .await
+                    .map(u32::from)
+            })
+            .await
+            .unwrap();
+
+        let res: Vec<_> = res.into_iter().map(|res| res.unwrap()).collect();
+        assert_eq!(&res, &[99, 99, 99u32]);
+    }
+
+    #[tokio::test]
+    async fn symmetric_sharing_many() {
+        tracing_forest::init();
+
+        let rng = rand::rngs::mock::StepRng::new(7, 32);
+        let (ctxs, _secrets) = preprocessing::dealer_preproc::<Element32>(rng, &[1, 1, 1], 0, 3);
+
+        let res: Vec<Result<u32, _>> = Cluster::new(3)
+            .with_args(ctxs)
+            .run_with_args(|mut coms, mut ctx| async move {
+                let rng = rand::rngs::mock::StepRng::new(7, 32);
+                let secret = Element32::from(33u32);
+                let shares = spdz::Share::symmetric_share_many(&mut ctx, &[secret], rng, &mut coms)
+                    .instrument(tracing::info_span!("Sharing"))
+                    .await?;
+
+                let share = shares[0].clone() + &shares[1] + &shares[2];
+                spdz::Share::recombine_many(&mut ctx, share, &mut coms)
+                    .instrument(tracing::info_span!("Recombining"))
+                    .await
+                    .map(|x| x[0])
                     .map(u32::from)
             })
             .await
