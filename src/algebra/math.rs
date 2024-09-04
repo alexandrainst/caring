@@ -27,7 +27,7 @@ use ff::Field;
 ///
 /// If the rayon feature is enabled the operations will be parallelized.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Vector<F>(Box<[F]>);
+pub struct Vector<F>(pub(super) Box<[F]>);
 
 impl<F> Vector<F> {
     pub const fn from_boxed_slice(slice: Box<[F]>) -> Self {

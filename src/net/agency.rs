@@ -29,9 +29,8 @@ use itertools::Itertools;
 
 pub trait Broadcast: Send {
     type BroadcastError: Error + Send + Sync + 'static;
-    // type Error: Error + 'static;
 
-    /// Broadcast a message to all other parties.
+    /// Broadcast a single message to all other parties.
     ///
     /// * `msg`: Message to send
     ///
@@ -41,7 +40,7 @@ pub trait Broadcast: Send {
         msg: &(impl serde::Serialize + Sync),
     ) -> impl std::future::Future<Output = Result<(), Self::BroadcastError>> + Send;
 
-    /// Broadcast a message to all parties and await their messages
+    /// Broadcast a single message to all parties and await their messages
     /// Messages are ordered by their index.
     ///
     /// This function is symmetric, and as such it is expected that all other parties
@@ -100,11 +99,11 @@ impl<'a, B: Broadcast> Broadcast for &'a mut B {
     }
 }
 
-// TODO: Possible rename this trait as it's name is confusing.
+/// Uni(que) cast to every party
 pub trait Unicast {
     type UnicastError: Error + Send + 'static;
 
-    /// Unicast messages to each party
+    /// Send a unique message to each party
     ///
     /// Messages are supposed to be in order, meaning message `i`
     /// will be send to party `i`, skipping your own index.
@@ -117,7 +116,7 @@ pub trait Unicast {
         msgs: &[impl serde::Serialize + Send + Sync],
     ) -> impl std::future::Future<Output = Result<(), Self::UnicastError>> + Send;
 
-    /// Unicast a message to each party and await their messages
+    /// Send a unique message to each party and await their messages
     /// Messages are supposed to be in order, meaning message `i`
     /// will be send to party `i`.
     ///
@@ -129,7 +128,7 @@ pub trait Unicast {
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Send + Sync;
 
-    /// Receive a message for each party.
+    /// Receive a message from each party.
     ///
     /// Asymmetric, waiting
     ///
