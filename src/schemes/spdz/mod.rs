@@ -81,6 +81,13 @@ mod ops {
         }
     }
 
+    impl<F: PrimeField> std::ops::MulAssign<&F> for Share<F> {
+        fn mul_assign(&mut self, rhs: &F) {
+            self.val *= *rhs;
+            self.mac *= *rhs;
+        }
+    }
+
     impl<F: PrimeField> Share<F> {
         #[must_use]
         pub fn add_public(self, val: F, is_chosen_party: bool, params: &SpdzParams<F>) -> Self {

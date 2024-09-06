@@ -20,7 +20,7 @@ use std::{
 };
 
 use crate::{
-    algebra::math::Vector,
+    algebra::math::{RowMult, Vector},
     net::agency::Unicast,
     schemes::{
         shamir::{self},
@@ -231,6 +231,23 @@ impl<F: Field, G: Group> std::iter::Sum for VerifiableShare<F, G> {
 pub struct VecVerifiableShare<F: Field, G: Group> {
     shares: shamir::VecShare<F>,
     polys: Box<[Polynomial<G>]>,
+}
+
+impl<F: Field, G: Group> RowMult<F> for VecVerifiableShare<F, G>
+where
+    G: for<'a> MulAssign<&'a F>,
+{
+    fn row_wise_mult(&mut self, slice: &[F]) {
+        self.shares
+            .ys
+            .iter_mut()
+            .zip(slice.iter())
+            .for_each(|(a, b)| *a = *b);
+        self.polys
+            .iter_mut()
+            .zip(slice.iter())
+            .for_each(|(poly, b)| poly.0 *= b);
+    }
 }
 
 impl<F, G> SharedMany for VerifiableShare<F, G>
