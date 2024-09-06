@@ -8,7 +8,7 @@ use serde::{de::DeserializeOwned, Serialize};
 // TODO: Important! Switch RngCore to CryptoRngCore
 
 use crate::{
-    algebra::math::{lagrange_coefficients, Vector},
+    algebra::math::{lagrange_coefficients, RowMult, Vector},
     net::agency::Unicast,
     schemes::{interactive::InteractiveMult, SharedMany},
 };
@@ -309,6 +309,12 @@ impl<F: Field + DeserializeOwned + Serialize> SharedMany for Share<F> {
 pub struct VecShare<F: Field> {
     //pub(crate) x: F,
     pub(crate) ys: Vector<F>,
+}
+
+impl<F: Field> RowMult<F> for VecShare<F> {
+    fn row_wise_mult(&mut self, slice: &[F]) {
+        self.ys.row_wise_mult(slice);
+    }
 }
 
 impl<F: Field> FromIterator<Share<F>> for VecShare<F> {

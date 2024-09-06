@@ -33,7 +33,10 @@ use std::{
 
 use rand::RngCore;
 
-use crate::{algebra::math::Vector, net::Communicate};
+use crate::{
+    algebra::math::{RowMult, Vector},
+    net::Communicate,
+};
 
 /// Currently unused trait, but might be a better way to represent that a share
 /// can be multiplied by a const, however, it could also just be baked into 'Shared' directly.
@@ -123,7 +126,8 @@ pub trait SharedMany: Shared {
     type Vectorized: Sized
         + FromIterator<Self>
         + for<'a> Add<&'a Self::Vectorized, Output = Self::Vectorized>
-        + for<'b> Sub<&'b Self::Vectorized, Output = Self::Vectorized>
+        + for<'a> Sub<&'a Self::Vectorized, Output = Self::Vectorized>
+        + RowMult<Self::Value>
         + serde::Serialize
         + serde::de::DeserializeOwned
         + Clone
@@ -287,7 +291,8 @@ pub mod interactive {
         type VectorShare: Sized
             + FromIterator<Self>
             + for<'a> Add<&'a Self::VectorShare, Output = Self::VectorShare>
-            + for<'b> Sub<&'b Self::VectorShare, Output = Self::VectorShare>
+            + for<'a> Sub<&'a Self::VectorShare, Output = Self::VectorShare>
+            + RowMult<Self::Value>
             + serde::Serialize
             + serde::de::DeserializeOwned
             + Clone

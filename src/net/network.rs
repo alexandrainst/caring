@@ -5,6 +5,7 @@ use futures::future::join_all;
 use futures::prelude::*;
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
+use tokio::time::error::Elapsed;
 use tokio_util::bytes::Bytes;
 
 use crate::net::{
@@ -52,10 +53,13 @@ impl<C: SplitChannel> std::fmt::Debug for Network<C> {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Error communicating with {id}: {source}")]
 pub enum NetworkError<E, U> {
+    #[error("Error receiving from {id}: {source}")]
     Incoming { id: u32, source: ReceiverError<E> },
+    #[error("Error sending to {id}: {source}")]
     Outgoing { id: u32, source: U },
+    #[error("{id} timeouted after {elapsed:?}")]
+    TimeOut { id: u32, elapsed: Elapsed },
 }
 
 #[allow(type_alias_bounds)] // It clearly matters, stop complaining
@@ -288,13 +292,7 @@ impl<C: SplitChannel> Network<C> {
             .into_iter()
             .map(|(id, m)| match m {
                 Ok(m) => m.map_err(|e| NetworkError::Incoming { id, source: e }),
-                Err(_duration) => {
-                    todo!("handle it")
-                    //    Err(NetworkError {
-                    //    id,
-                    //    source: ConnectionError::TimeOut(duration),
-                    //})
-                }
+                Err(elapsed) => Err(NetworkError::TimeOut { id, elapsed }),
             })
             .collect::<NetResult<_, C>>()?;
 

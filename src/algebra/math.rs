@@ -16,7 +16,7 @@
 // TODO: Consider smallvec or tinyvec
 // TODO: Make parallel version it's own type switch on them using cfg..
 
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, MulAssign, Sub, SubAssign};
 
 use ff::Field;
 
@@ -55,11 +55,42 @@ impl<F> Vector<F> {
     }
 }
 
+impl<A> Vector<A> {
+    pub fn scalar_mul<B>(&mut self, scalar: &B)
+    where
+        for<'b> A: MulAssign<&'b B>,
+    {
+        self.0.iter_mut().for_each(|a| *a *= scalar);
+    }
+}
+
+pub trait RowMult<T> {
+    fn row_wise_mult(&mut self, slice: &[T]);
+}
+
+impl<A, B> RowMult<B> for Vector<A>
+where
+    for<'b> A: MulAssign<&'b B>,
+{
+    fn row_wise_mult(&mut self, slice: &[B]) {
+        self.0
+            .iter_mut()
+            .zip(slice.iter())
+            .for_each(|(a, b)| *a *= b);
+    }
+}
+
 impl<F> std::ops::Deref for Vector<F> {
     type Target = [F];
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl<F> std::ops::DerefMut for Vector<F> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -181,6 +212,17 @@ macro_rules! inherent {
 
 inherent!(Add, add, AddAssign, add_assign);
 inherent!(Sub, sub, SubAssign, sub_assign);
+
+impl<F> std::ops::Neg for Vector<F>
+where
+    F: std::ops::Neg<Output = F>,
+{
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        self.into_iter().map(|x| -x).collect()
+    }
+}
 
 /// Generic implementation of row-wise mult-assign
 ///
