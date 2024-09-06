@@ -5,11 +5,14 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    algebra::field::Field,
+    algebra::{
+        field::Field,
+        math::{RowMult, Vector},
+    },
     net::{agency::Broadcast, Communicate},
     schemes::{
         interactive::{InteractiveShared, InteractiveSharedMany},
-        Shared,
+        Shared, SharedMany,
     },
 };
 
@@ -82,6 +85,47 @@ impl<F: Field, C: Clone, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
     }
 }
 
+impl<S, F> BeaverTriple<S>
+where
+    S: SharedMany<Value = F>,
+    F: Field,
+{
+    pub fn vectorized(vector: impl Iterator<Item = Self>) -> BeaverTriple<S::Vectorized> {
+        use itertools::MultiUnzip;
+        let (a, b, c): (Vec<_>, Vec<_>, Vec<_>) =
+            vector.map(|BeaverTriple { shares }| shares).multiunzip();
+        let a = a.into_iter().collect();
+        let b = b.into_iter().collect();
+        let c = c.into_iter().collect();
+        let shares = (a, b, c);
+        BeaverTriple { shares }
+    }
+
+    pub fn fake_vec(
+        ctx: &S::Context,
+        vector_size: usize,
+        mut rng: impl RngCore,
+    ) -> Vec<BeaverTriple<S::Vectorized>> {
+        use itertools::MultiUnzip;
+        let (a, b, c): (Vec<_>, Vec<_>, Vec<_>) = (0..vector_size)
+            .map(|_| {
+                let a = F::random(&mut rng);
+                let b = F::random(&mut rng);
+                (a, b, a * b)
+            })
+            .multiunzip();
+        let mut c = a;
+
+        // Share (preproccess)
+        let a = S::share_many(ctx, &a, &mut rng);
+        let b = S::share_many(ctx, &b, &mut rng);
+        let c = S::share_many(ctx, &c, &mut rng);
+        itertools::izip!(a, b, c)
+            .map(|(a, b, c)| BeaverTriple { shares: (a, b, c) })
+            .collect()
+    }
+}
+
 /// Perform multiplication using beaver triples
 ///
 /// * `ctx`: context for secret sharing scheme
@@ -145,13 +189,28 @@ pub async fn beaver_multiply_vector<
     F: Field,
     S: InteractiveSharedMany<Value = F> + std::ops::Mul<S::Value, Output = S>,
 >(
-    _ctx: &mut S::Context,
-    _x: S::VectorShare,
-    _y: S::VectorShare,
-    _triples: &[BeaverTriple<S>],
-    _coms: impl Communicate,
-) {
-    todo!()
+    ctx: &mut S::Context,
+    x: &S::VectorShare,
+    y: &S::VectorShare,
+    triple: BeaverTriple<S::VectorShare>, // TODO: Convert between this and a Vec<BeaverTriple>
+    mut coms: impl Communicate,
+) -> Result<S::VectorShare, S::Error> {
+    let BeaverTriple { shares: (a, b, c) } = triple;
+
+    let ax = x.clone() + &a;
+    let by = y.clone() + &b;
+
+    let ax = S::recombine_many(ctx, ax, &mut coms).await?;
+    let by = S::recombine_many(ctx, by, &mut coms).await?;
+
+    let mut yax = y.clone();
+    yax.row_wise_mult(&ax);
+
+    let mut aby = a;
+    aby.row_wise_mult(&(-by));
+
+    let z = yax + &aby + &c;
+    Ok(z)
 }
 
 #[derive(Clone)]

@@ -1,4 +1,4 @@
-use std::ops::{AddAssign, SubAssign};
+use std::ops::{AddAssign, MulAssign, SubAssign};
 
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -62,6 +62,12 @@ impl<F: Field> std::ops::Mul<F> for Share<F> {
             value: self.value * rhs,
             ..self
         }
+    }
+}
+
+impl<F: Field> MulAssign<&F> for Share<F> {
+    fn mul_assign(&mut self, rhs: &F) {
+        self.value = self.value * *rhs;
     }
 }
 
