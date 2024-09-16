@@ -5,10 +5,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    algebra::{
-        field::Field,
-        math::{RowMult, Vector},
-    },
+    algebra::{field::Field, math::RowMult},
     net::{agency::Broadcast, Communicate},
     schemes::{
         interactive::{InteractiveShared, InteractiveSharedMany},
@@ -85,12 +82,11 @@ impl<F: Field, C: Clone, S: Shared<Value = F, Context = C>> BeaverTriple<S> {
     }
 }
 
-impl<S, F> BeaverTriple<S>
+impl<S> BeaverTriple<S>
 where
-    S: SharedMany<Value = F>,
-    F: Field,
+    S: InteractiveSharedMany,
 {
-    pub fn vectorized(vector: impl Iterator<Item = Self>) -> BeaverTriple<S::Vectorized> {
+    pub fn vectorized(vector: impl Iterator<Item = Self>) -> BeaverTriple<S::VectorShare> {
         use itertools::MultiUnzip;
         let (a, b, c): (Vec<_>, Vec<_>, Vec<_>) =
             vector.map(|BeaverTriple { shares }| shares).multiunzip();
@@ -100,7 +96,13 @@ where
         let shares = (a, b, c);
         BeaverTriple { shares }
     }
+}
 
+impl<S, F> BeaverTriple<S>
+where
+    S: SharedMany<Value = F>,
+    F: Field,
+{
     pub fn fake_vec(
         ctx: &S::Context,
         vector_size: usize,
@@ -114,7 +116,6 @@ where
                 (a, b, a * b)
             })
             .multiunzip();
-        let mut c = a;
 
         // Share (preproccess)
         let a = S::share_many(ctx, &a, &mut rng);
@@ -183,9 +184,7 @@ pub async fn beaver_multiply_many<
     Some(zs)
 }
 
-#[expect(clippy::extra_unused_type_parameters)]
 pub async fn beaver_multiply_vector<
-    C,
     F: Field,
     S: InteractiveSharedMany<Value = F> + std::ops::Mul<S::Value, Output = S>,
 >(

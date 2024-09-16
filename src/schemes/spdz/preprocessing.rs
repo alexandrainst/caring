@@ -4,7 +4,10 @@ use crate::{
     algebra::math::Vector,
     net::Id,
     protocols::beaver,
-    schemes::spdz::{self, SpdzContext},
+    schemes::{
+        spdz::{self, SpdzContext},
+        Reserve,
+    },
 };
 use bincode;
 use ff::PrimeField;
@@ -34,6 +37,64 @@ impl fmt::Display for PreProcError {
                 write!(f, "Not enough pre shared random elements.")
             }
         }
+    }
+}
+
+impl<F: ff::PrimeField> Reserve for spdz::SpdzContext<F> {
+    fn reserve(&mut self, amount: usize) -> Self {
+        fn inner<T>(list: &mut Vec<T>, n: usize) -> Vec<T> {
+            let mut new = list.split_off(n);
+            std::mem::swap(&mut new, list);
+            new
+        }
+
+        let reserved = inner(
+            &mut self.preprocessed.triplets.multiplication_triplets,
+            amount,
+        );
+
+        let party_fuel = {
+            let old = &mut self.preprocessed.for_sharing.party_fuel;
+            old.iter_mut()
+                .map(|tank| FuelTank {
+                    party: tank.party,
+                    shares: inner(&mut tank.shares, amount),
+                })
+                .collect()
+        };
+        let preprocessed = PreprocessedValues {
+            triplets: Triplets {
+                multiplication_triplets: reserved,
+            },
+            for_sharing: PreShareTank {
+                party_fuel,
+                my_randomness: inner(&mut self.preprocessed.for_sharing.my_randomness, amount),
+                me: self.preprocessed.for_sharing.me,
+            },
+        };
+        Self {
+            opened_values: vec![],
+            params: self.params.clone(),
+            preprocessed,
+        }
+    }
+
+    fn put_back(&mut self, mut other: Self) {
+        self.opened_values.append(&mut other.opened_values);
+        self.preprocessed
+            .triplets
+            .multiplication_triplets
+            .append(&mut other.preprocessed.triplets.multiplication_triplets);
+        self.preprocessed
+            .for_sharing
+            .my_randomness
+            .append(&mut other.preprocessed.for_sharing.my_randomness);
+        self.preprocessed
+            .for_sharing
+            .party_fuel
+            .iter_mut()
+            .zip(other.preprocessed.for_sharing.party_fuel)
+            .for_each(|(tank, mut old)| tank.shares.append(&mut old.shares));
     }
 }
 
@@ -104,7 +165,7 @@ impl<F: PrimeField> PreShareTank<F> {
 /// Multiplication triplet fuel tank
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Triplets<F: PrimeField> {
-    multiplication_triplets: Vec<MultiplicationTriple<F>>,
+    pub(crate) multiplication_triplets: Vec<MultiplicationTriple<F>>,
 }
 
 // TODO: Use beaver module

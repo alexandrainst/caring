@@ -9,7 +9,7 @@ use std::{
 use crate::{
     algebra::math::Vector,
     net::Id,
-    vm::{Const, Instruction, Script, Value},
+    vm::{ConstRef, Instruction, Script, Value},
 };
 
 /// An expression stack
@@ -44,9 +44,9 @@ impl<F> Exp<F> {
         }
     }
 
-    fn append_constant(&mut self, value: impl Into<Value<F>>) -> Const {
+    fn append_constant(&mut self, value: impl Into<Value<F>>) -> ConstRef {
         self.constants.push(value.into());
-        Const(self.constants.len() as u16 - 1)
+        ConstRef(self.constants.len() as u16 - 1)
     }
 
     fn constant_op(value: impl Into<Value<F>>, opcode: Instruction) -> Self {
@@ -75,14 +75,14 @@ impl<F> Exp<F> {
     ///
     /// * `secret`: value to secret share
     pub fn share(secret: impl Into<F>) -> Self {
-        Self::constant_op(secret.into(), Instruction::Share(Const(0)))
+        Self::constant_op(secret.into(), Instruction::Share(ConstRef(0)))
     }
 
     /// Secret share a vector
     ///
     /// * `secret`: vector to secret share
     pub fn share_vec(secret: impl Into<Vector<F>>) -> Self {
-        Self::constant_op(secret.into(), Instruction::Share(Const(0)))
+        Self::constant_op(secret.into(), Instruction::Share(ConstRef(0)))
     }
 
     /// Receive are share from a given party `id`
@@ -201,7 +201,7 @@ impl<F> ExpList<F> {
     pub fn concrete(self, own: usize, size: usize) -> Vec<Exp<F>> {
         let mut me = Some(Exp {
             constants: vec![self.constant],
-            instructions: vec![Instruction::SymShare(Const(0))],
+            instructions: vec![Instruction::SymShare(ConstRef(0))],
         });
         (0..size)
             .map(|id| {
@@ -218,7 +218,7 @@ impl<F> ExpList<F> {
         use Instruction as I;
         Exp {
             constants: vec![self.constant],
-            instructions: vec![I::SymShare(Const(0)), I::Sum(0)],
+            instructions: vec![I::SymShare(ConstRef(0)), I::Sum(0)],
         }
     }
 }

@@ -110,11 +110,11 @@ impl<Arg, C> Cluster<Arg, C> {
                 tokio::spawn(fut.instrument(span)).inspect_err(move |e| {
                     let reason = e.source();
                     if e.is_panic() {
-                        tracing::error!("Player {id} panic'ed: {e}, reason: {reason:#?}");
+                        tracing::error!("Player {id} panic'ed: {e}, reason: {reason:?}");
                     } else if e.is_cancelled() {
-                        tracing::error!("Player {id} was cancelled: {e}, reason: {reason:#?}");
+                        tracing::error!("Player {id} was cancelled: {e}, reason: {reason:?}");
                     } else {
-                        tracing::error!("Player {id} returned an error: {e}, reason: {reason:#?}");
+                        tracing::error!("Player {id} returned an error: {e}, reason: {reason:?}");
                     }
                 })
             })
@@ -140,7 +140,7 @@ impl Cluster<Script<Element32>> {
             let mut fueltanks = beaver::BeaverTriple::fake_many(&context, shared_rng, 2000);
             let mut engine = Engine::<_, S, _>::new(context, network, private_rng);
             engine.add_fuel(&mut fueltanks[context.me.0]);
-            engine.execute(&script).await.unwrap_single()
+            engine.execute(&script).await.unwrap().unwrap_single()
         })
         .await
     }

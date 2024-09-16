@@ -1,4 +1,4 @@
-use std::{error::Error, future::Future};
+use std::{error::Error, fmt::Display, future::Future};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
@@ -101,6 +101,13 @@ impl<'a, C: SplitChannel> SplitChannel for &'a mut C {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Id(pub usize);
+
+impl Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let i = self.0;
+        write!(f, "{i}")
+    }
+}
 
 /// Tune to a specific channel
 pub trait Tuneable {
