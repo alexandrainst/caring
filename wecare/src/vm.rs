@@ -11,7 +11,7 @@ use caring::{
     algebra::{element::Element32, math::Vector},
     net::{agency::Broadcast, connection::TcpConnection, network::TcpNetwork},
     schemes::{feldman, shamir, spdz},
-    vm::{self, parsing::Exp},
+    vm::{self, parsing::Exp, ExecutionError},
 };
 
 pub use caring::net::Id;
@@ -194,30 +194,30 @@ impl Engine {
         EngineBuilder::default()
     }
 
-    pub async fn execute(&mut self, expr: Opened) -> Value<UnknownNumber> {
+    pub async fn execute(&mut self, expr: Opened) -> Result<Value<UnknownNumber>, ExecutionError> {
         let res: Value<UnknownNumber> = match self {
             Engine::Spdz25519(engine) => {
-                let res = engine.execute(&expr.try_finalize().unwrap()).await;
+                let res = engine.execute(&expr.try_finalize().unwrap()).await?;
                 res.map(|x| x.into())
             }
             Engine::Shamir32(engine) => engine
                 .execute(&expr.try_finalize().unwrap())
-                .await
+                .await?
                 .map(|x| x.into()),
             Engine::Spdz32(engine) => {
-                let res = engine.execute(&expr.try_finalize().unwrap()).await;
+                let res = engine.execute(&expr.try_finalize().unwrap()).await?;
                 res.map(|x| x.into())
             }
             Engine::Shamir25519(engine) => {
-                let res = engine.execute(&expr.try_finalize().unwrap()).await;
+                let res = engine.execute(&expr.try_finalize().unwrap()).await?;
                 res.map(|x| x.into())
             }
             Engine::Feldman25519(engine) => {
-                let res = engine.execute(&expr.try_finalize().unwrap()).await;
+                let res = engine.execute(&expr.try_finalize().unwrap()).await?;
                 res.map(|x| x.into())
             }
         };
-        res
+        Ok(res)
     }
 
     pub fn id(&self) -> Id {
@@ -236,6 +236,7 @@ impl Engine {
         };
         self.execute(program)
             .await
+            .unwrap()
             .unwrap_vector()
             .into_iter()
             .map(|x| x.to_f64())
@@ -383,7 +384,10 @@ impl EngineBuilder {
 }
 
 pub mod blocking {
-    use caring::{net::Id, vm::Value};
+    use caring::{
+        net::Id,
+        vm::{ExecutionError, Value},
+    };
 
     use crate::vm::UnknownNumber;
 
@@ -439,7 +443,10 @@ pub mod blocking {
     }
 
     impl Engine {
-        pub fn execute(&mut self, expr: super::Opened) -> Value<UnknownNumber> {
+        pub fn execute(
+            &mut self,
+            expr: super::Opened,
+        ) -> Result<Value<UnknownNumber>, ExecutionError> {
             self.runtime.block_on(self.parent.execute(expr))
         }
 
@@ -495,7 +502,7 @@ mod test {
                     let script = res;
 
                     println!("Party 0: Executing");
-                    let res = engine.execute(script);
+                    let res = engine.execute(script).unwrap();
                     res.unwrap_single().to_f64()
                 }),
                 scope.spawn(|| {
@@ -511,7 +518,7 @@ mod test {
                     let script = res;
 
                     println!("Party 1: Executing");
-                    let res = engine.execute(script);
+                    let res = engine.execute(script).unwrap();
                     res.unwrap_single().to_f64()
                 }),
                 scope.spawn(|| {
@@ -527,7 +534,7 @@ mod test {
                     let script = res;
 
                     println!("Party 2: Executing");
-                    let res = engine.execute(script);
+                    let res = engine.execute(script).unwrap();
                     res.unwrap_single().to_f64()
                 }),
             ]
