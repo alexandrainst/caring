@@ -319,7 +319,6 @@ mod test {
 
     #[test]
     fn sunshine_shamir() {
-        tracing_forest::init();
         use std::thread;
         let t1 = thread::spawn(move || {
             println!("[1] Setting up...");
@@ -356,7 +355,6 @@ mod test {
 
     #[test]
     fn sunshine_spdz() {
-        tracing_forest::init();
         use std::thread;
         let ctx1 = tempfile::tempfile().unwrap();
         let ctx2 = tempfile::tempfile().unwrap();
@@ -404,7 +402,6 @@ mod test {
 
     #[test]
     fn sunshine_spdz_for_two() {
-        tracing_forest::init();
         use std::thread;
 
         let ctx1 = tempfile::tempfile().unwrap();
