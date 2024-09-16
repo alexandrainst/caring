@@ -593,7 +593,6 @@ mod test {
 
     #[tokio::test]
     async fn connection_works() {
-        tracing_forest::init();
         let (c1, c2) = Connection::in_memory();
         let p1 = async {
             let (gateway, mut muxes) = Gateway::multiplex(c1, 3);
@@ -642,7 +641,6 @@ mod test {
 
     #[tokio::test]
     async fn connection_handles_errors() {
-        tracing_forest::init();
         let (c1, c2) = Connection::in_memory();
         let p1 = async {
             let (gateway, mut muxes) = Gateway::multiplex(c1, 3);
@@ -671,7 +669,6 @@ mod test {
 
     #[tokio::test]
     async fn network() {
-        tracing_forest::init();
         crate::testing::Cluster::new(3)
             .run(|net| async move {
                 let (gateway, mut muxed) = NetworkGateway::multiplex(net, 2);
@@ -698,7 +695,6 @@ mod test {
 
     #[tokio::test]
     async fn network_borrowed() {
-        tracing_forest::init();
         crate::testing::Cluster::new(3)
             .run(|mut net| async move {
                 let net_ref = net.as_mut();
@@ -725,7 +721,6 @@ mod test {
 
     #[tokio::test]
     async fn network_borrowed_no_tasks() {
-        tracing_forest::init();
         let res = crate::testing::Cluster::new(3)
             .run(|mut net| async move {
                 let net_ref = net.as_mut();
