@@ -83,13 +83,15 @@ impl Engine {
     /// Execute a script
     ///
     /// * `script`: list of expressions to evaluate
-    fn execute(&self, script: &Opened) -> Computed {
+    fn execute(&self, script: &Opened) -> PyResult<Computed> {
         let res = {
             let mut engine = self.0.lock().expect("Lock poisoned");
             let script: vm::Opened = script.0.clone();
-            engine.execute(script)
+            engine
+                .execute(script)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
         };
-        Computed(res)
+        Ok(Computed(res))
     }
 
     /// Your own Id
