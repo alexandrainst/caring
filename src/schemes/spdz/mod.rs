@@ -655,8 +655,6 @@ mod test {
 
     #[tokio::test]
     async fn symmetric_sharing() {
-        tracing_forest::init();
-
         let rng = rand::rngs::mock::StepRng::new(7, 32);
         let (ctxs, _secrets) = preprocessing::dealer_preproc::<Element32>(rng, &[1, 1, 1], 0, 3);
 
@@ -684,8 +682,6 @@ mod test {
 
     #[tokio::test]
     async fn symmetric_sharing_many() {
-        tracing_forest::init();
-
         let rng = rand::rngs::mock::StepRng::new(7, 32);
         let (ctxs, _secrets) = preprocessing::dealer_preproc::<Element32>(rng, &[1, 1, 1], 0, 3);
 
