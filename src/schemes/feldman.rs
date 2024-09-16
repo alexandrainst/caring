@@ -24,7 +24,7 @@ use crate::{
     net::agency::Unicast,
     schemes::{
         shamir::{self},
-        SharedMany,
+        Length, SharedMany,
     },
 };
 use crate::{algebra::poly::Polynomial, schemes::shamir::ShamirParams};
@@ -247,6 +247,12 @@ where
             .iter_mut()
             .zip(slice.iter())
             .for_each(|(poly, b)| poly.0 *= b);
+    }
+}
+
+impl<F: Field, G: Group> Length for VecVerifiableShare<F, G> {
+    fn len(&self) -> usize {
+        self.shares.len()
     }
 }
 

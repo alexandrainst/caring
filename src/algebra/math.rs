@@ -80,6 +80,12 @@ where
     }
 }
 
+impl<F> super::Length for Vector<F> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 impl<F> std::ops::Deref for Vector<F> {
     type Target = [F];
 

@@ -6,7 +6,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use crate::{
     algebra::{field::Field, math::Vector},
     net::Id,
-    schemes::{Shared, SharedMany},
+    schemes::{Reserve, Shared, SharedMany},
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -84,6 +84,14 @@ impl<F> Share<F> {
 pub struct Context {
     pub all_parties: usize,
     pub me: Id,
+}
+
+impl Reserve for Context {
+    fn reserve(&mut self, _amount: usize) -> Self {
+        *self
+    }
+
+    fn put_back(&mut self, _other: Self) {}
 }
 
 impl Context {

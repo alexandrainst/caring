@@ -10,7 +10,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::{
     algebra::math::{lagrange_coefficients, RowMult, Vector},
     net::agency::Unicast,
-    schemes::{interactive::InteractiveMult, SharedMany},
+    schemes::{interactive::InteractiveMult, Length, Reserve, SharedMany},
 };
 
 use crate::algebra::poly::Polynomial;
@@ -36,6 +36,14 @@ pub struct Share<F: Field> {
 pub struct ShamirParams<F> {
     pub threshold: u64,
     pub ids: Vec<F>,
+}
+
+impl<F: Clone> Reserve for ShamirParams<F> {
+    fn reserve(&mut self, _amount: usize) -> Self {
+        self.clone()
+    }
+
+    fn put_back(&mut self, _other: Self) {}
 }
 
 // TODO: Collapse Field with Ser-De since we always require that combo?
@@ -314,6 +322,12 @@ pub struct VecShare<F: Field> {
 impl<F: Field> RowMult<F> for VecShare<F> {
     fn row_wise_mult(&mut self, slice: &[F]) {
         self.ys.row_wise_mult(slice);
+    }
+}
+
+impl<F: Field> Length for VecShare<F> {
+    fn len(&self) -> usize {
+        self.ys.len()
     }
 }
 

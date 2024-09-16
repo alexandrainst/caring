@@ -1,14 +1,18 @@
+mod ast;
 pub mod parsing;
+
+use std::{collections::BTreeMap, error::Error};
 
 use ff::Field;
 use itertools::{Either, Itertools};
 use rand::RngCore;
+use thiserror::Error;
 
 use crate::{
-    algebra::math::Vector,
+    algebra::{math::Vector, Length},
     net::{agency::Broadcast, connection::TcpConnection, network::Network, Id, SplitChannel},
-    protocols::beaver::{beaver_multiply, BeaverTriple},
-    schemes::interactive::{InteractiveShared, InteractiveSharedMany},
+    protocols::beaver::{beaver_multiply, beaver_multiply_vector, BeaverTriple},
+    schemes::interactive::InteractiveSharedMany,
 };
 
 #[derive(Debug, Clone)]
@@ -83,14 +87,14 @@ impl<F> Value<F> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Const(u16);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstRef(u16);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Instruction {
-    Share(Const),
-    SymShare(Const),
-    MulCon(Const),
+    Share(ConstRef),
+    SymShare(ConstRef),
+    MulCon(ConstRef),
     Recv(Id),
     RecvVec(Id),
     Recombine,
@@ -111,11 +115,99 @@ pub struct Script<F> {
     instructions: Vec<Instruction>,
 }
 
+impl<F> Script<F> {
+    pub fn mults(&self, parties: usize) -> usize {
+        self.mults_and_shared(parties)
+            .0
+            .into_iter()
+            .map(|(size, amount)| size * amount)
+            .sum()
+    }
+
+    pub fn shared(&self, parties: usize) -> usize {
+        self.mults_and_shared(parties).1
+    }
+
+    fn get_constant(&self, addr: ConstRef) -> &Value<F> {
+        self.constants.get(addr.0 as usize).unwrap()
+    }
+
+    fn mults_and_shared(&self, parties: usize) -> (BTreeMap<usize, usize>, usize) {
+        let mut mults = BTreeMap::new();
+        let mut shared = 0;
+        let mut stack = Vec::new();
+        for inst in &self.instructions {
+            match inst {
+                Instruction::Share(addr) => match self.get_constant(*addr) {
+                    Value::Single(_) => {
+                        stack.push(1usize);
+                        shared += 1;
+                    }
+                    Value::Vector(v) => {
+                        stack.push(v.len());
+                        shared += v.len();
+                    }
+                },
+                Instruction::SymShare(addr) => match self.get_constant(*addr) {
+                    Value::Single(_) => {
+                        stack.append(&mut vec![1usize; parties]);
+                        shared += parties;
+                    }
+                    Value::Vector(v) => {
+                        shared += v.len() * parties;
+                        stack.append(&mut vec![v.len(); parties])
+                    }
+                },
+                Instruction::MulCon(addr) => {
+                    stack.pop();
+                    match self.get_constant(*addr) {
+                        Value::Single(_) => stack.push(1usize),
+                        Value::Vector(v) => stack.push(v.len()),
+                    }
+                }
+                Instruction::Recv(_) => {
+                    stack.push(1);
+                    shared += 1;
+                }
+                Instruction::RecvVec(_) => {
+                    stack.push(0);
+                    shared += 1;
+                }
+                Instruction::Recombine => {
+                    stack.pop();
+                }
+                Instruction::Add | Instruction::Sub => {
+                    let a = stack.pop().unwrap();
+                    let b = stack.pop().unwrap();
+                    if a == 0 {
+                        stack.push(b)
+                    } else {
+                        stack.push(a)
+                    }
+                }
+                Instruction::Mul => {
+                    let size = stack.pop().unwrap();
+                    mults
+                        .entry(size)
+                        .and_modify(|amount: &mut usize| *amount += 1);
+                }
+                Instruction::Sum(n) => {
+                    let n = if *n == 0 { parties } else { *n };
+                    for _ in 0..(n - 1) {
+                        stack.pop();
+                    }
+                }
+            }
+        }
+        (mults, shared)
+    }
+}
+
 #[derive(Debug)]
-pub struct Engine<C: SplitChannel, S: InteractiveShared, R> {
+pub struct Engine<C: SplitChannel, S: InteractiveSharedMany, R> {
     network: Network<C>,
     context: S::Context,
-    fueltank: Vec<BeaverTriple<S>>,
+    fueltank: FuelTank<S>,
     rng: R,
 }
 
@@ -184,6 +276,67 @@ impl<S: InteractiveSharedMany> Stack<S> {
     }
 }
 
+struct FuelTank<S> {
+    pub mult_triples: Vec<BeaverTriple<S>>,
+}
+
+impl<S> FuelTank<S>
+where
+    S: InteractiveSharedMany,
+{
+    pub fn single_mult(&mut self) -> Option<BeaverTriple<S>> {
+        self.mult_triples.pop()
+    }
+
+    pub fn vector_mult(&mut self, size: usize) -> Option<BeaverTriple<S::VectorShare>> {
+        if self.mult_triples.len() < size {
+            return None;
+        }
+        let iter = self.mult_triples.drain(..size);
+        Some(BeaverTriple::vectorized(iter))
+    }
+}
+
+impl<S> std::fmt::Debug for FuelTank<S>
+where
+    S: InteractiveSharedMany,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FuelTank")
+            .field("mult_triples", &self.mult_triples.len())
+            .finish()
+    }
+}
+
+impl<S> Default for FuelTank<S>
+where
+    S: InteractiveSharedMany,
+{
+    fn default() -> Self {
+        Self {
+            mult_triples: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("Error during Execution: {reason}")]
+pub struct ExecutionError {
+    #[from]
+    reason: Box<dyn Error + Send + 'static>,
+}
+
+impl ExecutionError {
+    pub fn new<E>(error: E) -> Self
+    where
+        E: Error + Send + 'static,
+    {
+        Self {
+            reason: Box::new(error),
+        }
+    }
+}
+
 impl<C, S, R, F> Engine<C, S, R>
 where
     C: SplitChannel,
@@ -195,7 +348,7 @@ where
         Self {
             network,
             context,
-            fueltank: vec![],
+            fueltank: FuelTank::default(),
             rng,
         }
     }
@@ -209,23 +362,31 @@ where
     }
 
     pub fn add_fuel(&mut self, fuel: &mut Vec<BeaverTriple<S>>) {
-        self.fueltank.append(fuel);
+        self.fueltank.mult_triples.append(fuel);
     }
 
     // TODO: Superscalar execution when awaiting.
 
-    pub async fn execute(&mut self, script: &Script<F>) -> Value<F> {
+    pub async fn execute(&mut self, script: &Script<F>) -> Result<Value<F>, ExecutionError> {
         let mut stack = Stack::new();
         let mut results: Vec<Value<_>> = vec![];
         let constants = &script.constants;
 
+        let n = script.instructions.len();
+        let m = constants.len();
+        let i = self.network.id();
+        tracing::info!("Starting execution of {n} instructions with {m} contants as player {i}");
+
         for opcode in script.instructions.iter() {
+            tracing::trace!("Executing opcode: {opcode:?}");
             self.step(&mut stack, &mut results, constants, opcode)
                 .await
-                .unwrap();
+                .map_err(ExecutionError::new)?;
         }
 
-        results.pop().unwrap()
+        // TODO: Handle missing output.
+        // Handle multiple outputs
+        Ok(results.pop().unwrap())
     }
 
     async fn step(
@@ -239,9 +400,11 @@ where
         let mut coms = &mut self.network;
         let mut rng = &mut self.rng;
         let fueltank = &mut self.fueltank;
+        let get_constant = |addr: &ConstRef| &constants[addr.0 as usize];
+
         match opcode {
             Instruction::Share(addr) => {
-                let f = &constants[addr.0 as usize];
+                let f = get_constant(addr);
                 match f {
                     Value::Single(f) => {
                         let share = S::share(ctx, *f, &mut rng, &mut coms).await?;
@@ -254,7 +417,7 @@ where
                 }
             }
             Instruction::SymShare(addr) => {
-                let f = &constants[addr.0 as usize];
+                let f = get_constant(addr);
                 match f {
                     Value::Single(f) => {
                         let shares = S::symmetric_share(ctx, *f, &mut rng, &mut coms).await?;
@@ -307,12 +470,10 @@ where
                 }
             }
             Instruction::MulCon(addr) => {
-                let constant = &constants[addr.0 as usize];
-                match (stack.pop(), constant) {
-                    (SharedValue::Single(a), Value::Single(constant)) => {
-                        stack.push_single(a * *constant)
-                    }
-                    (SharedValue::Vector(_a), Value::Vector(_constant)) => {
+                let con = get_constant(addr);
+                match (stack.pop(), con) {
+                    (SharedValue::Single(a), Value::Single(con)) => stack.push_single(a * *con),
+                    (SharedValue::Vector(_a), Value::Vector(_con)) => {
                         todo!("vector mult")
                         //stack.push_vector(a * &constant)
                     }
@@ -325,12 +486,16 @@ where
                 let y = stack.pop();
                 match (x, y) {
                     (SharedValue::Single(x), SharedValue::Single(y)) => {
-                        let triple = fueltank.pop().unwrap();
+                        let triple = fueltank.single_mult().unwrap();
                         let z = beaver_multiply(ctx, x, y, triple, &mut coms).await?;
                         stack.push_single(z)
                     }
-                    (SharedValue::Vector(_x), SharedValue::Vector(_y)) => {
-                        todo!()
+                    (SharedValue::Vector(x), SharedValue::Vector(y)) => {
+                        let size = x.len();
+                        let triple = fueltank.vector_mult(size).unwrap();
+                        let z: S::VectorShare =
+                            beaver_multiply_vector::<F, S>(ctx, &x, &y, triple, &mut coms).await?;
+                        stack.push_vector(z);
                     }
                     (SharedValue::Vector(_), SharedValue::Single(_y)) => {
                         todo!()
@@ -370,7 +535,7 @@ where
     }
 }
 
-impl<S: InteractiveShared, R> Engine<TcpConnection, S, R> {
+impl<S: InteractiveSharedMany, R> Engine<TcpConnection, S, R> {
     pub async fn shutdown(self) -> Result<(), std::io::Error> {
         self.network.shutdown().await
     }
@@ -384,7 +549,7 @@ mod tests {
         algebra::{self, element::Element32},
         net::{agency::Broadcast, connection::DuplexConnection, network::InMemoryNetwork, Id},
         testing::{self, mock},
-        vm::{Const, Engine, Instruction, Value},
+        vm::{ConstRef, Engine, Instruction, Value},
     };
 
     pub fn dumb_engine(
@@ -401,7 +566,7 @@ mod tests {
         Engine {
             network,
             context,
-            fueltank: vec![],
+            fueltank: super::FuelTank::default(),
             rng,
         }
     }
@@ -417,12 +582,17 @@ mod tests {
                 let script = crate::vm::Script {
                     constants: vec![Value::Single(val)],
                     instructions: vec![
-                        SymShare(Const(0)), // add two to the stack.
+                        SymShare(ConstRef(0)), // add two to the stack.
                         Add,
                         Recombine,
                     ],
                 };
-                let res: u32 = engine.execute(&script).await.unwrap_single().into();
+                let res: u32 = engine
+                    .execute(&script)
+                    .await
+                    .unwrap()
+                    .unwrap_single()
+                    .into();
                 engine.network.shutdown().await.unwrap();
                 res
             })
@@ -439,27 +609,32 @@ mod tests {
         let a = crate::vm::Script {
             constants: vec![Value::Single(a)],
             instructions: vec![
-                Share(Const(0)), // +1
-                Recv(Id(1)),     // +1
-                Add,             // -1
-                Recombine,       // -1
+                Share(ConstRef(0)), // +1
+                Recv(Id(1)),        // +1
+                Add,                // -1
+                Recombine,          // -1
             ],
         };
         let b = Element32::from(57u32);
         let b = crate::vm::Script {
             constants: vec![Value::Single(b)],
             instructions: vec![
-                Recv(Id(0)),     // +1
-                Share(Const(0)), // +1
-                Add,             // -1
-                Recombine,       // -1
+                Recv(Id(0)),        // +1
+                Share(ConstRef(0)), // +1
+                Add,                // -1
+                Recombine,          // -1
             ],
         };
         let results = testing::Cluster::new(2)
             .with_args([a, b])
             .run_with_args(|net, script| async move {
                 let mut engine = dumb_engine(net);
-                let res: u32 = engine.execute(&script).await.unwrap_single().into();
+                let res: u32 = engine
+                    .execute(&script)
+                    .await
+                    .unwrap()
+                    .unwrap_single()
+                    .into();
                 engine.network.shutdown().await.unwrap();
                 res
             })
