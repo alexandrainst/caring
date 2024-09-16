@@ -34,7 +34,10 @@ use std::{
 use rand::RngCore;
 
 use crate::{
-    algebra::math::{RowMult, Vector},
+    algebra::{
+        math::{RowMult, Vector},
+        Length,
+    },
     net::Communicate,
 };
 
@@ -128,6 +131,7 @@ pub trait SharedMany: Shared {
         + for<'a> Add<&'a Self::Vectorized, Output = Self::Vectorized>
         + for<'a> Sub<&'a Self::Vectorized, Output = Self::Vectorized>
         + RowMult<Self::Value>
+        + Length
         + serde::Serialize
         + serde::de::DeserializeOwned
         + Clone
@@ -161,6 +165,7 @@ pub mod interactive {
     use std::ops::Mul;
 
     use thiserror::Error;
+    use tracing::instrument;
 
     use crate::{
         algebra::math::Vector,
@@ -293,6 +298,7 @@ pub mod interactive {
             + for<'a> Add<&'a Self::VectorShare, Output = Self::VectorShare>
             + for<'a> Sub<&'a Self::VectorShare, Output = Self::VectorShare>
             + RowMult<Self::Value>
+            + Length
             + serde::Serialize
             + serde::de::DeserializeOwned
             + Clone
@@ -336,6 +342,7 @@ pub mod interactive {
     {
         type VectorShare = S::Vectorized;
 
+        #[instrument(skip_all)]
         async fn share_many(
             ctx: &mut Self::Context,
             secrets: &[Self::Value],
@@ -350,6 +357,7 @@ pub mod interactive {
             Ok(my_share)
         }
 
+        #[instrument(skip_all)]
         async fn symmetric_share_many(
             ctx: &mut Self::Context,
             secrets: &[Self::Value],
@@ -364,6 +372,7 @@ pub mod interactive {
             Ok(shared)
         }
 
+        #[instrument(skip_all)]
         async fn receive_share_many(
             _ctx: &mut Self::Context,
             mut coms: impl Communicate,
@@ -374,6 +383,7 @@ pub mod interactive {
             Ok(s)
         }
 
+        #[instrument(skip_all)]
         async fn recombine_many(
             ctx: &mut Self::Context,
             secrets: Self::VectorShare,
@@ -413,6 +423,17 @@ pub mod interactive {
     }
 }
 
+/// Reserve part of a context for performing
+/// concurrent operations in the new subcontext.
+pub trait Reserve {
+    /// Reserve `amount` operations in resources.
+    fn reserve(&mut self, amount: usize) -> Self;
+
+    /// Put back unused resources.
+    fn put_back(&mut self, other: Self);
+}
+
+// NOTE: Unused.
 pub trait Verify: Sized {
     type Args: Send;
 
