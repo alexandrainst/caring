@@ -1,9 +1,4 @@
-import logging
 from caring import Expr, Engine, preproc
-
-FORMAT = '%(levelname)s %(name)s %(asctime)-15s %(filename)s:%(lineno)d %(message)s'
-logging.basicConfig(format=FORMAT)
-logging.getLogger().setLevel(logging.INFO)
 
 preproc(12, 10, "./context1.bin", "./context2.bin")
 
