@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, error::Error, fmt::Display};
 use ff::{Field, PrimeField};
 use itertools::{Either, Itertools};
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -16,10 +16,10 @@ use crate::{
     schemes::{interactive::InteractiveSharedMany, spdz},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value<F> {
     Single(F),
-    Vector(Vector<F>),
+    Vectorized(Vector<F>),
 }
 
 impl<F> Value<F> {
@@ -32,7 +32,7 @@ impl<F> Value<F> {
 
     pub fn unwrap_vector(self) -> Vector<F> {
         match self {
-            Value::Vector(v) => v,
+            Value::Vectorized(v) => v,
             _ => panic!("Was single and not a vector!"),
         }
     }
@@ -40,14 +40,14 @@ impl<F> Value<F> {
     pub fn map<U>(self, func: impl Fn(F) -> U) -> Value<U> {
         match self {
             Value::Single(a) => Value::Single(func(a)),
-            Value::Vector(a) => Value::Vector(a.into_iter().map(func).collect()),
+            Value::Vectorized(a) => Value::Vectorized(a.into_iter().map(func).collect()),
         }
     }
 
     pub fn to_vec(self) -> Vec<F> {
         match self {
             Value::Single(s) => vec![s],
-            Value::Vector(v) => v.into(),
+            Value::Vectorized(v) => v.into(),
         }
     }
 }
@@ -59,7 +59,7 @@ impl<F> From<F> for Value<F> {
 }
 impl<F> From<Vector<F>> for Value<F> {
     fn from(value: Vector<F>) -> Self {
-        Value::Vector(value)
+        Value::Vectorized(value)
     }
 }
 
@@ -70,7 +70,7 @@ impl<F> Value<F> {
     {
         match self {
             Value::Single(v) => Value::Single(v.into()),
-            Value::Vector(v) => Value::Vector(v.into_iter().map(|v| v.into()).collect()),
+            Value::Vectorized(v) => Value::Vectorized(v.into_iter().map(|v| v.into()).collect()),
         }
     }
 
@@ -80,18 +80,18 @@ impl<F> Value<F> {
     {
         match self {
             Value::Single(v) => Ok(Value::Single(v.try_into()?)),
-            Value::Vector(v) => {
+            Value::Vectorized(v) => {
                 let bs: Vector<B> = v.into_iter().map(|v| v.try_into()).try_collect()?;
-                Ok(Value::Vector(bs))
+                Ok(Value::Vectorized(bs))
             }
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConstRef(u16);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Instruction {
     Share(ConstRef),
     SymShare(ConstRef),
@@ -174,7 +174,7 @@ impl<F> Script<F> {
                         stack.push(1usize);
                         shared += 1;
                     }
-                    Value::Vector(v) => {
+                    Value::Vectorized(v) => {
                         stack.push(v.len());
                         shared += v.len();
                     }
@@ -184,7 +184,7 @@ impl<F> Script<F> {
                         stack.append(&mut vec![1usize; parties]);
                         shared += parties;
                     }
-                    Value::Vector(v) => {
+                    Value::Vectorized(v) => {
                         shared += v.len() * parties;
                         stack.append(&mut vec![v.len(); parties])
                     }
@@ -193,7 +193,7 @@ impl<F> Script<F> {
                     stack.pop();
                     match self.get_constant(*addr) {
                         Value::Single(_) => stack.push(1usize),
-                        Value::Vector(v) => stack.push(v.len()),
+                        Value::Vectorized(v) => stack.push(v.len()),
                     }
                 }
                 Instruction::Recv(_) => {
@@ -419,15 +419,22 @@ where
         tracing::info!(
             "Starting execution of {n} instructions with {m} contants as player {i} with {f} fuel"
         );
+        for (i, c) in constants.iter().enumerate() {
+            tracing::debug!("Constant[{i}]: {c:?}");
+        }
 
         for (i, opcode) in script.instructions.iter().enumerate() {
-            tracing::trace!("Executing opcode: {opcode:?}");
+            tracing::trace!("Executing opcode: {opcode}");
             self.step(&mut stack, &mut results, constants, opcode)
                 .await
                 .map_err(|e| ExecutionError {
                     reason: Box::new(e),
                     line: i,
                 })?;
+        }
+
+        for (i, c) in results.iter().enumerate() {
+            tracing::debug!("Results[{i}]: {c:?}");
         }
 
         // TODO: Handle multiple outputs
@@ -468,7 +475,7 @@ where
                         let share = S::share(ctx, *f, &mut rng, &mut coms).await?;
                         stack.push_single(share)
                     }
-                    Value::Vector(fs) => {
+                    Value::Vectorized(fs) => {
                         let share = S::share_many(ctx, fs, &mut rng, &mut coms).await?;
                         stack.push_vector(share)
                     }
@@ -482,7 +489,7 @@ where
                         let shares = shares.into_iter().map(|s| SharedValue::Single(s));
                         stack.stack.extend(shares) // dirty hack
                     }
-                    Value::Vector(f) => {
+                    Value::Vectorized(f) => {
                         let shares = S::symmetric_share_many(ctx, f, &mut rng, &mut coms).await?;
                         let shares = shares.into_iter().map(|s| SharedValue::Vector(s));
                         stack.stack.extend(shares) // dirty hack
@@ -505,7 +512,7 @@ where
                     }
                     SharedValue::Vector(share) => {
                         let f = S::recombine_many(ctx, share, &mut coms).await?;
-                        results.push(Value::Vector(f));
+                        results.push(Value::Vectorized(f));
                     }
                 };
             }
@@ -531,11 +538,11 @@ where
                 let con = get_constant(addr);
                 match (stack.pop(), con) {
                     (SharedValue::Single(a), Value::Single(con)) => stack.push_single(a * *con),
-                    (SharedValue::Vector(_a), Value::Vector(_con)) => {
+                    (SharedValue::Vector(_a), Value::Vectorized(_con)) => {
                         todo!("vector mult")
                         //stack.push_vector(a * &constant)
                     }
-                    (SharedValue::Single(_), Value::Vector(_)) => todo!(),
+                    (SharedValue::Single(_), Value::Vectorized(_)) => todo!(),
                     (SharedValue::Vector(_), Value::Single(_)) => todo!(),
                 }
             }

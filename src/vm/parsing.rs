@@ -67,7 +67,7 @@ impl<F> Exp<F> {
     // This is slighty cursed.
     pub fn symmetric_share_vec(secret: impl Into<Vector<F>>) -> ExpList<F> {
         ExpList {
-            constant: Value::Vector(secret.into()),
+            constant: Value::Vectorized(secret.into()),
         }
     }
 
