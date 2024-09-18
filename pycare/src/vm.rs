@@ -77,7 +77,7 @@ impl Engine {
 
         let engine = builder
             .connect_blocking()
-            .map_err(|e| pyo3::exceptions::PyBrokenPipeError::new_err(e))?
+            .map_err(pyo3::exceptions::PyBrokenPipeError::new_err)?
             .build()
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         Ok(Self(Mutex::new(engine)))

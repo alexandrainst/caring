@@ -119,7 +119,7 @@ fn caring(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // pyo3_log::init();
 
     // TODO: disable this
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::from_default_env();
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
