@@ -5,15 +5,15 @@ engine = Engine(
     address="localhost:1235",
     peers=["localhost:1234"],
     threshold=1,
-    preprocessed="./context2.bin"
+    preprocessed_path="./context2.bin"
 )
 
-[a, b]  = Expr.symmetric_share([7, 2.123456789], id=engine.id(), size=2)
+[a, b]  = Expr.symmetric_share([7, 2], id=engine.id(), size=2)
 
-c = a + b;
+c = a * b;
 
 script = c.open()
 
-res = engine.execute(script).as_float()
+res = engine.execute(script).as_int()
 
 print(res)

@@ -14,7 +14,7 @@ fn precompute(n: usize) -> (File, File) {
     let ctx1 = tempfile::tempfile().unwrap();
     let ctx2 = tempfile::tempfile().unwrap();
     let mut files = [ctx1, ctx2];
-    do_preproc(&mut files, &[n, n], false);
+    do_preproc(&mut files, &[n, n], 0, false).unwrap();
     let [mut ctx1, mut ctx2] = files;
     ctx1.rewind().unwrap();
     ctx2.rewind().unwrap();
@@ -23,7 +23,7 @@ fn precompute(n: usize) -> (File, File) {
 }
 
 fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
-    let (mut ctx1, mut ctx2) = precompute(10000000);
+    let (ctx1, ctx2) = precompute(10000000);
     let clock = time::Instant::now();
     print!("Setting up engines...");
     let _ = std::io::stdout().flush();
@@ -39,6 +39,7 @@ fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
                 .connect_blocking()
                 .unwrap()
                 .build()
+                .unwrap()
         });
         let e1 = scope.spawn(|| {
             thread::sleep(Duration::from_millis(200));
@@ -52,6 +53,7 @@ fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
                 .connect_blocking()
                 .unwrap()
                 .build()
+                .unwrap()
         });
         (e1.join().unwrap(), e2.join().unwrap())
     });

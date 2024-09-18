@@ -13,13 +13,7 @@ use bincode;
 use ff::PrimeField;
 use rand::{Rng, SeedableRng};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    error::Error,
-    fmt,
-    fs::File,
-    io::{self, Write},
-    path::Path,
-};
+use std::{error::Error, fmt, fs::File, io::Write, path::Path};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PreProcError {
@@ -235,18 +229,18 @@ pub fn write_context<F: PrimeField + Serialize + DeserializeOwned>(
 
 pub fn load_context<F: PrimeField + Serialize + DeserializeOwned>(
     file: &mut File,
-) -> SpdzContext<F> {
+) -> Result<SpdzContext<F>, bincode::Error> {
     // TODO: return Result instead.
     let buffered = std::io::BufReader::new(file);
-    bincode::deserialize_from(buffered).unwrap()
+    bincode::deserialize_from(buffered)
 }
 
 pub async fn load_context_async<F: PrimeField + Serialize + DeserializeOwned>(
     file: &Path,
-) -> SpdzContext<F> {
+) -> Result<SpdzContext<F>, bincode::Error> {
     let contents = tokio::fs::read(file).await.unwrap();
     // TODO: return Result instead.
-    bincode::deserialize_from(&*contents).unwrap()
+    bincode::deserialize_from(&*contents)
 }
 
 fn dealer_preshares<F: PrimeField>(
@@ -392,8 +386,8 @@ impl<F: PrimeField + Serialize + DeserializeOwned> SpdzContext<F> {
         generate_empty_context(number_of_parties, mac_key_share, who_am_i)
     }
 
-    pub fn from_file(mut file: File) -> Result<Self, io::Error> {
-        Ok(load_context(&mut file))
+    pub fn from_file(mut file: File) -> Result<Self, bincode::Error> {
+        load_context(&mut file)
     }
 }
 

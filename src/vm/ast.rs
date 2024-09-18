@@ -48,7 +48,7 @@ pub enum BinOp {
     Mul,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Ast {
     // Consider a constant pool?
     expressions: Vec<Expression>,

@@ -66,14 +66,31 @@ fn feldman(threshold: u32, my_addr: &str, others: &Bound<'_, PyTuple>) -> PyResu
 
 /// Calculate and save the preprocessing
 #[pyfunction]
-#[pyo3(signature = (number_of_shares, *paths_to_pre))]
-fn preproc(number_of_shares: usize, paths_to_pre: &Bound<'_, PyTuple>) {
+#[pyo3(signature = (num_shares, num_triplets, *paths_to_pre, scheme="spdz-25519"))]
+fn preproc(
+    num_shares: usize,
+    num_triplets: usize,
+    paths_to_pre: &Bound<'_, PyTuple>,
+    scheme: &str,
+) -> PyResult<()> {
     let mut files: Vec<File> = paths_to_pre
         .iter()
-        .map(|x| x.extract::<String>().unwrap())
-        .map(|p| File::create(p).unwrap())
-        .collect();
-    do_preproc(&mut files, &[number_of_shares, number_of_shares], false);
+        .map(|x| {
+            x.extract::<String>()
+                .and_then(|name| File::create(name).map_err(|e| e.into()))
+        })
+        .collect::<PyResult<_>>()?;
+
+    match scheme {
+        "spdz-25519" => do_preproc(&mut files, &[num_shares, num_shares], num_triplets, false),
+        "spdz-32" => do_preproc(&mut files, &[num_shares, num_shares], num_triplets, true),
+        _ => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Invalid scheme: '{scheme}'"
+            )));
+        }
+    }
+    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
 #[pymethods]
@@ -98,6 +115,14 @@ impl OldEngine {
 /// A Python module implemented in Rust.
 #[pymodule]
 fn caring(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // TODO: enable this
+    // pyo3_log::init();
+
+    // TODO: disable this
+    use tracing_subscriber::{fmt, EnvFilter};
+    let filter = EnvFilter::from_default_env();
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+
     m.add_function(wrap_pyfunction!(spdz, m)?)?;
     m.add_function(wrap_pyfunction!(shamir, m)?)?;
     m.add_function(wrap_pyfunction!(feldman, m)?)?;
