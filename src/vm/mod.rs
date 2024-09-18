@@ -1,18 +1,19 @@
 mod ast;
 pub mod parsing;
 
-use std::{collections::BTreeMap, error::Error};
+use std::{collections::BTreeMap, error::Error, fmt::Display};
 
-use ff::Field;
+use ff::{Field, PrimeField};
 use itertools::{Either, Itertools};
 use rand::RngCore;
+use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
 use crate::{
     algebra::{math::Vector, Length},
     net::{agency::Broadcast, connection::TcpConnection, network::Network, Id, SplitChannel},
     protocols::beaver::{beaver_multiply, beaver_multiply_vector, BeaverTriple},
-    schemes::interactive::InteractiveSharedMany,
+    schemes::{interactive::InteractiveSharedMany, spdz},
 };
 
 #[derive(Debug, Clone)]
@@ -104,6 +105,23 @@ pub enum Instruction {
     Sum(usize),
 }
 
+impl Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Instruction::Share(const_ref) => write!(f, "share ${const_ref:?}"),
+            Instruction::SymShare(const_ref) => write!(f, "symshare ${const_ref:?}"),
+            Instruction::MulCon(const_ref) => write!(f, "mul ${const_ref:?}"),
+            Instruction::Recv(id) => write!(f, "recv #{id:?}"),
+            Instruction::RecvVec(id) => write!(f, "recv_vec #{id:?}"),
+            Instruction::Recombine => write!(f, "open"),
+            Instruction::Add => write!(f, "add"),
+            Instruction::Sub => write!(f, "add"),
+            Instruction::Mul => write!(f, "add"),
+            Instruction::Sum(n) => write!(f, "sum {n}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 enum SharedValue<S: InteractiveSharedMany> {
     Single(S),
@@ -115,9 +133,21 @@ pub struct Script<F> {
     instructions: Vec<Instruction>,
 }
 
+impl<F> Display for Script<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let n = self.constants.len();
+        writeln!(f, "Constant Pool Sized {n}")?;
+        writeln!(f, "Program:")?;
+        for inst in &self.instructions {
+            writeln!(f, "\t{inst}")?;
+        }
+        Ok(())
+    }
+}
+
 impl<F> Script<F> {
     pub fn mults(&self, parties: usize) -> usize {
-        self.mults_and_shared(parties)
+        self.count_mult_shared(parties)
             .0
             .into_iter()
             .map(|(size, amount)| size * amount)
@@ -125,14 +155,15 @@ impl<F> Script<F> {
     }
 
     pub fn shared(&self, parties: usize) -> usize {
-        self.mults_and_shared(parties).1
+        self.count_mult_shared(parties).1
     }
 
     fn get_constant(&self, addr: ConstRef) -> &Value<F> {
         self.constants.get(addr.0 as usize).unwrap()
     }
 
-    fn mults_and_shared(&self, parties: usize) -> (BTreeMap<usize, usize>, usize) {
+    /// Provide the number of multiplications (per vector size) and shares
+    fn count_mult_shared(&self, parties: usize) -> (BTreeMap<usize, usize>, usize) {
         let mut mults = BTreeMap::new();
         let mut shared = 0;
         let mut stack = Vec::new();
@@ -320,21 +351,30 @@ where
 }
 
 #[derive(Debug, Error)]
-#[error("Error during Execution: {reason}")]
+#[error("Error during Execution: {reason} - at instruction {line}")]
 pub struct ExecutionError {
-    #[from]
-    reason: Box<dyn Error + Send + 'static>,
+    // We currently do not want to virally propagate all of S::Error everywhere.
+    // In the future, we might neuter S::Error along with the associated error types in
+    // `caring::net`.
+    reason: Box<dyn Error>,
+    line: usize,
 }
 
-impl ExecutionError {
-    pub fn new<E>(error: E) -> Self
-    where
-        E: Error + Send + 'static,
-    {
-        Self {
-            reason: Box::new(error),
-        }
-    }
+#[derive(Debug, Error)]
+enum RuntimeError<E: Error> {
+    // Allow to easily wrap the Shared::Error
+    #[error(transparent)]
+    Base(#[from] E),
+
+    #[error("No elemented left on stack")]
+    EmptyStack(),
+
+    #[error("No result on result-stack")]
+    NoResult(),
+
+    // Might detail this more out.
+    #[error("Out of Fuel (Mults): {need} needed, had {in_reserve}")]
+    MissingFuel { need: usize, in_reserve: usize }, // Might add more here, such as communications errors et al.
 }
 
 impl<C, S, R, F> Engine<C, S, R>
@@ -375,18 +415,29 @@ where
         let n = script.instructions.len();
         let m = constants.len();
         let i = self.network.id();
-        tracing::info!("Starting execution of {n} instructions with {m} contants as player {i}");
+        let f = self.fueltank.mult_triples.len();
+        tracing::info!(
+            "Starting execution of {n} instructions with {m} contants as player {i} with {f} fuel"
+        );
 
-        for opcode in script.instructions.iter() {
+        for (i, opcode) in script.instructions.iter().enumerate() {
             tracing::trace!("Executing opcode: {opcode:?}");
             self.step(&mut stack, &mut results, constants, opcode)
                 .await
-                .map_err(ExecutionError::new)?;
+                .map_err(|e| ExecutionError {
+                    reason: Box::new(e),
+                    line: i,
+                })?;
         }
 
-        // TODO: Handle missing output.
-        // Handle multiple outputs
-        Ok(results.pop().unwrap())
+        // TODO: Handle multiple outputs
+        results.pop().ok_or_else(|| {
+            let reason = Box::new(RuntimeError::<S::Error>::NoResult()).into();
+            ExecutionError {
+                reason,
+                line: script.instructions.len() + 1,
+            }
+        })
     }
 
     async fn step(
@@ -395,13 +446,20 @@ where
         results: &mut Vec<Value<F>>,
         constants: &[Value<F>],
         opcode: &Instruction,
-    ) -> Result<(), S::Error> {
+    ) -> Result<(), RuntimeError<S::Error>> {
         let ctx = &mut self.context;
         let mut coms = &mut self.network;
         let mut rng = &mut self.rng;
         let fueltank = &mut self.fueltank;
         let get_constant = |addr: &ConstRef| &constants[addr.0 as usize];
 
+        // NOTE: Currently the engine is implemented with allowing mixing scalar and multiple
+        // arbitrary vector (sizes). While convenient, this allows for runtime errors as
+        // the operations between these different types is currently unspecified,
+        // resulting in a panic. One should consider if we should have multiple different engines,
+        // for each type, multiple stacks (for each type) or accept the current design.
+        // The program itself can be validated beforehand, as all input sizes are known,
+        // with exception of SymShare, which is evil anyway.
         match opcode {
             Instruction::Share(addr) => {
                 let f = get_constant(addr);
@@ -486,21 +544,34 @@ where
                 let y = stack.pop();
                 match (x, y) {
                     (SharedValue::Single(x), SharedValue::Single(y)) => {
-                        let triple = fueltank.single_mult().unwrap();
+                        let triple =
+                            fueltank
+                                .single_mult()
+                                .ok_or_else(|| RuntimeError::MissingFuel {
+                                    need: 1,
+                                    in_reserve: self.fueltank.mult_triples.len(),
+                                })?;
                         let z = beaver_multiply(ctx, x, y, triple, &mut coms).await?;
                         stack.push_single(z)
                     }
                     (SharedValue::Vector(x), SharedValue::Vector(y)) => {
                         let size = x.len();
-                        let triple = fueltank.vector_mult(size).unwrap();
+                        let triple = fueltank.vector_mult(size).ok_or_else(|| {
+                            RuntimeError::MissingFuel {
+                                need: size,
+                                in_reserve: self.fueltank.mult_triples.len(),
+                            }
+                        })?;
                         let z: S::VectorShare =
                             beaver_multiply_vector::<F, S>(ctx, &x, &y, triple, &mut coms).await?;
                         stack.push_vector(z);
                     }
                     (SharedValue::Vector(_), SharedValue::Single(_y)) => {
-                        todo!()
+                        todo!("Allow for vector x scalar multiplication")
                     }
-                    (SharedValue::Single(_), SharedValue::Vector(_)) => todo!(),
+                    (SharedValue::Single(_), SharedValue::Vector(_)) => {
+                        todo!("Allow for vector x scalar multiplication")
+                    }
                 };
             }
             Instruction::Sum(size) => {
@@ -535,7 +606,24 @@ where
     }
 }
 
+impl<C, F, R> Engine<C, spdz::Share<F>, R>
+where
+    C: SplitChannel,
+    F: PrimeField + Serialize + DeserializeOwned,
+{
+    pub fn load_context(&mut self) {
+        let ctx = &mut self.context;
+        self.fueltank
+            .mult_triples
+            .append(&mut ctx.preprocessed.triplets.multiplication_triplets);
+
+        let fuel = self.fueltank.mult_triples.len();
+        tracing::info!("Loading {fuel} fuel from context");
+    }
+}
+
 impl<S: InteractiveSharedMany, R> Engine<TcpConnection, S, R> {
+    /// Gracefull shutdown the internal network
     pub async fn shutdown(self) -> Result<(), std::io::Error> {
         self.network.shutdown().await
     }

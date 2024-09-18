@@ -19,6 +19,7 @@ fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
                 .connect_blocking()
                 .unwrap()
                 .build()
+                .unwrap()
         });
         let e1 = scope.spawn(|| {
             thread::sleep(Duration::from_millis(200));
@@ -31,6 +32,7 @@ fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
                 .connect_blocking()
                 .unwrap()
                 .build()
+                .unwrap()
         });
         (e1.join().unwrap(), e2.join().unwrap())
     });

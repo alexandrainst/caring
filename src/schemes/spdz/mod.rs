@@ -1766,8 +1766,8 @@ mod test {
         .unwrap();
         files[0].rewind().unwrap();
         files[1].rewind().unwrap();
-        let p1_context: SpdzContext<F> = preprocessing::load_context(&mut files[0]);
-        let p2_context: SpdzContext<F> = preprocessing::load_context(&mut files[1]);
+        let p1_context: SpdzContext<F> = preprocessing::load_context(&mut files[0]).unwrap();
+        let p2_context: SpdzContext<F> = preprocessing::load_context(&mut files[1]).unwrap();
         // unpacking
         let p1_params = p1_context.params;
         let p2_params = p2_context.params;

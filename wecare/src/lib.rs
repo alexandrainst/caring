@@ -13,7 +13,7 @@ use caring::{
 use curve25519_dalek::RistrettoPoint;
 use fixed::FixedI32;
 use rand::{thread_rng, SeedableRng};
-use std::{fs::File, net::SocketAddr, time::Duration};
+use std::{error::Error, fs::File, net::SocketAddr, time::Duration};
 use tokio::runtime::Runtime;
 
 pub trait Mapping {
@@ -125,32 +125,37 @@ pub type SpdzEngine32 = AdderEngine<spdz::Share<S32>>;
 pub type ShamirEngine32 = AdderEngine<shamir::Share<S32>>;
 
 #[derive(Debug)]
-pub struct MpcError(pub &'static str);
+pub struct MpcError(pub String);
 
 impl std::fmt::Display for MpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let msg = self.0;
+        let msg = &self.0;
         write!(f, "Bad thing happened: {msg}")
     }
 }
 
 impl std::error::Error for MpcError {}
 
-pub fn do_preproc(files: &mut [File], number_of_shares: &[usize], use_32: bool) {
-    assert_eq!(files.len(), number_of_shares.len());
-    let number_of_triplets = 0;
+pub fn do_preproc(
+    files: &mut [File],
+    num_preshares: &[usize],
+    num_triplets: usize,
+    use_32: bool,
+) -> Result<(), Box<dyn Error>> {
+    assert_eq!(files.len(), num_preshares.len());
     if use_32 {
         let num = S32::from_f64(0.0);
-        preprocessing::write_context(files, number_of_shares, number_of_triplets, num).unwrap();
+        preprocessing::write_context(files, num_preshares, num_triplets, num)
     } else {
         let num = S25519::from_f64(0.0);
-        preprocessing::write_context(files, number_of_shares, number_of_triplets, num).unwrap();
+        preprocessing::write_context(files, num_preshares, num_triplets, num)
     }
 }
 
 pub type Engine = generic::AdderEngine;
 
 mod generic {
+
     use super::*;
 
     pub enum AdderEngine {
@@ -174,14 +179,16 @@ mod generic {
             let (mut network, runtime) = self.connect_network()?;
             let file = self
                 .preprocessed
-                .ok_or(MpcError("No proccesing file found"))?;
+                .ok_or(MpcError("No proccesing file found".to_string()))?;
             if self.use_32bit_field {
-                let context = preprocessing::load_context(file);
+                let context =
+                    preprocessing::load_context(file).map_err(|e| MpcError(e.to_string()))?;
                 network.set_id(context.params.who_am_i);
                 let engine = SpdzEngine32::new(network, runtime, context);
                 Ok(AdderEngine::Spdz32(engine))
             } else {
-                let context = preprocessing::load_context(file);
+                let context =
+                    preprocessing::load_context(file).map_err(|e| MpcError(e.to_string()))?;
                 network.set_id(context.params.who_am_i);
                 let engine = SpdzEngine::new(network, runtime, context);
                 Ok(AdderEngine::Spdz(engine))
@@ -189,7 +196,9 @@ mod generic {
         }
 
         pub fn build_shamir(self) -> Result<AdderEngine, MpcError> {
-            let threshold = self.threshold.ok_or(MpcError("No threshold found"))?;
+            let threshold = self
+                .threshold
+                .ok_or_else(|| MpcError("No threshold found".to_owned()))?;
             let (network, runtime) = self.connect_network()?;
             if self.use_32bit_field {
                 let ids = network
@@ -211,7 +220,9 @@ mod generic {
         }
 
         pub fn build_feldman(self) -> Result<AdderEngine, MpcError> {
-            let threshold = self.threshold.ok_or(MpcError("No threshold found"))?;
+            let threshold = self
+                .threshold
+                .ok_or_else(|| MpcError("No threshold found".to_string()))?;
             let (network, runtime) = self.connect_network()?;
             let ids = network
                 .participants()
@@ -234,7 +245,7 @@ mod generic {
             let network = TcpNetwork::connect(my_addr, &others);
             let network = runtime
                 .block_on(network)
-                .map_err(|_| MpcError("Failed to setup network"))?;
+                .map_err(|e| MpcError(format!("Failed to setup network: {e}")))?;
 
             Ok((network, runtime))
         }
@@ -359,7 +370,7 @@ mod test {
         let ctx1 = tempfile::tempfile().unwrap();
         let ctx2 = tempfile::tempfile().unwrap();
         let mut files = [ctx1, ctx2];
-        do_preproc(&mut files, &[1, 1], false);
+        do_preproc(&mut files, &[1, 1], 0, false).unwrap();
         let [mut ctx1, mut ctx2] = files;
         ctx1.rewind().unwrap();
         ctx2.rewind().unwrap();
@@ -407,7 +418,7 @@ mod test {
         let ctx1 = tempfile::tempfile().unwrap();
         let ctx2 = tempfile::tempfile().unwrap();
         let mut files = [ctx1, ctx2];
-        do_preproc(&mut files, &[2, 2], false);
+        do_preproc(&mut files, &[2, 2], 0, false).unwrap();
         let [mut ctx1, mut ctx2] = files;
         ctx1.rewind().unwrap();
         ctx2.rewind().unwrap();

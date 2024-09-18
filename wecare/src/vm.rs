@@ -1,4 +1,5 @@
 use std::{
+    error::Error,
     fs::File,
     net::{SocketAddr, ToSocketAddrs},
 };
@@ -331,7 +332,7 @@ impl EngineBuilder {
         Ok(self)
     }
 
-    pub fn build(self) -> Engine {
+    pub fn build(self) -> Result<Engine, Box<dyn Error>> {
         let mut network = self.network.expect("No network installed!");
         let party_count = network.size();
         let scheme = self.scheme.unwrap_or(SchemeKind::Shamir);
@@ -339,7 +340,7 @@ impl EngineBuilder {
         let field = self.field.unwrap_or(FieldKind::Curve25519);
         let rng = rand::rngs::StdRng::from_entropy();
 
-        match (scheme, field) {
+        let engine = match (scheme, field) {
             (SchemeKind::Shamir, FieldKind::Curve25519) => {
                 let ids = network
                     .participants()
@@ -358,15 +359,19 @@ impl EngineBuilder {
             }
             (SchemeKind::Spdz, FieldKind::Curve25519) => {
                 let mut file = self.preprocesing.expect("Missing preproc!");
-                let context = spdz::preprocessing::load_context(&mut file);
-                network.set_id(context.params.who_am_i);
-                Engine::Spdz25519(vm::Engine::new(context, network, rng))
+                let ctx = spdz::preprocessing::load_context(&mut file)?;
+                network.set_id(ctx.params.who_am_i);
+                let mut engine = vm::Engine::new(ctx, network, rng);
+                engine.load_context();
+                Engine::Spdz25519(engine)
             }
             (SchemeKind::Spdz, FieldKind::Element32) => {
                 let mut file = self.preprocesing.expect("Missing preproc!");
-                let context = spdz::preprocessing::load_context(&mut file);
+                let context = spdz::preprocessing::load_context(&mut file)?;
                 network.set_id(context.params.who_am_i);
-                Engine::Spdz32(vm::Engine::new(context, network, rng))
+                let mut engine = vm::Engine::new(context, network, rng);
+                engine.load_context();
+                Engine::Spdz32(engine)
             }
             (SchemeKind::Feldman, FieldKind::Curve25519) => {
                 let ids = network
@@ -379,11 +384,14 @@ impl EngineBuilder {
             (SchemeKind::Feldman, FieldKind::Element32) => {
                 panic!("Can't construct feldman from this field element. Missing group!")
             }
-        }
+        };
+        Ok(engine)
     }
 }
 
 pub mod blocking {
+    use std::error::Error;
+
     use caring::{
         net::Id,
         vm::{ExecutionError, Value},
@@ -433,12 +441,12 @@ pub mod blocking {
             Ok(self)
         }
 
-        pub fn build(self) -> Engine {
-            let parent = self.parent.build();
-            Engine {
+        pub fn build(self) -> Result<Engine, Box<dyn Error>> {
+            let parent = self.parent.build()?;
+            Ok(Engine {
                 runtime: self.runtime,
                 parent,
-            }
+            })
         }
     }
 
@@ -486,6 +494,7 @@ mod test {
                 .connect_blocking()
                 .unwrap()
                 .build()
+                .unwrap()
         }
         let addrs = ["127.0.0.1:3235", "127.0.0.1:3236", "127.0.0.1:3237"];
         let res = thread::scope(|scope| {

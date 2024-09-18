@@ -20,7 +20,7 @@ b_1, b_2 = np.array_split(b, 2)
 
 # Processing (only for spdz)
 print("Preprocessing...")
-caring.preproc(100000, "./ctx1.bin", "./ctx2.bin")
+caring.preproc(100000, 0, "./ctx1.bin", "./ctx2.bin")
 
 
 print("Running...")

@@ -18,7 +18,7 @@ impl Computed {
     }
 
     /// Parse the computed result as an integer
-    fn as_integer(&self) -> Vec<u64> {
+    fn as_int(&self) -> Vec<u64> {
         self.0.clone().map(|s| s.to_u64()).to_vec()
     }
 }
@@ -34,14 +34,14 @@ impl Engine {
     /// * `threshold`: (optional) threshold if using a threshold scheme
     /// * `preprocessed`: (optional) path to preprocessed material
     #[new]
-    #[pyo3(signature = (scheme, address, peers, multithreaded=false, threshold=None, preprocessed=None))]
+    #[pyo3(signature = (scheme, address, peers, multithreaded=false, threshold=None, preprocessed_path=None))]
     fn new(
         scheme: &str,
         address: &str,
         peers: &Bound<'_, PyList>,
         multithreaded: bool,
         threshold: Option<u64>,
-        preprocessed: Option<&str>,
+        preprocessed_path: Option<&str>,
     ) -> PyResult<Self> {
         let peers = peers.iter().map(|x| x.extract::<String>().unwrap().clone());
 
@@ -61,7 +61,7 @@ impl Engine {
             .field(field);
 
         let builder = builder.threshold(threshold.unwrap_or_default());
-        let builder = match preprocessed {
+        let builder = match preprocessed_path {
             Some(path) => {
                 let file = std::fs::File::open(path)?;
                 builder.preprocessed(file)
@@ -75,8 +75,11 @@ impl Engine {
             builder.single_threaded_runtime()
         };
 
-        let builder = builder.connect_blocking().unwrap();
-        let engine = builder.build();
+        let engine = builder
+            .connect_blocking()
+            .map_err(|e| pyo3::exceptions::PyBrokenPipeError::new_err(e))?
+            .build()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         Ok(Self(Mutex::new(engine)))
     }
 
