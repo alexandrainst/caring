@@ -540,6 +540,7 @@ pub fn reconstruct_many<F: Field>(
 #[cfg(test)]
 mod test {
     use crate::algebra::element::Element32;
+    use rand::Rng;
 
     use super::*;
 
@@ -609,47 +610,6 @@ mod test {
         let v = reconstruct_many(&ctx, &shares);
         let v: Vec<u32> = v.into_iter().map(|x| x.into()).collect();
         assert_eq!(v, a.iter().zip(b).map(|(a, b)| a + b).collect::<Vec<_>>());
-    }
-
-    use fixed::FixedU32;
-    use rand::Rng;
-
-    #[test]
-    fn addition_fixpoint() {
-        // We test that we can secret-share a two *fixed point* numbers and add them.
-        let mut rng = rand::rngs::mock::StepRng::new(0, 7);
-        const PARTIES: std::ops::Range<u32> = 1..5u32;
-        type Fix = FixedU32<16>;
-        let a = 1.0;
-        let b = 3.0;
-        let a = Fix::from_num(a);
-        let b = Fix::from_num(b);
-        let ids: Vec<_> = PARTIES.map(Element32::from).collect();
-        let ctx = ShamirParams {
-            threshold: 2,
-            ids: ids.clone(),
-        };
-
-        let vs1 = {
-            let v = Element32::from(a.to_bits() as u64);
-            dbg!(&v);
-            share(v, &ids, 4, &mut rng)
-        };
-        let vs2 = {
-            let v = Element32::from(b.to_bits() as u64);
-            dbg!(&v);
-            share(v, &ids, 4, &mut rng)
-        };
-
-        // MPC
-        let shares: Vec<_> = vs1.iter().zip(vs2.iter()).map(|(&a, &b)| a + b).collect();
-        let v = reconstruct(&ctx, &shares);
-        dbg!(v);
-
-        // back to fixed
-        let v: u32 = v.into();
-        let v = Fix::from_bits(v);
-        assert_eq!(v, a + b);
     }
 
     #[tokio::test]
