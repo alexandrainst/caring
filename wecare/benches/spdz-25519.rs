@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::time;
 use std::{fs::File, hint::black_box, io::Seek, thread};
 use std::{io::Write, time::Duration};
@@ -63,70 +63,26 @@ fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
 
 fn criterion_benchmark(c: &mut Criterion) {
     let (mut e1, mut e2) = build_spdz_engines();
-    c.bench_function("spdz-25519 single", |b| {
-        let input1 = vec![7.0];
-        let input2 = vec![3.0];
-        b.iter(|| {
-            thread::scope(|scope| {
-                let t1 = scope.spawn(|| {
-                    black_box(e1.sum(&input1));
+    let mut group = c.benchmark_group("spdz-25519");
+    for n in [1, 8, 16, 32, 64, 128] {
+        group.bench_function(BenchmarkId::from_parameter(n), |b| {
+            let input1 = vec![7.0; n];
+            let input2 = vec![3.0; n];
+            b.iter(|| {
+                thread::scope(|scope| {
+                    let t1 = scope.spawn(|| {
+                        black_box(e1.sum(&input1));
+                    });
+                    let t2 = scope.spawn(|| {
+                        black_box(e2.sum(&input2));
+                    });
+                    t1.join().unwrap();
+                    t2.join().unwrap();
                 });
-                let t2 = scope.spawn(|| {
-                    black_box(e2.sum(&input2));
-                });
-                t1.join().unwrap();
-                t2.join().unwrap();
-            });
+            })
         });
-    });
-    c.bench_function("spdz-25519 vec32", |b| {
-        let input1 = vec![7.0; 32];
-        let input2 = vec![3.0; 32];
-        b.iter(|| {
-            thread::scope(|scope| {
-                let t1 = scope.spawn(|| {
-                    black_box(e1.sum(&input1));
-                });
-                let t2 = scope.spawn(|| {
-                    black_box(e2.sum(&input2));
-                });
-                t1.join().unwrap();
-                t2.join().unwrap();
-            });
-        });
-    });
-    c.bench_function("spdz-25519 vec64", |b| {
-        let input1 = vec![7.0; 64];
-        let input2 = vec![3.0; 64];
-        b.iter(|| {
-            thread::scope(|scope| {
-                let t1 = scope.spawn(|| {
-                    black_box(e1.sum(&input1));
-                });
-                let t2 = scope.spawn(|| {
-                    black_box(e2.sum(&input2));
-                });
-                t1.join().unwrap();
-                t2.join().unwrap();
-            });
-        });
-    });
-    c.bench_function("spdz-25519 vec128", |b| {
-        let input1 = vec![7.0; 128];
-        let input2 = vec![3.0; 128];
-        b.iter(|| {
-            thread::scope(|scope| {
-                let t1 = scope.spawn(|| {
-                    black_box(e1.sum(&input1));
-                });
-                let t2 = scope.spawn(|| {
-                    black_box(e2.sum(&input2));
-                });
-                t1.join().unwrap();
-                t2.join().unwrap();
-            });
-        });
-    });
+    }
+
     let _ = e1.shutdown();
     let _ = e2.shutdown();
 }
