@@ -23,7 +23,7 @@ fn precompute(n: usize) -> (File, File) {
 }
 
 fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
-    let (ctx1, ctx2) = precompute(10000000);
+    let (ctx1, mut ctx2) = precompute(10000000);
     let clock = time::Instant::now();
     print!("Setting up engines...");
     let _ = std::io::stdout().flush();
@@ -63,7 +63,7 @@ fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
 
 fn criterion_benchmark(c: &mut Criterion) {
     let (mut e1, mut e2) = build_spdz_engines();
-    c.bench_function("spdz single", |b| {
+    c.bench_function("spdz-25519 single", |b| {
         let input1 = vec![7.0];
         let input2 = vec![3.0];
         b.iter(|| {
@@ -79,7 +79,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             });
         });
     });
-    c.bench_function("spdz vec32", |b| {
+    c.bench_function("spdz-25519 vec32", |b| {
         let input1 = vec![7.0; 32];
         let input2 = vec![3.0; 32];
         b.iter(|| {
@@ -95,7 +95,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             });
         });
     });
-    c.bench_function("spdz vec64", |b| {
+    c.bench_function("spdz-25519 vec64", |b| {
         let input1 = vec![7.0; 64];
         let input2 = vec![3.0; 64];
         b.iter(|| {
@@ -111,7 +111,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             });
         });
     });
-    c.bench_function("spdz vec128", |b| {
+    c.bench_function("spdz-25519 vec128", |b| {
         let input1 = vec![7.0; 128];
         let input2 = vec![3.0; 128];
         b.iter(|| {

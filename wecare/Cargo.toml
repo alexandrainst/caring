@@ -28,3 +28,17 @@ harness = false
 [[bench]]
 name = "shamir-25519"
 harness = false
+
+[[bench]]
+name = "feldman-25519"
+harness = false
+
+[[bench]]
+name = "spdz-32"
+harness = false
+
+[[bench]]
+name = "shamir-32"
+harness = false
+
+

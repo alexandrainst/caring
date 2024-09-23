@@ -14,7 +14,7 @@ fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
                 .address("127.0.0.1:1234")
                 .participant("127.0.0.1:1235")
                 .scheme(SchemeKind::Shamir)
-                .field(FieldKind::Curve25519)
+                .field(FieldKind::Element32)
                 .single_threaded_runtime()
                 .connect_blocking()
                 .unwrap()
@@ -27,7 +27,7 @@ fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
                 .address("127.0.0.1:1235")
                 .participant("127.0.0.1:1234")
                 .scheme(SchemeKind::Shamir)
-                .field(FieldKind::Curve25519)
+                .field(FieldKind::Element32)
                 .single_threaded_runtime()
                 .connect_blocking()
                 .unwrap()
@@ -42,7 +42,7 @@ fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
 
 fn criterion_benchmark(c: &mut Criterion) {
     let (mut e1, mut e2) = build_shamir_engines();
-    c.bench_function("shamir-25519 single", |b| {
+    c.bench_function("shamir-32 single", |b| {
         let input1 = vec![7.0];
         let input2 = vec![3.0];
         b.iter(|| {
@@ -58,7 +58,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             });
         });
     });
-    c.bench_function("shamir-25519 vec32", |b| {
+    c.bench_function("shamir-32 vec32", |b| {
         let input1 = vec![7.0; 32];
         let input2 = vec![3.0; 32];
         b.iter(|| {
@@ -74,7 +74,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             });
         });
     });
-    c.bench_function("shamir-25519 vec64", |b| {
+    c.bench_function("shamir-32 vec64", |b| {
         let input1 = vec![7.0; 64];
         let input2 = vec![3.0; 64];
         b.iter(|| {
@@ -90,7 +90,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             });
         });
     });
-    c.bench_function("shamir-25519 vec128", |b| {
+    c.bench_function("shamir-32 vec128", |b| {
         let input1 = vec![7.0; 128];
         let input2 = vec![3.0; 128];
         b.iter(|| {
