@@ -61,6 +61,7 @@ pub fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
     (e1, e2)
 }
 
+#[allow(unused)]
 fn criterion_benchmark(c: &mut Criterion) {
     let (mut e1, mut e2) = build_spdz_engines();
     let mut group = c.benchmark_group("spdz-25519");
