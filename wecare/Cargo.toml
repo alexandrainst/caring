@@ -22,6 +22,10 @@ criterion = "0.5.1"
 tempfile = "3.10.1"
 
 [[bench]]
+name = "all"
+harness = false
+
+[[bench]]
 name = "spdz-25519"
 harness = false
 

@@ -22,7 +22,7 @@ fn precompute(n: usize) -> (File, File) {
     (ctx1, ctx2)
 }
 
-fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
+pub fn build_spdz_engines() -> (blocking::Engine, blocking::Engine) {
     let (ctx1, mut ctx2) = precompute(10000000);
     let clock = time::Instant::now();
     print!("Setting up engines...");

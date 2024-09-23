@@ -4,7 +4,7 @@ use std::{io::Write, time::Duration};
 use wecare::vm::{blocking, FieldKind};
 use wecare::{vm::Engine, vm::SchemeKind};
 
-fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
+pub fn build_shamir_engines() -> (blocking::Engine, blocking::Engine) {
     let clock = std::time::Instant::now();
     print!("Setting up engines...");
     let _ = std::io::stdout().flush();
