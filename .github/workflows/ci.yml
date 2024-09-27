@@ -4,16 +4,6 @@ on:
   pull_request:
 
 jobs:
-  test:
-    name: cargo test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install C compiler
-        run: sudo apt-get update && sudo apt-get install -y build-essential
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - run: cargo test
-
   # Check formatting with rustfmt
   formatting:
     name: cargo fmt
@@ -26,3 +16,26 @@ jobs:
           components: rustfmt
       - name: Rustfmt Check
         uses: actions-rust-lang/rustfmt@v1
+
+  build:
+    name: cargo build
+    needs: formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install C compiler
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo build
+
+  test:
+    name: cargo test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install C compiler
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo test
+
