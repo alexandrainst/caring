@@ -34,7 +34,7 @@ def lasso_ADMM(engine: caring.Engine, A, b, max_iter=100, lam=1.):
         n = len(u)
         u_and_theta = u.tolist()
         u_and_theta.extend(theta)
-        u_and_theta : list[float] = engine.sum_many(u_and_theta)
+        u_and_theta : list[float] = engine.sum(u_and_theta)
         time_mpc_sum +=  (time.time() - t0)
         u = np.array(u_and_theta[:n]) / 2.
         theta = np.array(u_and_theta[n:]) / 2.

@@ -149,6 +149,14 @@ class Engine:
         """
 
 
+    def sum(self, a: float | list[float]) -> float:
+        """
+            Performs a summation with the connected parties.
+            Returns the sum of all the numbers.
+            :param a: number to summate with
+        """
+
+
 """
     Preprocess mult. triples and preshares
 

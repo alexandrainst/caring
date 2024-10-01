@@ -1,7 +1,7 @@
 use std::{future::Future, ops::DerefMut, sync::Mutex, time::Duration};
 
 use crate::expr::{Id, Opened};
-use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
+use pyo3::{exceptions::{PyTypeError, PyValueError}, prelude::*, types::PyList};
 use wecare::vm;
 
 #[pyclass(frozen)]
@@ -115,6 +115,29 @@ impl Engine {
     fn id(&self) -> Id {
         Id(self.0.lock().unwrap().engine.id())
     }
+
+
+    /// Sum
+    fn sum(&self, py: Python<'_>, num: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
+        let mut this = self.0.lock().expect("Lock poisoned");
+        let EngineInner { engine, runtime } = this.deref_mut();
+        if let Ok(num) = num.extract::<f64>() {
+            runtime.block_on(check_signals(py, async {
+                engine
+                    .sum(&[num])
+                    .await
+            }))
+        } else if let Ok(nums) = num.extract::<Vec<f64>>() {
+            runtime.block_on(check_signals(py, async {
+                engine
+                    .sum(&nums)
+                    .await
+            }))
+        } else {
+            Err(PyTypeError::new_err("num is not a number"))
+        }
+    }
+
 
     /// Your own Id
     fn peers(&self) -> Vec<Id> {

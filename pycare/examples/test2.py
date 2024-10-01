@@ -1,11 +1,16 @@
-import caring
-# engine = caring.spdz("./context2.bin", "127.0.0.1:1235", "127.0.0.1:1234")
-engine = caring.shamir(2, "127.0.0.1:1235", "127.0.0.1:1234")
+from caring import Engine
+
+engine = Engine(
+    scheme="shamir-25519",
+    address="localhost:1235",
+    peers=["localhost:1234"],
+    threshold=2
+)
 
 res = engine.sum(-5)
 print(f"2.5 - 5 = {res}")
 
-res = engine.sum_many([3.2, 0.5])
+res = engine.sum([3.2, 0.5])
 print(f"[2.5, 3.5] + [3.2, 0.5] = {res}")
 
 res = engine.sum(3.14159265359)
@@ -35,4 +40,3 @@ print(f"0.01 + 0.02 = {res}")
 res = engine.sum(2.02)
 print(f"8.0 + 2.02 = {res}")
 
-engine.takedown()

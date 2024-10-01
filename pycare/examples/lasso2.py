@@ -18,7 +18,14 @@ A_1, A_2 = np.array_split(A, 2)
 b_1, b_2 = np.array_split(b, 2)
 
 
-engine = caring.spdz("./ctx2.bin", "127.0.0.1:1235", "127.0.0.1:1234")
+engine = caring.Engine(
+    scheme="spdz-25519",
+    address="localhost:1235",
+    peers=["localhost:1234"],
+    threshold=1,
+    preprocessed_path="./context2.bin"
+)
+
 theta_1, func_vals = lasso_ADMM(engine, A_2, b_2)
 # lets plot the objective values of the function
 # to make sure it has converged

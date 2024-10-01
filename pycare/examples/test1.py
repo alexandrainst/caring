@@ -1,17 +1,16 @@
-import caring
-# TODO: We need to make som preprocessing. Non of the participating parties should be allowed to do this, 
-# as knowing the other parties preprocedsed values breaks privacy. 
-# However for starters, and testing purposses ONLY we will allow party 1 to do it 
-# and save it where both party one and party two can find it. 
+from caring import Engine
 
-caring.preproc(12, 0, "./context1.bin", "./context2.bin")
-# engine = caring.spdz("./context1.bin", "127.0.0.1:1234", "127.0.0.1:1235")
-engine = caring.shamir(2, "127.0.0.1:1234", "127.0.0.1:1235")
+engine = Engine(
+    scheme="shamir-25519",
+    address="localhost:1234",
+    peers=["localhost:1235"],
+    threshold=2,
+)
 
 res = engine.sum(2.5)
 print(f"2.5 - 5 = {res}")
 
-res = engine.sum_many([2.5, 3.5])
+res = engine.sum([2.5, 3.5])
 print(f"[2.5, 3.5] + [3.2, 0.5] = {res}")
 
 res = engine.sum(3.14159265359)
@@ -41,4 +40,3 @@ print(f"0.01 + 0.02 = {res}")
 res = engine.sum(8.0)
 print(f"8.0 + 2.02 = {res}")
 
-engine.takedown()
