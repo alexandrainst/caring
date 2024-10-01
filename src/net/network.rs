@@ -587,15 +587,11 @@ impl TcpNetwork {
         let results = future::join_all(
             peers
                 .iter()
-                .map(|addr| tokio::task::spawn(tokio::net::TcpStream::connect(*addr))),
+                .map(|addr| tokio::net::TcpStream::connect(*addr)),
         )
         .await;
 
-        let mut parties: Vec<_> = results
-            .into_iter()
-            .map(|x| x.unwrap())
-            .filter_map(|x| x.ok())
-            .collect();
+        let mut parties: Vec<_> = results.into_iter().filter_map(|x| x.ok()).collect();
 
         // If we are not able to connect to some, they will connect to us.
         // Accepting connections

@@ -1,11 +1,16 @@
-use std::sync::Mutex;
+use std::{future::Future, ops::DerefMut, sync::Mutex, time::Duration};
 
 use crate::expr::{Id, Opened};
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyList};
 use wecare::vm;
 
 #[pyclass(frozen)]
-pub struct Engine(Mutex<vm::blocking::Engine>);
+pub struct Engine(Mutex<EngineInner>);
+
+struct EngineInner {
+    engine: vm::Engine,
+    runtime: tokio::runtime::Runtime,
+}
 
 #[pyclass(frozen)]
 pub struct Computed(vm::Value<vm::UnknownNumber>);
@@ -36,6 +41,7 @@ impl Engine {
     #[new]
     #[pyo3(signature = (scheme, address, peers, multithreaded=false, threshold=None, preprocessed_path=None))]
     fn new(
+        py: Python<'_>,
         scheme: &str,
         address: &str,
         peers: &Bound<'_, PyList>,
@@ -69,41 +75,79 @@ impl Engine {
             None => builder,
         };
 
-        let builder = if multithreaded {
-            builder.multi_threaded_runtime()
-        } else {
-            builder.single_threaded_runtime()
-        };
+        let runtime = tokio::runtime::Runtime::new().unwrap();
 
-        let engine = builder
-            .connect_blocking()
-            .map_err(pyo3::exceptions::PyBrokenPipeError::new_err)?
-            .build()
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        let engine = runtime.block_on(async {
+            check_signals(py, async {
+                builder
+                    .connect()
+                    .await
+                    .map_err(pyo3::exceptions::PyBrokenPipeError::new_err)?
+                    .build()
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+            })
+            .await
+        })??;
+
+        let engine = EngineInner { engine, runtime };
         Ok(Self(Mutex::new(engine)))
     }
 
     /// Execute a script
     ///
     /// * `script`: list of expressions to evaluate
-    fn execute(&self, script: &Opened) -> PyResult<Computed> {
+    fn execute(&self, py: Python<'_>, script: &Opened) -> PyResult<Computed> {
         let res = {
-            let mut engine = self.0.lock().expect("Lock poisoned");
+            let mut this = self.0.lock().expect("Lock poisoned");
             let script: vm::Opened = script.0.clone();
-            engine
-                .execute(script)
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+            let EngineInner { engine, runtime } = this.deref_mut();
+            runtime.block_on(check_signals(py, async {
+                engine
+                    .execute(script)
+                    .await
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+            }))??
         };
         Ok(Computed(res))
     }
 
     /// Your own Id
     fn id(&self) -> Id {
-        Id(self.0.lock().unwrap().id())
+        Id(self.0.lock().unwrap().engine.id())
     }
 
     /// Your own Id
     fn peers(&self) -> Vec<Id> {
-        self.0.lock().unwrap().peers().into_iter().map(Id).collect()
+        self.0
+            .lock()
+            .unwrap()
+            .engine
+            .peers()
+            .into_iter()
+            .map(Id)
+            .collect()
+    }
+}
+
+
+/// Check signals from python routinely while running other future
+async fn check_signals<F: Future>(py: Python<'_>, f: F) -> Result<F::Output, PyErr> {
+    let signals = async {
+        loop {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            match py.check_signals() {
+                Ok(_) => continue,
+                Err(err) => break err,
+            }
+        }
+    };
+
+    tokio::select! {
+        err = signals => {
+            Err(err)
+        },
+        res = f => {
+            Ok(res)
+        },
     }
 }

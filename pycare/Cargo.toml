@@ -9,6 +9,8 @@ name = "caring"
 crate-type = ["cdylib"]
 
 [dependencies]
+futures-concurrency = "7.6.1"
 pyo3 = { version = "0.22", features = ["abi3-py37", "generate-import-lib", "extension-module"]}
+tokio = { version = "1.40.0", features = ["full"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 wecare = { path = "../wecare" }

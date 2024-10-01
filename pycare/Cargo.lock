@@ -863,7 +863,9 @@ dependencies = [
 name = "pycare"
 version = "0.1.0"
 dependencies = [
+ "futures-concurrency",
  "pyo3",
+ "tokio",
  "tracing-subscriber",
  "wecare",
 ]
